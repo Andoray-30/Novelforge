@@ -2,8 +2,8 @@
 服务层 - AI服务、Tavern Card格式处理、角色去重和合并服务
 """
 
-from novelforge.services.ai_service import AIService
-from novelforge.services.tavern_converter import (
+from .ai_service import AIService
+from .tavern_converter import (
     TavernCardV2,
     TavernCardData,
     QualityScore,
@@ -17,7 +17,7 @@ from novelforge.services.tavern_converter import (
     TokenEstimate,
     FIELD_LENGTH_GUIDELINES
 )
-from novelforge.services.tavern_converter import (
+from .tavern_converter import (
     SillyTavernConverter,
     TavernCardV2,
     CharacterBook,
@@ -26,14 +26,14 @@ from novelforge.services.tavern_converter import (
     to_character_book,
     to_character_book_entries,
 )
-from novelforge.services.character_deduplicator import (
+from .character_deduplicator import (
     CharacterDeduplicator,
     MergeConflict,
     CharacterMergeResult,
     QualityAssessment,
     create_character_deduplicator
 )
-from novelforge.services.timeline_deduplicator import (
+from .timeline_deduplicator import (
     TimelineDeduplicator,
     TimelineMergeConflict,
     TimelineMergeResult,
@@ -45,7 +45,7 @@ __all__ = [
     # AI 服务
     "AIService",
     # Tavern Card
-    "TavernCardV3",
+    "TavernCardV2",
     "TavernCardData",
     "QualityScore",
     "QualityGrade",

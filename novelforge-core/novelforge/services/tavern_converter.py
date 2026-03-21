@@ -8,7 +8,7 @@ from typing import Optional, Any
 from pydantic import BaseModel
 import uuid
 
-from novelforge.core.models import (
+from ..core.models import (
     Character,
     Location,
     TimelineEvent,

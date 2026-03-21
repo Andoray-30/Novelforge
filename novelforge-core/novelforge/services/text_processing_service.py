@@ -12,6 +12,7 @@ from novelforge.types.text_processing import (
 from novelforge.content.text_preprocessor import create_text_preprocessor, TextPreprocessor
 from novelforge.content.chapter_detector import create_chapter_detector, ChapterDetector
 from novelforge.content.text_analyzer import create_text_analyzer, TextAnalyzer
+from novelforge.core.exceptions import ProcessingError, ConfigurationError
 
 
 class TextProcessingService:
@@ -124,7 +125,11 @@ class TextProcessingService:
             with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
                 return f.read()
         except Exception as e:
-            raise ValueError(f"无法读取TXT文件 {file_path}: {str(e)}")
+            raise ProcessingError(
+                message=f"无法读取TXT文件 {file_path}: {str(e)}",
+                details={"file_path": file_path, "format": "txt"},
+                context="text_file_reading"
+            )
     
     def _read_epub_file(self, file_path: str) -> str:
         """读取EPUB文件"""
@@ -145,9 +150,17 @@ class TextProcessingService:
             
             return '\n\n'.join(chapters)
         except ImportError:
-            raise ValueError("处理EPUB文件需要安装ebooklib和beautifulsoup4库: pip install ebooklib beautifulsoup4")
+            raise ConfigurationError(
+                message="处理EPUB文件需要安装ebooklib和beautifulsoup4库: pip install ebooklib beautifulsoup4",
+                details={"required_packages": ["ebooklib", "beautifulsoup4"]},
+                context="epub_dependency"
+            )
         except Exception as e:
-            raise ValueError(f"无法读取EPUB文件 {file_path}: {str(e)}")
+            raise ProcessingError(
+                message=f"无法读取EPUB文件 {file_path}: {str(e)}",
+                details={"file_path": file_path, "format": "epub"},
+                context="epub_file_reading"
+            )
     
     def _read_pdf_file(self, file_path: str) -> str:
         """读取PDF文件"""
@@ -163,9 +176,17 @@ class TextProcessingService:
                 
                 return '\n\n'.join(text_pages)
         except ImportError:
-            raise ValueError("处理PDF文件需要安装pypdf2库: pip install PyPDF2")
+            raise ConfigurationError(
+                message="处理PDF文件需要安装pypdf2库: pip install PyPDF2",
+                details={"required_packages": ["PyPDF2"]},
+                context="pdf_dependency"
+            )
         except Exception as e:
-            raise ValueError(f"无法读取PDF文件 {file_path}: {str(e)}")
+            raise ProcessingError(
+                message=f"无法读取PDF文件 {file_path}: {str(e)}",
+                details={"file_path": file_path, "format": "pdf"},
+                context="pdf_file_reading"
+            )
     
     def _read_docx_file(self, file_path: str) -> str:
         """读取DOCX文件"""
@@ -177,9 +198,17 @@ class TextProcessingService:
             
             return '\n\n'.join(paragraphs)
         except ImportError:
-            raise ValueError("处理DOCX文件需要安装python-docx库: pip install python-docx")
+            raise ConfigurationError(
+                message="处理DOCX文件需要安装python-docx库: pip install python-docx",
+                details={"required_packages": ["python-docx"]},
+                context="docx_dependency"
+            )
         except Exception as e:
-            raise ValueError(f"无法读取DOCX文件 {file_path}: {str(e)}")
+            raise ProcessingError(
+                message=f"无法读取DOCX文件 {file_path}: {str(e)}",
+                details={"file_path": file_path, "format": "docx"},
+                context="docx_file_reading"
+            )
     
     def process_text(
         self, 

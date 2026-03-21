@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Optional
 from rich.console import Console
 
-console = Console()
+# console = Console()
 
 
 @dataclass
@@ -80,19 +80,22 @@ class RateLimiter:
         # 检查是否超限
         if current_rpm >= self.rpm_limit or current_tpm + estimated_tokens >= self.tpm_limit:
             # 计算需要等待的时间
-            wait_time = self._calculate_wait_time(estimated_tokens)
+            wait_time = self._calculate_wait_time(estimated_tokens, now)
 
             if wait_time > 0:
-                console.print(
-                    f"[yellow][限流] 限流器: 等待 {wait_time:.2f} 秒 "
-                    f"(RPM: {current_rpm}/{self.rpm_limit}, "
-                    f"TPM: {current_tpm}/{self.tpm_limit})[/yellow]"
-                )
+                # console.print(
+                #     f"[yellow][限流] 限流器: 等待 {wait_time:.2f} 秒 "
+                #     f"(RPM: {current_rpm}/{self.rpm_limit}, "
+                #     f"TPM: {current_tpm}/{self.tpm_limit})[/yellow]"
+                # )
                 await asyncio.sleep(wait_time)
+                # 重新清理过期记录，因为等待后可能有更多记录过期
+                self._cleanup_expired(time.time())
 
         # 记录请求
-        self.request_times.append(now)
+        self.request_times.append(time.time())
         self.token_counts.append(estimated_tokens)
+        self.total_requests += 1
 
     def record(self, tokens_used: int) -> None:
         """
@@ -134,40 +137,49 @@ class RateLimiter:
             self.request_times.popleft()
             self.token_counts.popleft()
 
-    def _calculate_wait_time(self, estimated_tokens: int) -> float:
+    def _calculate_wait_time(self, estimated_tokens: int, now: float) -> float:
         """
         计算需要等待的时间
 
         Args:
             estimated_tokens: 预估的 token 使用量
+            now: 当前时间戳
 
         Returns:
             需要等待的秒数
         """
-        now = time.time()
-
         # 计算 RPM 需要等待的时间
         rpm_wait = 0.0
         if len(self.request_times) >= self.rpm_limit:
             # 找到最早的请求时间
             earliest_time = self.request_times[0]
-            rpm_wait = earliest_time + self.window_size - now
+            rpm_wait = max(0.0, earliest_time + self.window_size - now)
 
         # 计算 TPM 需要等待的时间
         tpm_wait = 0.0
         current_tpm = sum(self.token_counts)
         if current_tpm + estimated_tokens >= self.tpm_limit:
-            # 累积 token 直到低于限制
-            accumulated = 0
-            for i, tokens in enumerate(self.token_counts):
-                accumulated += tokens
-                if current_tpm + estimated_tokens - accumulated < self.tpm_limit:
+            # 需要找到最早的时间点，使得窗口内的token总数低于限制
+            # 从最早的请求开始累积，直到剩余的token数满足要求
+            accumulated_tokens = 0
+            required_release = current_tpm + estimated_tokens - self.tpm_limit
+            
+            # 找到需要等待的时间点
+            for i in range(len(self.token_counts)):
+                accumulated_tokens += self.token_counts[i]
+                if accumulated_tokens >= required_release:
+                    # 找到了足够的token释放点
                     earliest_time = self.request_times[i]
-                    tpm_wait = earliest_time + self.window_size - now
+                    tpm_wait = max(0.0, earliest_time + self.window_size - now)
                     break
+            else:
+                # 如果所有token都不够，等待整个窗口
+                if self.request_times:
+                    earliest_time = self.request_times[0]
+                    tpm_wait = max(0.0, earliest_time + self.window_size - now)
 
         # 返回较大的等待时间
-        return max(rpm_wait, tpm_wait, 0.0)
+        return max(rpm_wait, tpm_wait)
 
     def reset(self) -> None:
         """重置限流器"""

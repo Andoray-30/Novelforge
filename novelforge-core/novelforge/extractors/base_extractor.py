@@ -9,22 +9,25 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol
 from dataclasses import dataclass
 
-from novelforge.core.models import (
+from ..core.models import (
     Character,
-    Location, 
+    Location,
     TimelineEvent,
     NetworkEdge,
-    WorldSetting
+    WorldSetting,
+    Timeline,
+    RelationshipNetwork
 )
 
 
 class ExtractionResult(Protocol):
     """提取结果协议"""
-    characters: List[Character]
-    locations: List[Location]
-    timeline_events: List[TimelineEvent]
-    relationships: List[NetworkEdge]
-    world_setting: Optional[WorldSetting]
+    characters: list[Character]
+    world: Optional[WorldSetting]
+    timeline: Optional[Timeline]
+    relationships: Optional[RelationshipNetwork]
+    success: bool
+    errors: list[str]
 
 
 @dataclass

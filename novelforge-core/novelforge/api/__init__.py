@@ -5,7 +5,7 @@ FastAPI Web API for NovelForge
 
 from fastapi import FastAPI, HTTPException, status, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, JSONResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
 from datetime import datetime
@@ -39,22 +39,23 @@ from .types import (
     TaskQueueRequest,
     TaskQueueResponse,
     TaskStatus,
-    TaskPriority
+    TaskPriority as APITaskPriority
 )
-from novelforge.core.models import (
+from ..core.models import (
     Character, WorldSetting as WorldSettingModel, Timeline, RelationshipNetwork,
     CharacterRole as CharacterRoleEnum, RelationshipType, ExtractionResult, TimelineEvent, NetworkEdge
 )
-from novelforge.extractors.enhanced_orchestrator import EnhancedMultiWindowOrchestrator
-from novelforge.services.extraction_service import get_extraction_service, ExtractionService
-from novelforge.services.ai_scheduler import get_ai_scheduler, AITaskScheduler, TaskPriority
+from ..extractors.enhanced_orchestrator import EnhancedMultiWindowOrchestrator
+from ..services.extraction_service import get_extraction_service, ExtractionService
+# FIXME: 解决 TaskPriority 与 api.types 的同名导出冲突
+from ..services.ai_scheduler import get_ai_scheduler, AITaskScheduler, TaskPriority as SchedulerTaskPriority
+from ..services.ai_service import AIService
 
-from novelforge.core.config import Config
-from novelforge.services.ai_service import AIService
-from novelforge.api.ai_planning_service import get_ai_planning_service, AIPlanningService
-from novelforge.storage.storage_manager import StorageManager
-from novelforge.content.manager import ContentManager
-from novelforge.content.models import ContentItem, ContentSearchRequest, ContentSearchResult, ContentExportRequest
+from ..core.config import Config
+from .ai_planning_service import get_ai_planning_service, AIPlanningService
+from ..storage.storage_manager import StorageManager
+from ..content.manager import ContentManager
+from ..content.models import ContentItem, ContentSearchRequest, ContentSearchResult, ContentExportRequest
 
 # 全局配置和AI服务
 config = Config.load()
@@ -68,6 +69,7 @@ extractor_orchestrator = EnhancedMultiWindowOrchestrator(
 )
 
 # 创建存储管理器
+# TODO: 建议在此处检查数据存储路径是否存在，并确保当前进程具备写权限
 storage_manager = StorageManager()
 
 # 创建提取服务
@@ -165,7 +167,7 @@ async def build_world_setting(request: WorldBuildingRequest):
 async def start_workflow_process(ai_plan: dict, source_text: Optional[str] = None):
     """启动完整工作流处理"""
     try:
-        # 这里实现完整的工作流逻辑
+        # TODO: 此处尚未接入实际工作流系统，目前仅生成了一个模拟的任务ID
         task_id = str(uuid.uuid4())
         return {
             "taskId": task_id,
@@ -183,7 +185,7 @@ async def start_workflow_process(ai_plan: dict, source_text: Optional[str] = Non
 async def get_workflow_status(task_id: str):
     """获取工作流状态"""
     try:
-        # 这里实现工作流状态查询
+        # TODO: 此处应实现对接任务管理器的真实状态查询逻辑
         return {
             "taskId": task_id,
             "status": "completed",  # 或 "running", "error"
@@ -198,10 +200,9 @@ async def get_workflow_status(task_id: str):
         )
 
 
-@app.post("/api/extract/text", response_model=ExtractionResult)
-
 # 文本提取相关端点
 
+# FIXME: 已移除重复定义的多余的 @app.post 路由装饰器
 @app.post("/api/extract/text", response_model=ExtractionResult)
 async def extract_from_text(text_data: dict):
    """从文本中提取角色、世界设定、时间线和关系网络"""
@@ -588,21 +589,15 @@ async def queue_task(request: TaskQueueRequest):
 
 
 @app.get("/api/task/{task_id}", response_model=AITask)
-async def get_task_status(task_id: str):
-   """获取任务状态"""
-   try:
-       loaded = await storage_manager.load(f"task_{task_id}")
-       if not loaded:
-           raise HTTPException(
-               status_code=status.HTTP_404_NOT_FOUND,
-               detail="任务不存在"
-           )
-       return AITask(**loaded)
-   except Exception as e:
-       raise HTTPException(
-           status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-           detail=f"获取任务状态失败: {str(e)}"
-       )
+async def get_basic_task_status(task_id: str):
+    """获取任务状态"""
+    loaded = await storage_manager.load(f"task_{task_id}")
+    if not loaded:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="任务不存在"
+        )
+    return AITask(**loaded)
 
 
 @app.post("/api/task/{task_id}/execute")
@@ -837,7 +832,7 @@ async def list_content_by_type(
 async def submit_task(
     task_type: str,
     parameters: dict,
-    priority: TaskPriority = TaskPriority.MEDIUM,
+    priority: SchedulerTaskPriority = SchedulerTaskPriority.MEDIUM,
     user_id: Optional[str] = None
 ):
     """提交新任务到调度器"""
@@ -861,34 +856,28 @@ async def submit_task(
 
 
 @app.get("/api/scheduler/task/{task_id}", response_model=dict)
-async def get_task_status(task_id: str):
+async def get_scheduler_task_status(task_id: str):
     """获取任务状态"""
-    try:
-        task = await ai_scheduler.get_task_status(task_id)
-        if not task:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="任务不存在"
-            )
-        
-        return {
-            "id": task.id,
-            "type": task.type,
-            "status": task.status.value,
-            "priority": task.priority.value,
-            "parameters": task.parameters,
-            "created_at": task.created_at.isoformat(),
-            "started_at": task.started_at.isoformat() if task.started_at else None,
-            "completed_at": task.completed_at.isoformat() if task.completed_at else None,
-            "result": task.result,
-            "error": task.error,
-            "user_id": task.user_id
-        }
-    except Exception as e:
+    task = await ai_scheduler.get_task_status(task_id)
+    if not task:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取任务状态失败: {str(e)}"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="任务不存在"
         )
+    
+    return {
+        "id": task.id,
+        "type": task.type,
+        "status": task.status.value,
+        "priority": task.priority.value,
+        "parameters": task.parameters,
+        "created_at": task.created_at.isoformat(),
+        "started_at": task.started_at.isoformat() if task.started_at else None,
+        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+        "result": task.result,
+        "error": task.error,
+        "user_id": task.user_id
+    }
 
 
 @app.post("/api/scheduler/cancel/{task_id}", response_model=dict)
@@ -960,20 +949,26 @@ async def get_user_tasks(
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
     """HTTP异常处理"""
-    return {
-        "error": exc.detail,
-        "detail": f"HTTP {exc.status_code} 错误",
-        "timestamp": datetime.now().isoformat()
-    }
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": exc.detail,
+            "detail": f"HTTP {exc.status_code} 错误",
+            "timestamp": datetime.now().isoformat()
+        }
+    )
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc):
     """通用异常处理"""
-    return {
-        "error": "服务器内部错误",
-        "detail": str(exc),
-        "timestamp": datetime.now().isoformat()
-    }
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "服务器内部错误",
+            "detail": str(exc),
+            "timestamp": datetime.now().isoformat()
+        }
+    )
 
 
 

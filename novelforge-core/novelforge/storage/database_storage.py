@@ -3,7 +3,7 @@
 """
 import sqlite3
 import json
-import threading
+import asyncio
 from typing import Any, Optional, List
 from pathlib import Path
 from datetime import datetime
@@ -17,7 +17,7 @@ class DatabaseStorage(BaseStorage):
     def __init__(self, db_path: str = "./data/novelforge.db"):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.Lock()  # 线程安全锁
+        self._lock = asyncio.Lock()  # 异步安全锁
         self._init_db()
     
     def _init_db(self):
@@ -46,7 +46,7 @@ class DatabaseStorage(BaseStorage):
     async def save(self, key: str, data: Any) -> bool:
         """保存数据到数据库"""
         try:
-            with self._lock:
+            async with self._lock:
                 data_str = json.dumps(data, ensure_ascii=False)
                 with self._get_connection() as conn:
                     conn.execute('''
@@ -75,7 +75,7 @@ class DatabaseStorage(BaseStorage):
     async def delete(self, key: str) -> bool:
         """从数据库删除数据"""
         try:
-            with self._lock:
+            async with self._lock:
                 with self._get_connection() as conn:
                     cursor = conn.execute('DELETE FROM storage WHERE key = ?', (key,))
                     conn.commit()
@@ -100,7 +100,8 @@ class DatabaseStorage(BaseStorage):
         try:
             with self._get_connection() as conn:
                 cursor = conn.execute('SELECT 1 FROM storage WHERE key = ? LIMIT 1', (key,))
-                return cursor.fetchone() is not None
+                result = cursor.fetchone() is not None
+                return result
         except Exception as e:
             print(f"检查键存在性失败: {e}")
             return False

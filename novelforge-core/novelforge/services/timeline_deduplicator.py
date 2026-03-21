@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 from novelforge.core.models import TimelineEvent, EventType, Importance
 from novelforge.services.ai_service import AIService
 from novelforge.quality.evaluator import QualityEvaluator
-from novelforge.services.tavern_converter import CharacterQualityScore
+# TimelineQualityScore is defined locally in this file
 
 
 class TimelineMergeConflict(BaseModel):
@@ -38,15 +38,6 @@ class TimelineMergeConflict(BaseModel):
     resolution: Optional[str] = None
 
 
-class TimelineMergeResult(BaseModel):
-    """时间线合并结果"""
-    merged_event: TimelineEvent
-    conflicts: List[TimelineMergeConflict]
-    similarity_score: float
-    is_merged: bool
-    quality_score: Optional['TimelineQualityScore'] = None
-
-
 class TimelineQualityScore(BaseModel):
     """时间线事件多维度质量评分"""
     overall: int = Field(default=0, ge=0, le=100, description="总体评分")
@@ -54,10 +45,19 @@ class TimelineQualityScore(BaseModel):
     suggestions: list[str] = Field(default_factory=list, description="改进建议")
 
 
+class TimelineMergeResult(BaseModel):
+    """时间线合并结果"""
+    merged_event: TimelineEvent
+    conflicts: List[TimelineMergeConflict]
+    similarity_score: float
+    is_merged: bool
+    quality_score: Optional[TimelineQualityScore] = None
+
+
 class TimelineQualityAssessment(BaseModel):
     """时间线质量评估结果"""
-    before_merge_score: Optional['TimelineQualityScore'] = None
-    after_merge_score: Optional['TimelineQualityScore'] = None
+    before_merge_score: Optional[TimelineQualityScore] = None
+    after_merge_score: Optional[TimelineQualityScore] = None
     improvement: float = 0.0
 
 

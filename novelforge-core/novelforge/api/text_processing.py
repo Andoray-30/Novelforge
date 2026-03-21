@@ -8,8 +8,8 @@ import tempfile
 import os
 from pathlib import Path
 
-from novelforge.services.text_processing_service import text_processing_service
-from novelforge.types.text_processing import TextProcessingConfig
+from ..services.text_processing_service import text_processing_service
+from ..types.text_processing import TextProcessingConfig
 
 router = APIRouter(prefix="/text-processing", tags=["text-processing"])
 
@@ -227,7 +227,7 @@ async def get_supported_formats():
     Returns:
         支持的文件格式列表
     """
-    from novelforge.types.text_processing import TextFormat
+    from ..types.text_processing import TextFormat
     
     return {
         "success": True,

@@ -229,7 +229,12 @@ class Timeline(BaseModel):
         ]
     
     def get_events_by_importance(self, min_importance: Importance) -> list[TimelineEvent]:
-        """获取指定重要性以上的事件"""
+        """获取指定重要性以上的事件
+        
+        重要性顺序: LOW(0) < MEDIUM(1) < HIGH(2) < CRITICAL(3)
+        "指定重要性以上"意味着重要性级别 >= 指定级别
+        例如: min_importance=MEDIUM(1) 返回 MEDIUM(1), HIGH(2), CRITICAL(3) 的事件
+        """
         importance_order = [Importance.LOW, Importance.MEDIUM, Importance.HIGH, Importance.CRITICAL]
         min_idx = importance_order.index(min_importance)
         return [

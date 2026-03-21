@@ -155,7 +155,7 @@ class BackendFeatureTestSuite:
             )
             
             self.results.append(result)
-            print(f"✓ {test_name} - 通过 ({duration:.2f}s)")
+            print(f"[OK] {test_name} - 通过 ({duration:.2f}s)")
             
         except Exception as e:
             duration = time.time() - start_time
@@ -169,7 +169,7 @@ class BackendFeatureTestSuite:
                 exception=e
             )
             self.results.append(result)
-            print(f"✗ {test_name} - 错误 ({duration:.2f}s): {e}")
+            print(f"[ERROR] {test_name} - 错误 ({duration:.2f}s): {e}")
     
     async def test_new_plot_generation(self):
         """测试新剧情生成功能"""
@@ -217,7 +217,7 @@ class BackendFeatureTestSuite:
             )
             
             self.results.append(result)
-            print(f"✓ {test_name} - 通过 ({duration:.2f}s)")
+            print(f"[OK] {test_name} - 通过 ({duration:.2f}s)")
             
         except Exception as e:
             duration = time.time() - start_time
@@ -231,7 +231,7 @@ class BackendFeatureTestSuite:
                 exception=e
             )
             self.results.append(result)
-            print(f"✗ {test_name} - 错误 ({duration:.2f}s): {e}")
+            print(f"[ERROR] {test_name} - 错误 ({duration:.2f}s): {e}")
     
     async def test_content_management_system(self):
         """测试内容管理系统"""
@@ -314,7 +314,7 @@ class BackendFeatureTestSuite:
             )
             
             self.results.append(result)
-            print(f"✓ {test_name} - 通过 ({duration:.2f}s)")
+            print(f"[OK] {test_name} - 通过 ({duration:.2f}s)")
             
         except Exception as e:
             duration = time.time() - start_time
@@ -328,7 +328,7 @@ class BackendFeatureTestSuite:
                 exception=e
             )
             self.results.append(result)
-            print(f"✗ {test_name} - 错误 ({duration:.2f}s): {e}")
+            print(f"[ERROR] {test_name} - 错误 ({duration:.2f}s): {e}")
     
     async def test_data_storage(self):
         """测试数据存储功能"""
@@ -398,7 +398,7 @@ class BackendFeatureTestSuite:
             )
             
             self.results.append(result)
-            print(f"✓ {test_name} - 通过 ({duration:.2f}s)")
+            print(f"[OK] {test_name} - 通过 ({duration:.2f}s)")
             
         except Exception as e:
             duration = time.time() - start_time
@@ -412,7 +412,7 @@ class BackendFeatureTestSuite:
                 exception=e
             )
             self.results.append(result)
-            print(f"✗ {test_name} - 错误 ({duration:.2f}s): {e}")
+            print(f"[ERROR] {test_name} - 错误 ({duration:.2f}s): {e}")
     
     async def test_character_extraction(self):
         """测试角色提取功能"""
@@ -461,7 +461,7 @@ class BackendFeatureTestSuite:
             )
             
             self.results.append(result)
-            print(f"✓ {test_name} - 通过，提取了 {len(characters)} 个角色 ({duration:.2f}s)")
+            print(f"[OK] {test_name} - 通过，提取了 {len(characters)} 个角色 ({duration:.2f}s)")
             
         except Exception as e:
             duration = time.time() - start_time
@@ -475,7 +475,7 @@ class BackendFeatureTestSuite:
                 exception=e
             )
             self.results.append(result)
-            print(f"✗ {test_name} - 错误 ({duration:.2f}s): {e}")
+            print(f"[ERROR] {test_name} - 错误 ({duration:.2f}s): {e}")
     
     async def test_timeline_extraction(self):
         """测试时间线提取功能"""
@@ -524,7 +524,7 @@ class BackendFeatureTestSuite:
             )
             
             self.results.append(result)
-            print(f"✓ {test_name} - 通过，提取了 {len(events)} 个事件 ({duration:.2f}s)")
+            print(f"[OK] {test_name} - 通过，提取了 {len(events)} 个事件 ({duration:.2f}s)")
             
         except Exception as e:
             duration = time.time() - start_time
@@ -538,7 +538,7 @@ class BackendFeatureTestSuite:
                 exception=e
             )
             self.results.append(result)
-            print(f"✗ {test_name} - 错误 ({duration:.2f}s): {e}")
+            print(f"[ERROR] {test_name} - 错误 ({duration:.2f}s): {e}")
     
     async def test_world_extraction(self):
         """测试世界设定提取功能"""
@@ -591,7 +591,7 @@ class BackendFeatureTestSuite:
             )
             
             self.results.append(result)
-            print(f"✓ {test_name} - 通过 ({duration:.2f}s)")
+            print(f"[OK] {test_name} - 通过 ({duration:.2f}s)")
             
         except Exception as e:
             duration = time.time() - start_time
@@ -605,7 +605,7 @@ class BackendFeatureTestSuite:
                 exception=e
             )
             self.results.append(result)
-            print(f"✗ {test_name} - 错误 ({duration:.2f}s): {e}")
+            print(f"[ERROR] {test_name} - 错误 ({duration:.2f}s): {e}")
     
     async def test_relationship_extraction(self):
         """测试关系网络提取功能"""
@@ -656,7 +656,7 @@ class BackendFeatureTestSuite:
             )
             
             self.results.append(result)
-            print(f"✓ {test_name} - 通过，提取了 {len(relationships)} 个关系 ({duration:.2f}s)")
+            print(f"[OK] {test_name} - 通过，提取了 {len(relationships)} 个关系 ({duration:.2f}s)")
             
         except Exception as e:
             duration = time.time() - start_time
@@ -670,7 +670,7 @@ class BackendFeatureTestSuite:
                 exception=e
             )
             self.results.append(result)
-            print(f"✗ {test_name} - 错误 ({duration:.2f}s): {e}")
+            print(f"[ERROR] {test_name} - 错误 ({duration:.2f}s): {e}")
     
     async def test_ai_scheduler(self):
         """测试AI调度系统"""
@@ -740,7 +740,7 @@ class BackendFeatureTestSuite:
             )
             
             self.results.append(result)
-            print(f"✓ {test_name} - 通过，任务ID: {task_id} ({duration:.2f}s)")
+            print(f"[OK] {test_name} - 通过，任务ID: {task_id} ({duration:.2f}s)")
             
         except Exception as e:
             duration = time.time() - start_time
@@ -754,7 +754,7 @@ class BackendFeatureTestSuite:
                 exception=e
             )
             self.results.append(result)
-            print(f"✗ {test_name} - 错误 ({duration:.2f}s): {e}")
+            print(f"[ERROR] {test_name} - 错误 ({duration:.2f}s): {e}")
     
     def generate_test_report(self):
         """生成测试报告"""
@@ -785,10 +785,10 @@ class BackendFeatureTestSuite:
         
         for i, result in enumerate(self.results, 1):
             status_emoji = {
-                TestStatus.PASSED: "✓",
-                TestStatus.FAILED: "✗",
-                TestStatus.SKIPPED: "-",
-                TestStatus.ERROR: "✗"
+                TestStatus.PASSED: "[OK]",
+                TestStatus.FAILED: "[FAIL]",
+                TestStatus.SKIPPED: "[SKIPPED]",
+                TestStatus.ERROR: "[ERROR]"
             }.get(result.status, "?")
             
             print(f"{i:2d}. {status_emoji} {result.name}")

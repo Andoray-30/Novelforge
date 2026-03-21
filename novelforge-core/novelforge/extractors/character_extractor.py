@@ -10,10 +10,12 @@ from typing import List, Tuple, Optional
 from pathlib import Path
 from novelforge.core.models import Character, Gender, CharacterRole
 from novelforge.extractors.base_extractor import (
-    CharacterExtractorInterface, 
+    BaseExtractor,
+    CharacterExtractorInterface,
     ExtractionConfig
 )
 from novelforge.services.ai_service import AIService
+from ..core.exceptions import ProcessingError
 
 
 class CharacterExtractor(CharacterExtractorInterface):
@@ -314,8 +316,13 @@ class CharacterExtractor(CharacterExtractorInterface):
                 if attempt < self.config.max_retries - 1:
                     await asyncio.sleep(self.config.retry_delay)
                 else:
-                    print(f"角色提取失败: {e}")
-                    return []
+                    from ..core.exceptions import ProcessingError
+                    raise ProcessingError(
+                        message=f"角色提取失败: {str(e)}",
+                        details={"attempt": attempt, "max_retries": self.config.max_retries},
+                        context="character_extraction"
+                    )
+        return []
     async def _enhanced_merge_characters(self, all_characters: List[Character], ai_service) -> List[Character]:
         """增强型角色合并"""
         # 阶段1: 基础合并

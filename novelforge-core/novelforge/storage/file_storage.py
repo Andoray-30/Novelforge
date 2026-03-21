@@ -3,9 +3,13 @@
 """
 import json
 import os
+import logging
 from pathlib import Path
 from typing import Any, Optional, List
 from .base_storage import BaseStorage
+
+# 设置日志
+logger = logging.getLogger(__name__)
 
 
 class FileStorage(BaseStorage):
@@ -18,8 +22,20 @@ class FileStorage(BaseStorage):
     def _get_file_path(self, key: str) -> Path:
         """获取键对应的文件路径"""
         # 对键进行安全处理，避免路径遍历攻击
-        safe_key = "".join(c for c in key if c.isalnum() or c in "._-")
-        return self.storage_dir / f"{safe_key}.json"
+        if not key or not isinstance(key, str):
+            raise ValueError("Key must be a non-empty string")
+        
+        # 移除危险字符，只保留字母、数字、点、下划线、连字符和空格
+        safe_key = "".join(c for c in key if c.isalnum() or c in "._- ")
+        if not safe_key:
+            raise ValueError("Key contains no valid characters after sanitization")
+        
+        # 确保不会发生路径遍历
+        file_path = self.storage_dir / f"{safe_key}.json"
+        if not str(file_path.resolve()).startswith(str(self.storage_dir.resolve())):
+            raise ValueError("Invalid key that would cause path traversal")
+        
+        return file_path
     
     async def save(self, key: str, data: Any) -> bool:
         """保存数据到文件"""
@@ -29,7 +45,7 @@ class FileStorage(BaseStorage):
                 json.dump(data, f, ensure_ascii=False, indent=2)
             return True
         except Exception as e:
-            print(f"保存数据失败: {e}")
+            logger.error(f"保存数据失败 (key: {key}): {e}")
             return False
     
     async def load(self, key: str) -> Optional[Any]:
@@ -41,7 +57,7 @@ class FileStorage(BaseStorage):
             with open(file_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except Exception as e:
-            print(f"加载数据失败: {e}")
+            logger.error(f"加载数据失败 (key: {key}): {e}")
             return None
     
     async def delete(self, key: str) -> bool:
@@ -53,7 +69,7 @@ class FileStorage(BaseStorage):
                 return True
             return False
         except Exception as e:
-            print(f"删除数据失败: {e}")
+            logger.error(f"删除数据失败 (key: {key}): {e}")
             return False
     
     async def list_keys(self) -> List[str]:
@@ -65,10 +81,14 @@ class FileStorage(BaseStorage):
                 keys.append(key)
             return keys
         except Exception as e:
-            print(f"列出键失败: {e}")
+            logger.error(f"列出键失败: {e}")
             return []
     
     async def exists(self, key: str) -> bool:
         """检查键是否存在"""
-        file_path = self._get_file_path(key)
-        return file_path.exists()
+        try:
+            file_path = self._get_file_path(key)
+            return file_path.exists()
+        except Exception as e:
+            logger.error(f"检查键存在性失败 (key: {key}): {e}")
+            return False

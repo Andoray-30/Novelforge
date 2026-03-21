@@ -1,0 +1,9 @@
+{
+  "source_directories": [
+    "novelforge-core"
+  ],
+  "search_path": [
+    "novelforge-core/.venv/Lib/site-packages",
+    "novelforge-core/.venv/Lib"
+  ]
+}

@@ -125,7 +125,7 @@ class RelationshipExtractor(RelationshipExtractorInterface):
 
     async def _extract_relationships_from_chunk(self, chunk: 'Chunk') -> List[NetworkEdge]:
         """从单个片段中提取角色关系网络"""
-        prompt = f"""你是一个专业的小说分析师。请仔细分析以下文本片段，提取角色之间的关系。", "", "文本片段：", "{chunk.content}", "", "## 任务说明", "- 识别文本中角色之间的关系", "- 区分不同类型的关系（家庭、友情、爱情、敌对等）", "- 评估关系的强度和状态", "- 如果提供了已知角色列表，请重点关注这些角色间的关系", "", "## 输出格式", "请以JSON格式输出，结构如下：", "{{", "    \"relationships\": [", "        {{", "            \"source\": \"源角色名\",", "            \"target\": \"目标角色名\",", "            \"relationship_type\": \"关系类型（family, friend, romantic, enemy等）\",", "            \"description\": \"关系描述\",", "            \"evidence\": \"原文中的证据文本\",", "            \"confidence\": \"置信度（0-1）\",", "            \"is_mutual\": \"是否相互的（true/false）\",", "            \"status\": \"关系状态（active, inactive, conflict等）\"", "        }}", "    ]", "}}", "", "请注意：只输出JSON，不要添加其他解释文字。"""
+        prompt = f"""你是一个专业的小说分析师。请仔细分析以下文本片段，提取角色之间的关系。", "", "文本片段：", "{chunk.content}", "", "## 任务说明", "- 识别文本中角色之间的关系", "- 区分不同类型的关系（家庭、友情、爱情、敌对等）", "- 评估关系的强度（1-10分）和状态", "- 如果提供了已知角色列表，请重点关注这些角色间的关系", "", "## 输出格式", "请以JSON格式输出，结构如下：", "{{", "    \"relationships\": [", "        {{", "            \"source\": \"源角色名\",", "            \"target\": \"目标角色名\",", "            \"relationship_type\": \"关系类型（family, friend, romantic, enemy等）\",", "            \"description\": \"关系描述\",", "            \"strength\": \"关系强度（1-10的整数）\",", "            \"evidence\": \"原文中的证据文本\",", "            \"confidence\": \"置信度（0-1）\",", "            \"is_mutual\": \"是否相互的（true/false）\",", "            \"status\": \"关系状态（active, inactive, conflict等）\"", "        }}", "    ]", "}}", "", "请注意：只输出JSON，不要添加其他解释文字。"""
 
         for attempt in range(self.config.max_retries):
             try:
@@ -164,7 +164,7 @@ class RelationshipExtractor(RelationshipExtractorInterface):
                         target=str(rel_data.get("target", "Unknown")),
                         relationship_type=relationship_type,
                         description=str(rel_data.get("description", "")),
-                        strength=int(rel_data.get("strength", rel_data.get("strength_value", 5))),
+                        strength=int(rel_data.get("strength", 5)),
                         status=relationship_status,
                         evidence=[str(rel_data.get("evidence", ""))] if rel_data.get("evidence") else [],
                         start_event=str(rel_data.get("start_event", "")) if rel_data.get("start_event") else None,

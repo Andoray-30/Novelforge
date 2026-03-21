@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from rich.console import Console
 
-console = Console()
+# console = Console()
 
 
 class ConcurrencyState(str, Enum):
@@ -96,6 +96,8 @@ class AdaptiveConcurrency:
         # 信号量（用于控制并发）
         self._semaphore = asyncio.Semaphore(min_concurrency)
         self._lock = asyncio.Lock()
+        # 当前实际的信号量值，用于安全更新
+        self._current_semaphore_value = min_concurrency
 
     async def acquire(self) -> None:
         """
@@ -105,7 +107,7 @@ class AdaptiveConcurrency:
         """
         await self._semaphore.acquire()
 
-    def release(self, success: bool, response_time: float) -> None:
+    async def release(self, success: bool, response_time: float) -> None:
         """
         释放并发许可并更新状态
 
@@ -122,8 +124,8 @@ class AdaptiveConcurrency:
 
         self.response_times.append(response_time)
 
-        # 调整并发数
-        asyncio.create_task(self._adjust_concurrency(success, response_time))
+        # 调整并发数（异步调用，使用锁保护）
+        await self._adjust_concurrency(success, response_time)
 
         # 释放信号量
         self._semaphore.release()
@@ -166,7 +168,7 @@ class AdaptiveConcurrency:
 
     async def _adjust_concurrency(self, success: bool, response_time: float) -> None:
         """
-        调整并发数（内部方法）
+        调整并发数（内部方法，异步版本，使用锁保护）
 
         Args:
             success: 请求是否成功
@@ -188,16 +190,16 @@ class AdaptiveConcurrency:
 
             # 根据状态调整
             if self.state == ConcurrencyState.SLOW_START:
-                await self._slow_start(success_rate, avg_response_time)
+                self._slow_start(success_rate, avg_response_time)
             elif self.state == ConcurrencyState.CONGESTION_AVOIDANCE:
-                await self._congestion_avoidance(success_rate, avg_response_time)
+                self._congestion_avoidance(success_rate, avg_response_time)
             elif self.state == ConcurrencyState.FAST_RECOVERY:
-                await self._fast_recovery(success_rate, avg_response_time)
+                self._fast_recovery(success_rate, avg_response_time)
 
             # 更新信号量
             await self._update_semaphore()
 
-    async def _slow_start(self, success_rate: float, avg_response_time: float) -> None:
+    def _slow_start(self, success_rate: float, avg_response_time: float) -> None:
         """
         慢启动阶段
 
@@ -209,26 +211,26 @@ class AdaptiveConcurrency:
             if self.current_concurrency < self.max_concurrency:
                 old_concurrency = self.current_concurrency
                 self.current_concurrency += 1
-                console.print(
-                    f"[green]⬆️ 动态并发: {old_concurrency} → {self.current_concurrency} "
-                    f"(慢启动: 成功率 {success_rate:.1%}, 响应时间 {avg_response_time:.2f}s)[/green]"
-                )
+                # console.print(
+                #     f"[green]⬆️ 动态并发: {old_concurrency} → {self.current_concurrency} "
+                #     f"(慢启动: 成功率 {success_rate:.1%}, 响应时间 {avg_response_time:.2f}s)[/green]"
+                # )
 
             # 进入拥塞避免阶段
             if self.current_concurrency >= self.max_concurrency * 0.7:
                 self.state = ConcurrencyState.CONGESTION_AVOIDANCE
-                console.print(
-                    f"[cyan][并发] 动态并发: 进入拥塞避免阶段 (并发数: {self.current_concurrency})[/cyan]"
-                )
+                # console.print(
+                #     f"[cyan][并发] 动态并发: 进入拥塞避免阶段 (并发数: {self.current_concurrency})[/cyan]"
+                # )
         elif success_rate < self.congestion_threshold or avg_response_time > self.target_response_time * 1.5:
             # 成功率低或响应慢 - 进入快速恢复
             self.state = ConcurrencyState.FAST_RECOVERY
-            console.print(
-                f"[yellow][警告] 动态并发: 进入快速恢复阶段 "
-                f"(成功率 {success_rate:.1%}, 响应时间 {avg_response_time:.2f}s)[/yellow]"
-            )
+            # console.print(
+            #     f"[yellow][警告] 动态并发: 进入快速恢复阶段 "
+            #     f"(成功率 {success_rate:.1%}, 响应时间 {avg_response_time:.2f}s)[/yellow]"
+            # )
 
-    async def _congestion_avoidance(self, success_rate: float, avg_response_time: float) -> None:
+    def _congestion_avoidance(self, success_rate: float, avg_response_time: float) -> None:
         """
         拥塞避免阶段
 
@@ -243,21 +245,21 @@ class AdaptiveConcurrency:
                 if self.current_concurrency < self.max_concurrency:
                     old_concurrency = self.current_concurrency
                     self.current_concurrency += 1
-                    console.print(
-                        f"[green][增加] 动态并发: {old_concurrency} → {self.current_concurrency} "
-                        f"(拥塞避免: 成功率 {success_rate:.1%}, 响应时间 {avg_response_time:.2f}s)[/green]"
-                    )
+                    # console.print(
+                    #     f"[green][增加] 动态并发: {old_concurrency} → {self.current_concurrency} "
+                    #     f"(拥塞避免: 成功率 {success_rate:.1%}, 响应时间 {avg_response_time:.2f}s)[/green]"
+                    # )
                 self.congestion_avoidance_counter = 0
         elif success_rate < self.congestion_threshold or avg_response_time > self.target_response_time * 1.5:
             # 成功率低或响应慢 - 进入快速恢复
             self.state = ConcurrencyState.FAST_RECOVERY
             self.congestion_avoidance_counter = 0
-            console.print(
-                f"[yellow][警告] 动态并发: 进入快速恢复阶段 "
-                f"(成功率 {success_rate:.1%}, 响应时间 {avg_response_time:.2f}s)[/yellow]"
-            )
+            # console.print(
+            #     f"[yellow][警告] 动态并发: 进入快速恢复阶段 "
+            #     f"(成功率 {success_rate:.1%}, 响应时间 {avg_response_time:.2f}s)[/yellow]"
+            # )
 
-    async def _fast_recovery(self, success_rate: float, avg_response_time: float) -> None:
+    def _fast_recovery(self, success_rate: float, avg_response_time: float) -> None:
         """
         快速恢复阶段
 
@@ -267,10 +269,10 @@ class AdaptiveConcurrency:
         if success_rate >= self.target_success_rate and avg_response_time <= self.target_response_time:
             # 成功率恢复 - 进入慢启动
             self.state = ConcurrencyState.SLOW_START
-            console.print(
-                f"[cyan][并发] 动态并发: 进入慢启动阶段 "
-                f"(成功率 {success_rate:.1%}, 响应时间 {avg_response_time:.2f}s)[/cyan]"
-            )
+            # console.print(
+            #     f"[cyan][并发] 动态并发: 进入慢启动阶段 "
+            #     f"(成功率 {success_rate:.1%}, 响应时间 {avg_response_time:.2f}s)[/cyan]"
+            # )
         else:
             # 继续快速恢复 - 减少并发
             if self.current_concurrency > self.min_concurrency:
@@ -279,32 +281,31 @@ class AdaptiveConcurrency:
                     self.current_concurrency // 2,
                     self.min_concurrency
                 )
-                console.print(
-                    f"[red]⬇️ 动态并发: {old_concurrency} → {self.current_concurrency} "
-                    f"(快速恢复: 成功率 {success_rate:.1%}, 响应时间 {avg_response_time:.2f}s)[/red]"
-                )
+                # console.print(
+                #     f"[red]⬇️ 动态并发: {old_concurrency} → {self.current_concurrency} "
+                #     f"(快速恢复: 成功率 {success_rate:.1%}, 响应时间 {avg_response_time:.2f}s)[/red]"
+                # )
 
     async def _update_semaphore(self) -> None:
-        """更新信号量的并发限制"""
-        # 获取当前信号量的内部计数
-        current_permits = self._semaphore._value + (
-            self._semaphore._waiters.__len__() if hasattr(self._semaphore, '_waiters') else 0
-        )
-
-        # 计算需要调整的数量
-        diff = self.current_concurrency - current_permits
-
-        if diff > 0:
-            # 需要增加许可
+        """更新信号量的并发限制（异步版本，使用锁保护）"""
+        # 安全地更新信号量：如果需要增加并发数，直接释放额外的许可
+        # 如果需要减少并发数，我们无法直接减少，但会在下次创建新信号量时生效
+        if self.current_concurrency > self._current_semaphore_value:
+            # 增加并发数：释放额外的许可
+            diff = self.current_concurrency - self._current_semaphore_value
             for _ in range(diff):
-                self._semaphore.release()
-        elif diff < 0:
-            # 需要减少许可（通过 acquire）
-            for _ in range(-diff):
                 try:
-                    self._semaphore.acquire_nowait()
-                except:
+                    self._semaphore.release()
+                except ValueError:
+                    # 信号量已满，停止释放
                     break
+            self._current_semaphore_value = self.current_concurrency
+        elif self.current_concurrency < self._current_semaphore_value:
+            # 减少并发数：创建新的信号量
+            # 注意：这会导致短暂的并发控制不一致，但这是可接受的
+            old_semaphore = self._semaphore
+            self._semaphore = asyncio.Semaphore(self.current_concurrency)
+            self._current_semaphore_value = self.current_concurrency
 
     def reset(self) -> None:
         """重置并发控制器"""
@@ -316,3 +317,4 @@ class AdaptiveConcurrency:
         self.response_times.clear()
         self.congestion_avoidance_counter = 0
         self._semaphore = asyncio.Semaphore(self.min_concurrency)
+        self._current_semaphore_value = self.min_concurrency

@@ -87,6 +87,82 @@ def test_text_analyzer():
     print("文本分析器测试完成\n")
 
 
+def test_advanced_text_analyzer():
+    """测试高级文本分析器"""
+    print("测试高级文本分析器...")
+    
+    from novelforge.content.text_analyzer import AdvancedTextAnalyzer
+    
+    analyzer = AdvancedTextAnalyzer()
+    
+    test_text = """
+    这是一个测试文本。它包含多个句子。
+    这是第二段。我们来测试分析功能。
+    文本分析器应该能够计算各种指标。
+    """
+    
+    result = analyzer.analyze(test_text)
+    print(f"总字符数: {result.total_chars}")
+    print(f"总词数: {result.total_words}")
+    print(f"段落数: {result.total_paragraphs}")
+    print(f"平均段落长度: {result.avg_paragraph_length:.2f}")
+    print(f"平均句子长度: {result.avg_sentence_length:.2f}")
+    print(f"阅读时间: {result.reading_time_minutes} 分钟")
+    print(f"语言: {result.language}")
+    print(f"唯一词数: {result.unique_words}")
+    
+    # 验证高级分析指标
+    print(f"字符重复率: {result.char_repetition_rate:.4f}" if result.char_repetition_rate is not None else "字符重复率: None")
+    print(f"段落长度方差: {result.paragraph_length_variance:.4f}" if result.paragraph_length_variance is not None else "段落长度方差: None")
+    print(f"复杂词汇比例: {result.complex_word_ratio:.4f}" if result.complex_word_ratio is not None else "复杂词汇比例: None")
+    
+    if result.sentence_length_distribution:
+        print(f"句子长度分布: min={result.sentence_length_distribution.get('min', 0):.1f}, "
+              f"max={result.sentence_length_distribution.get('max', 0):.1f}, "
+              f"avg={result.sentence_length_distribution.get('avg', 0):.1f}")
+    
+    print("高级文本分析器测试完成\n")
+
+
+def test_novel_text_analyzer():
+    """测试小说文本分析器"""
+    print("测试小说文本分析器...")
+    
+    from novelforge.content.text_analyzer import NovelTextAnalyzer
+    
+    analyzer = NovelTextAnalyzer()
+    
+    # 包含对话的小说样本文本
+    test_text = """
+    「你好啊！」小明说道。
+    小红微笑着回答：「我也很高兴见到你。」
+    
+    他看见远处的山峰，想到童年的回忆。
+    她听到风声，跑向树林深处。
+    
+    这是一段描述性的文字，用来测试分析器的功能。
+    """
+    
+    result = analyzer.analyze(test_text)
+    print(f"总字符数: {result.total_chars}")
+    print(f"总词数: {result.total_words}")
+    print(f"段落数: {result.total_paragraphs}")
+    print(f"平均段落长度: {result.avg_paragraph_length:.2f}")
+    print(f"平均句子长度: {result.avg_sentence_length:.2f}")
+    print(f"阅读时间: {result.reading_time_minutes} 分钟")
+    print(f"语言: {result.language}")
+    print(f"唯一词数: {result.unique_words}")
+    
+    # 验证小说特有分析指标
+    print(f"对话比例: {result.dialogue_ratio:.4f}" if result.dialogue_ratio is not None else "对话比例: None")
+    print(f"描述性语言比例: {result.descriptive_ratio:.4f}" if result.descriptive_ratio is not None else "描述性语言比例: None")
+    print(f"动作描述比例: {result.action_ratio:.4f}" if result.action_ratio is not None else "动作描述比例: None")
+    print(f"平均每段句子数: {result.avg_sentences_per_paragraph:.2f}" if result.avg_sentences_per_paragraph is not None else "平均每段句子数: None")
+    print(f"节奏方差: {result.rhythm_variance:.4f}" if result.rhythm_variance is not None else "节奏方差: None")
+    
+    print("小说文本分析器测试完成\n")
+
+
 def test_text_processing_service():
     """测试文本处理服务"""
     print("测试文本处理服务...")
@@ -171,6 +247,8 @@ def run_all_tests():
     test_text_preprocessor()
     test_chapter_detector()
     test_text_analyzer()
+    test_advanced_text_analyzer()
+    test_novel_text_analyzer()
     test_text_processing_service()
     test_file_validation()
     

@@ -2,10 +2,10 @@
 提取服务 - 提供角色、时间线、世界设定、关系网络的单独和整合提取功能
 """
 from typing import List, Dict, Any, Optional
-from novelforge.services.ai_service import AIService
-from novelforge.extractors.enhanced_orchestrator import EnhancedMultiWindowOrchestrator
-from novelforge.core.models import Character, WorldSetting, Timeline, RelationshipNetwork, TimelineEvent, NetworkEdge
-from novelforge.core.config import Config
+from .ai_service import AIService
+from ..extractors.enhanced_orchestrator import EnhancedMultiWindowOrchestrator
+from ..core.models import Character, WorldSetting, Timeline, RelationshipNetwork, TimelineEvent, NetworkEdge
+from ..core.config import Config
 
 
 class ExtractionService:

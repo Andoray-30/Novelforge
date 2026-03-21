@@ -9,9 +9,9 @@ from typing import Optional, TypeVar, Type
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 
-from novelforge.core.config import Config, config as default_config
-from novelforge.base.rate_limiter import RateLimiter
-from novelforge.base.retry_policy import RetryPolicy, retry_with_policy
+from ..core.config import Config, config as default_config
+from ..base.rate_limiter import RateLimiter
+from ..base.retry_policy import RetryPolicy, retry_with_policy
 
 T = TypeVar("T", bound=BaseModel)
 

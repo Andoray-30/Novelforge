@@ -266,11 +266,12 @@ class AdvancedTextPreprocessor(DefaultTextPreprocessor):
         # 将常见的转义字符替换为正常字符
         replacements = {
             '&nbsp;': ' ',
-            '<': '<',
-            '>': '>',
-            '&': '&',
-            '"': '"',
-            ''': "'",
+            '&lt;': '<',
+            '&gt;': '>',
+            '&amp;': '&',
+            '&quot;': '"',
+            '&apos;': "'",
+            '&#39;': "'",
         }
         
         for old, new in replacements.items():

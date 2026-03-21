@@ -5,10 +5,10 @@
 import asyncio
 import random
 from dataclasses import dataclass
-from typing import Optional, Type
+from typing import Optional, Type, Callable, Any, Awaitable
 from rich.console import Console
 
-console = Console()
+# console = Console()
 
 
 @dataclass
@@ -42,6 +42,7 @@ class RetryPolicy:
 
     # 可重试的 HTTP 状态码
     RETRYABLE_STATUS_CODES = {
+        408,  # Request Timeout
         429,  # Too Many Requests
         449,  # Retry With (某些API提供商使用)
         500,  # Internal Server Error
@@ -89,6 +90,7 @@ class RetryPolicy:
         self.successful_attempts = 0
         self.failed_attempts = 0
         self.total_wait_time = 0.0
+        self._last_actual_delay = 0.0
 
     def should_retry(self, error: Exception) -> bool:
         """
@@ -107,8 +109,6 @@ class RetryPolicy:
         # 检查是否为 HTTP 错误
         if hasattr(error, 'status_code'):
             status_code = getattr(error, 'status_code', None)
-            console.print(f"[yellow]重试策略检查: status_code={status_code}, type={type(status_code)}[/yellow]")
-            # 尝试转换为整数进行比较
             try:
                 status_code_int = int(status_code) if status_code is not None else None
                 if status_code_int in self.RETRYABLE_STATUS_CODES:
@@ -116,11 +116,49 @@ class RetryPolicy:
             except (ValueError, TypeError):
                 pass
 
-        # 检查错误消息中是否包含状态码
-        error_message = str(error).lower()
-        for code in self.RETRYABLE_STATUS_CODES:
-            if str(code) in error_message:
-                return True
+        # 检查常见的HTTP响应对象
+        if hasattr(error, 'response') and hasattr(error.response, 'status_code'):
+            try:
+                status_code = int(error.response.status_code)
+                if status_code in self.RETRYABLE_STATUS_CODES:
+                    return True
+            except (ValueError, TypeError, AttributeError):
+                pass
+
+        # 检查 requests 库的异常
+        if hasattr(error, 'args') and len(error.args) > 0:
+            # requests.exceptions.HTTPError 可能包含状态码在 args 中
+            for arg in error.args:
+                if isinstance(arg, str):
+                    # 尝试从错误消息中提取状态码
+                    import re
+                    match = re.search(r'(\d{3})', arg)
+                    if match:
+                        try:
+                            status_code = int(match.group(1))
+                            if status_code in self.RETRYABLE_STATUS_CODES:
+                                return True
+                        except ValueError:
+                            pass
+
+        # 检查 aiohttp 异常
+        if hasattr(error, 'code'):
+            try:
+                status_code = int(getattr(error, 'code'))
+                if status_code in self.RETRYABLE_STATUS_CODES:
+                    return True
+            except (ValueError, TypeError, AttributeError):
+                pass
+
+        # 检查 httpx 异常
+        if hasattr(error, 'request') and hasattr(error, 'response'):
+            try:
+                if hasattr(error.response, 'status_code'):
+                    status_code = int(error.response.status_code)
+                    if status_code in self.RETRYABLE_STATUS_CODES:
+                        return True
+            except (ValueError, TypeError, AttributeError):
+                pass
 
         return False
 
@@ -132,12 +170,13 @@ class RetryPolicy:
             attempt: 当前重试次数（从 0 开始）
         """
         delay = self.get_delay(attempt)
+        self._last_actual_delay = delay
 
         if delay > 0:
-            console.print(
-                f"[yellow][重试] 等待 {delay:.2f} 秒后重试 "
-                f"(第 {attempt + 1}/{self.max_retries} 次重试)[/yellow]"
-            )
+            # console.print(
+            #     f"[yellow][重试] 等待 {delay:.2f} 秒后重试 "
+            #     f"(第 {attempt + 1}/{self.max_retries} 次重试)[/yellow]"
+            # )
             await asyncio.sleep(delay)
             self.total_wait_time += delay
 
@@ -182,7 +221,7 @@ class RetryPolicy:
             successful_attempts=self.successful_attempts,
             failed_attempts=self.failed_attempts,
             total_wait_time=self.total_wait_time,
-            last_retry_delay=self.get_delay(0),
+            last_retry_delay=self._last_actual_delay,
         )
 
     def reset(self) -> None:
@@ -191,14 +230,15 @@ class RetryPolicy:
         self.successful_attempts = 0
         self.failed_attempts = 0
         self.total_wait_time = 0.0
+        self._last_actual_delay = 0.0
 
 
 async def retry_with_policy(
-    func,
+    func: Callable[..., Awaitable[Any]],
     retry_policy: RetryPolicy,
-    *args,
-    **kwargs,
-):
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
     """
     使用重试策略执行函数
 
@@ -227,18 +267,18 @@ async def retry_with_policy(
 
             # 检查是否可重试
             if not retry_policy.should_retry(e):
-                console.print(
-                    f"[red][错误] 重试策略: 错误不可重试 - {type(e).__name__}: {e}[/red]"
-                )
+                # console.print(
+                #     f"[red][错误] 重试策略: 错误不可重试 - {type(e).__name__}: {e}[/red]"
+                # )
                 raise
 
             # 检查是否还有重试机会
             if attempt < retry_policy.max_retries:
                 await retry_policy.wait_for_retry(attempt)
             else:
-                console.print(
-                    f"[red][错误] 重试策略: 已达到最大重试次数 ({retry_policy.max_retries})[/red]"
-                )
+                # console.print(
+                #     f"[red][错误] 重试策略: 已达到最大重试次数 ({retry_policy.max_retries})[/red]"
+                # )
                 raise
 
     # 理论上不会到达这里

@@ -18,7 +18,7 @@ class TextFormat(Enum):
 class FileUploadConfig:
     """文件上传配置"""
     max_file_size: int = 50 * 1024 * 1024  # 50MB
-    allowed_formats: List[TextFormat] = None
+    allowed_formats: Optional[List[TextFormat]] = None
     chunk_size: int = 8192
     
     def __post_init__(self):
@@ -45,7 +45,7 @@ class Chapter:
     start_position: int
     end_position: int
     index: int = 0
-    metadata: Dict[str, Any] = None
+    metadata: Optional[Dict[str, Any]] = None
     
     def __post_init__(self):
         if self.metadata is None:
@@ -66,7 +66,7 @@ class TextMetadata:
     format: Optional[TextFormat] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
-    tags: List[str] = None
+    tags: Optional[List[str]] = None
     
     def __post_init__(self):
         if self.tags is None:
@@ -79,7 +79,7 @@ class ProcessedText:
     content: str
     metadata: TextMetadata
     chapters: List[Chapter]
-    warnings: List[str] = None
+    warnings: Optional[List[str]] = None
     
     def __post_init__(self):
         if self.warnings is None:
@@ -99,11 +99,26 @@ class TextAnalysisResult:
     readability_score: Optional[float] = None
     language: Optional[str] = None
     unique_words: int = 0
-    density: Dict[str, float] = None  # 词频分布
+    density: Optional[Dict[str, float]] = None  # 词频分布
+    
+    # 高级分析指标字段（用于AdvancedTextAnalyzer）
+    char_repetition_rate: Optional[float] = None
+    paragraph_length_variance: Optional[float] = None
+    sentence_length_distribution: Optional[Dict[str, float]] = None
+    complex_word_ratio: Optional[float] = None
+    
+    # 小说特有分析指标字段（用于NovelTextAnalyzer）
+    dialogue_ratio: Optional[float] = None
+    descriptive_ratio: Optional[float] = None
+    action_ratio: Optional[float] = None
+    avg_sentences_per_paragraph: Optional[float] = None
+    rhythm_variance: Optional[float] = None
     
     def __post_init__(self):
         if self.density is None:
             self.density = {}
+        if self.sentence_length_distribution is None:
+            self.sentence_length_distribution = {}
 
 
 class TextPreprocessor:

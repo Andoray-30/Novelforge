@@ -1,8 +1,11 @@
 """
 内存存储实现
 """
+import logging
 from typing import Any, Optional, List
 from .base_storage import BaseStorage
+
+logger = logging.getLogger(__name__)
 
 
 class MemoryStorage(BaseStorage):
@@ -16,7 +19,8 @@ class MemoryStorage(BaseStorage):
         try:
             self._storage[key] = data
             return True
-        except Exception:
+        except Exception as e:
+            logger.error(f"内存存储保存失败 (key: {key}): {e}")
             return False
     
     async def load(self, key: str) -> Optional[Any]:

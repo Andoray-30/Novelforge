@@ -7,9 +7,9 @@ from typing import Dict, List, Optional, Callable, Any
 from datetime import datetime
 from enum import Enum
 from dataclasses import dataclass
-from novelforge.services.ai_service import AIService
-from novelforge.storage.storage_manager import StorageManager
-from novelforge.core.config import Config
+from .ai_service import AIService
+from ..storage.storage_manager import StorageManager
+from ..core.config import Config
 
 
 class TaskStatus(str, Enum):
@@ -150,7 +150,7 @@ class AITaskScheduler:
     
     async def _process_novel_generation_task(self, task: Task) -> Dict[str, Any]:
         """处理小说生成任务"""
-        from novelforge.api.ai_planning_service import get_ai_planning_service
+        from ..api.ai_planning_service import get_ai_planning_service
         ai_planning_service = get_ai_planning_service(self.ai_service)
         
         # 调用AI规划服务生成内容
@@ -177,7 +177,7 @@ class AITaskScheduler:
     
     async def _process_extraction_task(self, task: Task) -> Dict[str, Any]:
         """处理提取任务"""
-        from novelforge.services.extraction_service import get_extraction_service
+        from .extraction_service import get_extraction_service
         extraction_service = get_extraction_service(self.ai_service, self.config)
         
         text = task.parameters.get("text", "")
@@ -192,7 +192,7 @@ class AITaskScheduler:
     
     async def _process_character_generation_task(self, task: Task) -> Dict[str, Any]:
         """处理角色生成任务"""
-        from novelforge.api.ai_planning_service import get_ai_planning_service
+        from ..api.ai_planning_service import get_ai_planning_service
         ai_planning_service = get_ai_planning_service(self.ai_service)
         
         context = task.parameters.get("context", "")
@@ -203,7 +203,7 @@ class AITaskScheduler:
     
     async def _process_world_building_task(self, task: Task) -> Dict[str, Any]:
         """处理世界构建任务"""
-        from novelforge.api.ai_planning_service import get_ai_planning_service
+        from ..api.ai_planning_service import get_ai_planning_service
         ai_planning_service = get_ai_planning_service(self.ai_service)
         
         story_outline = task.parameters.get("story_outline", {})
@@ -213,7 +213,7 @@ class AITaskScheduler:
     
     async def _process_timeline_task(self, task: Task) -> Dict[str, Any]:
         """处理时间线生成任务"""
-        from novelforge.services.extraction_service import get_extraction_service
+        from .extraction_service import get_extraction_service
         extraction_service = get_extraction_service(self.ai_service, self.config)
         
         text = task.parameters.get("text", "")
@@ -225,7 +225,7 @@ class AITaskScheduler:
     
     async def _process_relationship_task(self, task: Task) -> Dict[str, Any]:
         """处理关系提取任务"""
-        from novelforge.services.extraction_service import get_extraction_service
+        from .extraction_service import get_extraction_service
         extraction_service = get_extraction_service(self.ai_service, self.config)
         
         text = task.parameters.get("text", "")
@@ -283,6 +283,8 @@ class AITaskScheduler:
                     user_id=task_data["user_id"]
                 )
                 self.tasks[task_id] = task
+            else:
+                task = None
         
         return task
     

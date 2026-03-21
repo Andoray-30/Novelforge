@@ -11,8 +11,8 @@ NovelForge Core - 高质量角色卡和世界书提取核心模块
 """
 
 # 核心层
-from novelforge.core import Config
-from novelforge.core.models import (
+from .core import Config
+from .core.models import (
     Character,
     WorldSetting,
     Location,
@@ -33,7 +33,7 @@ from novelforge.core.models import (
 )
 
 # 基础组件层
-from novelforge.base import (
+from .base import (
     ExtractionPhase,
     ExtractionStatus,
     TextChunk,
@@ -47,8 +47,8 @@ from novelforge.base import (
 )
 
 # 服务层
-from novelforge.services import AIService
-from novelforge.services.tavern_converter import (
+from .services import AIService
+from .services.tavern_converter import (
     TavernCardV2,
     TavernCardData,
     QualityScore,
@@ -59,7 +59,7 @@ from novelforge.services.tavern_converter import (
     QUALITY_THRESHOLDS,
     TavernCardBuilder,
 )
-from novelforge.services.character_deduplicator import (
+from .services.character_deduplicator import (
     CharacterDeduplicator,
     MergeConflict,
     CharacterMergeResult,
@@ -67,8 +67,8 @@ from novelforge.services.character_deduplicator import (
     create_character_deduplicator
 )
 # API服务
-from novelforge.api.ai_planning_service import get_ai_planning_service
-from novelforge.api.types import (
+from .api.ai_planning_service import get_ai_planning_service
+from .api.types import (
     NovelType,
     LengthType,
     TargetAudience,
@@ -83,7 +83,7 @@ from novelforge.api.types import (
 )
 
 # 提取器层
-from novelforge.extractors import (
+from .extractors import (
     CharacterExtractor,
     WorldExtractor,
     TimelineExtractor,
@@ -109,11 +109,11 @@ from novelforge.extractors import (
 )
 
 # 质量评估层
-from novelforge.quality import QualityScorer, create_quality_scorer
-from novelforge.quality import QualityEvaluator, create_quality_evaluator
+from .quality import QualityScorer, create_quality_scorer
+from .quality import QualityEvaluator, create_quality_evaluator
 
 # 世界树
-from novelforge.world_tree import (
+from .world_tree import (
     WorldTree,
     WorldTreeBuilder,
     build_world_tree,
@@ -129,9 +129,9 @@ from novelforge.world_tree import (
 )
 
 # 动态并发控制
-from novelforge.base import RateLimiter, RateUsage
-from novelforge.base import AdaptiveConcurrency, ConcurrencyState, ConcurrencyStats
-from novelforge.base import RetryPolicy, RetryStats, retry_with_policy
+from .base import RateLimiter, RateUsage
+from .base import AdaptiveConcurrency, ConcurrencyState, ConcurrencyStats
+from .base import RetryPolicy, RetryStats, retry_with_policy
 
 __version__ = "0.5.0"
 __all__ = [

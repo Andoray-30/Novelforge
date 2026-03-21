@@ -8,7 +8,7 @@ import asyncio
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
-from novelforge.services.ai_service import AIService
+from ..services.ai_service import AIService
 from .types import StoryOutlineParams, StoryOutline, CharacterDesign, WorldSetting
 
 

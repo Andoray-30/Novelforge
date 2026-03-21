@@ -525,7 +525,7 @@ def multi_extract(
                 # 显示统计信息
                 console.print(f"\n[bold green]提取完成！[/bold green]")
                 console.print(f"角色数: {len(result.get('characters', []))}")
-                console.print(f"地点数: {len(result.get('locations', [])) if 'locations' in result else len(result.get('world_setting', {}).get('locations', []))}")
+                console.print(f"地点数: {len(result.get('locations', [])) if 'locations' in result else (len(result.get('world_setting').locations) if hasattr(result.get('world_setting'), 'locations') else 0)}")
                 console.print(f"时间线事件数: {len(result.get('timeline_events', []))}")
                 console.print(f"关系数: {len(result.get('relationships', [])) if 'relationships' in result else len(result.get('network_edges', []))}")
                 
@@ -658,7 +658,7 @@ def complete_extract(
             # 显示统计信息
             console.print(f"\n[bold green]完整提取完成！[/bold green]")
             console.print(f"角色数: {len(result.get('characters', []))}")
-            console.print(f"地点数: {len(result.get('locations', [])) if 'locations' in result else len(result.get('world_setting', {}).get('locations', []))}")
+            console.print(f"地点数: {len(result.get('locations', [])) if 'locations' in result else (len(result.get('world_setting').locations) if hasattr(result.get('world_setting'), 'locations') else 0)}")
             console.print(f"时间线事件数: {len(result.get('timeline_events', []))}")
             console.print(f"关系数: {len(result.get('relationships', []))}")
             

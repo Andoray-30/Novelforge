@@ -120,14 +120,30 @@ class WorldExtractor(WorldExtractorInterface):
         type_lower = type_str.lower()
         if type_lower in ['city', '城市', '都市', '城镇']:
             return LocationType.CITY
-        elif type_lower in ['country', '国家', '王国', '帝国']:
-            return LocationType.OTHER  # Use OTHER since COUNTRY doesn't exist in enum
-        elif type_lower in ['building', '建筑', '房屋', '大厦']:
+        elif type_lower in ['town', '镇', '小镇']:
+            return LocationType.TOWN
+        elif type_lower in ['village', '村庄', '村落', '村']:
+            return LocationType.VILLAGE
+        elif type_lower in ['forest', '森林', '树林', '丛林']:
+            return LocationType.FOREST
+        elif type_lower in ['mountain', '山脉', '山', '高山']:
+            return LocationType.MOUNTAIN
+        elif type_lower in ['river', '河流', '河', '江']:
+            return LocationType.RIVER
+        elif type_lower in ['ocean', '海洋', '大海', '海']:
+            return LocationType.OCEAN
+        elif type_lower in ['desert', '沙漠', '荒漠']:
+            return LocationType.DESERT
+        elif type_lower in ['building', '建筑', '房屋', '大厦', '建筑物']:
             return LocationType.BUILDING
-        elif type_lower in ['natural', '自然', '山脉', '河流', '森林']:
-            return LocationType.OTHER  # Use OTHER since NATURAL doesn't exist in enum
+        elif type_lower in ['room', '房间', '室', '屋']:
+            return LocationType.ROOM
+        elif type_lower in ['country', '国家', '王国', '帝国']:
+            return LocationType.CITY
+        elif type_lower in ['natural', '自然']:
+            return LocationType.FOREST
         elif type_lower in ['fantasy', '幻想', '魔法', '异世界']:
-            return LocationType.OTHER  # Use OTHER for fantasy locations since FANTASY doesn't exist in enum
+            return LocationType.OTHER
         else:
             return LocationType.OTHER
     
