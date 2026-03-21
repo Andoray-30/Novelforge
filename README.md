@@ -103,9 +103,18 @@ NovelForge/
 │   ├── guides/                      # 指南
 │   └── overview/                    # 概述
 ├── SillyTavern/                     # SillyTavern集成
+├── ARCHITECTURE_OVERVIEW.md         # 架构概览文档
+├── IMPLEMENTATION_STATUS.md          # 实现状态文档
 ├── data/                            # 数据目录
 └── archives/                        # 归档文件
 ```
+
+---
+
+## 📄 核心文档
+
+- **[ARCHITECTURE_OVERVIEW.md](ARCHITECTURE_OVERVIEW.md)** - 项目架构概览，展示六层架构和数据流转
+- **[IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md)** - 各模块实现状态和进度跟踪
 
 ---
 
@@ -180,9 +189,9 @@ npm run start
 
 ### 访问应用
 
-- 前端界面: http://localhost:3000
-- 后端API: http://localhost:8000
-- API文档: http://localhost:8000/docs
+- 前端界面: <http://localhost:3000>
+- 后端API: <http://localhost:8000>
+- API文档: <http://localhost:8000/docs>
 
 ---
 
@@ -262,12 +271,14 @@ npm run start
 <summary>点击查看详细进度</summary>
 
 #### ✅ 大目标 1: 数据基础设施 (已完成)
+
 - [x] 数据存储系统 (local-storage, indexed-db, storage-manager)
 - [x] 状态管理系统 (zustand stores)
 - [x] 数据模型完善
 - [x] 分层世界树模型
 
 #### ✅ 大目标 2: 智能文本提取 (已完成)
+
 - [x] 文本处理与导入
 - [x] 角色提取系统
 - [x] 角色卡去重和合并机制
@@ -277,6 +288,7 @@ npm run start
 - [x] 增强世界设定树
 
 #### 🔄 大目标 3: 交互展示系统 (进行中)
+
 - [ ] 角色卡片组件
 - [ ] 角色详情页面
 - [ ] 角色编辑功能
@@ -286,17 +298,20 @@ npm run start
 - [ ] 世界设定展示
 
 #### ✅ 大目标 4: AI对话创作 (已完成)
+
 - [x] 对话界面设计
 - [x] 创作需求解析
 - [x] 智能调度系统
 - [x] 创作模式设计
 
 #### ✅ 大目标 5: 内容生成引擎 (已完成)
+
 - [x] 内容生成核心
 - [x] 质量控制机制
 - [x] 生成结果优化
 
 #### ✅ 大目标 6: 内容管理系统 (已完成)
+
 - [x] 内容组织管理
 - [x] 导出与分享
 - [x] 创作过程追踪

@@ -1,9 +1,10 @@
 # NovelForge 全面技术报告
 
 ## 文档版本
-**版本：** 1.0  
-**日期：** 2026-02-22  
-**状态：** 正式发布
+
+**版本：** 1.1  
+**日期：** 2026-03-21  
+**状态：** 更新版
 
 ---
 
@@ -115,6 +116,7 @@ NovelForge/
 **职责：** 定义所有核心数据结构
 
 **关键类：**
+
 - `Character` - 角色模型（Pydantic）
 - `Location` - 地点模型
 - `WorldSetting` - 世界设定模型
@@ -122,6 +124,7 @@ NovelForge/
 - `RelationshipNetwork` / `NetworkEdge` - 关系网络模型
 
 **技术路径：**
+
 ```
 用户输入 → 解析器 → 提取器 → 数据模型 → JSON输出
                               ↓
@@ -135,12 +138,14 @@ NovelForge/
 **职责：** 封装所有AI API调用
 
 **关键功能：**
+
 - `chat()` - 通用对话
 - `extract()` - 结构化提取
 - `extract_list()` - 列表提取
 - `_parse_json()` - JSON解析（带容错）
 
 **技术路径：**
+
 ```
 提取器请求 → AIService.chat() → OpenAI API
                 ↓
@@ -177,6 +182,7 @@ NovelForge/
 **设计理念：** 基于磁盘缓存的稳定并发方案
 
 **架构：**
+
 ```
 ┌─────────────────────────────────────┐
 │         MultiWindowExtractor         │
@@ -245,6 +251,7 @@ Phase 3: 智能合并与导出
 ```
 
 **内存优化：**
+
 - 切片保存到磁盘，不驻留内存
 - Worker处理完立即释放
 - 总内存占用 <5MB
@@ -269,6 +276,7 @@ Phase 3: 智能合并与导出
 ### 3.2 multi-extract 命令（新增）
 
 **用法：**
+
 ```bash
 # 基本用法
 novelforge multi-extract novel.txt -o workspace/
@@ -282,12 +290,14 @@ novelforge multi-extract novel.txt \
 ```
 
 **参数说明：**
+
 - `--workers` / `-w`: Worker数量（默认5）
 - `--chunk-size`: 切片大小（默认5000字符）
 - `--concurrency`: 每个Worker的并发数（默认2）
 - `--output` / `-o`: 输出目录
 
 **输出文件：**
+
 ```
 workspace/
 ├── chunks/                    # 切片文件
@@ -342,6 +352,7 @@ python -c "from novelforge.cli.main import cli; print('OK')"
 ### 5.2 推荐工作流
 
 **对于大文件（>100KB）：**
+
 ```bash
 # 1. 使用多窗口并发提取
 novelforge multi-extract "超时空辉夜姬.txt" -o workspace/ --workers 5
@@ -351,6 +362,7 @@ ls workspace/
 ```
 
 **对于小文件（<100KB）：**
+
 ```bash
 # 使用综合提取
 novelforge extract novel.txt -o output/ --evaluate
@@ -421,21 +433,21 @@ GAME_TERMS = {"上路", "中路", "下路", ...}
 
 ### 8.1 短期（1周内）
 
-- [ ] 添加时间线提取到multi-extract
-- [ ] 添加关系网络提取到multi-extract
-- [ ] 优化Prompt质量
+- [x] 添加时间线提取到multi-extract
+- [x] 添加关系网络提取到multi-extract
+- [x] 优化Prompt质量
 
 ### 8.2 中期（1个月内）
 
-- [ ] 实现流式处理
-- [ ] 添加资源监控
-- [ ] 实现自适应降级
+- [x] 实现流式处理
+- [x] 添加资源监控
+- [x] 实现自适应降级
 
 ### 8.3 长期（3个月内）
 
-- [ ] 实现分布式处理
-- [ ] 添加Web界面
-- [ ] 性能优化
+- [x] 实现分布式处理
+- [x] 添加Web界面
+- [x] 性能优化
 
 ---
 
@@ -451,5 +463,5 @@ GAME_TERMS = {"上路", "中路", "下路", ...}
 
 ---
 
-**报告生成时间：** 2026-02-22  
+**报告生成时间：** 2026-03-21  
 **技术团队：** NovelForge
