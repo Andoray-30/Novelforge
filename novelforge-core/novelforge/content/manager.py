@@ -31,7 +31,8 @@ class ContentManager:
                 raise Exception(f"Failed to save content {content_id} to database")
         else:
             # 使用文件存储
-            await self.storage.save(f"content_{content_id}", content_item.model_dump())
+            # FIXME: 之前使用 model_dump() 会导致 datetime 无法被 json.dump 序列化从而崩溃
+            await self.storage.save(f"content_{content_id}", content_item.model_dump(mode='json'))
             
             # 创建索引项
             index_item = {
@@ -42,7 +43,8 @@ class ContentManager:
                 "tags": content_item.metadata.tags,
                 "created_at": content_item.metadata.created_at.isoformat(),
                 "updated_at": content_item.metadata.updated_at.isoformat(),
-                "parent_id": content_item.metadata.parent_id
+                "parent_id": content_item.metadata.parent_id,
+                "session_id": content_item.metadata.session_id
             }
             await self.storage.save(f"index_{content_id}", index_item)
             
@@ -73,7 +75,7 @@ class ContentManager:
                 await self._remove_from_tag_index(content_id, tag)
             
             # 保存内容
-            await self.storage.save(f"content_{content_id}", content_item.model_dump())
+            await self.storage.save(f"content_{content_id}", content_item.model_dump(mode='json'))
             
             # 更新索引项
             index_item = {
@@ -84,7 +86,8 @@ class ContentManager:
                 "tags": content_item.metadata.tags,
                 "created_at": content_item.metadata.created_at.isoformat(),
                 "updated_at": content_item.metadata.updated_at.isoformat(),
-                "parent_id": content_item.metadata.parent_id
+                "parent_id": content_item.metadata.parent_id,
+                "session_id": content_item.metadata.session_id
             }
             await self.storage.save(f"index_{content_id}", index_item)
             
@@ -122,6 +125,24 @@ class ContentManager:
                 await self._remove_from_tag_index(content_id, tag)
             
             return True
+
+    async def delete_by_session(self, session_id: str) -> int:
+        """根据会话 ID 批量删除内容"""
+        if self.use_database:
+            return await self.db_storage.delete_content_by_session(session_id)
+        else:
+            # 文件存储模式下的遍历删除
+            all_keys = await self.storage.list_keys()
+            index_keys = [key for key in all_keys if key.startswith("index_")]
+            count = 0
+            for key in index_keys:
+                index_data = await self.storage.load(key)
+                if index_data and index_data.get("session_id") == session_id:
+                    content_id = index_data.get("id")
+                    if content_id:
+                        await self.delete_content(str(content_id))
+                        count += 1
+            return count
     
     async def search_content(self, request: ContentSearchRequest) -> ContentSearchResult:
         """搜索内容"""
@@ -132,6 +153,7 @@ class ContentManager:
                 content_type=request.content_type,
                 tags=request.tags,
                 status=request.status,
+                session_id=request.session_id,
                 limit=request.limit,
                 offset=request.offset
             )
@@ -155,11 +177,22 @@ class ContentManager:
                     continue
                 if request.status and index_data.get("status") != request.status:
                     continue
+                
+                # 核心修复: 如果指定了 session_id，则必须匹配
+                if request.session_id:
+                    if index_data.get("session_id") != request.session_id:
+                        continue
+                
+                # 如果指定了标签，检查是否包含（如果已经有 session_id 过滤，tags 可作为二级过滤）
                 if request.tags:
-                    # 检查是否包含所有指定的标签
                     item_tags = index_data.get("tags", [])
-                    has_all_tags = all(tag in item_tags for tag in request.tags)
-                    if not has_all_tags:
+                    has_any_tag = any(tag in item_tags for tag in request.tags)
+                    # 如果有 session_id，我们使用 ANY 逻辑增加兼容性；如果没有，则维持 ALL 逻辑
+                    if not request.session_id:
+                        has_all_tags = all(tag in item_tags for tag in request.tags)
+                        if not has_all_tags:
+                            continue
+                    elif not has_any_tag:
                         continue
                 
                 # 检查标题是否匹配查询
@@ -195,10 +228,10 @@ class ContentManager:
             limit=request.limit
         )
     
-    async def list_content_by_type(self, content_type: str, status: Optional[str] = None) -> List[ContentItem]:
+    async def list_content_by_type(self, content_type: str, status: Optional[str] = None, session_id: Optional[str] = None) -> List[ContentItem]:
         """按类型列出内容"""
         if self.use_database:
-            return await self.db_storage.list_content_by_type(content_type, status)
+            return await self.db_storage.list_content_by_type(content_type, status, session_id)
         else:
             all_keys = await self.storage.list_keys()
             
@@ -215,6 +248,8 @@ class ContentManager:
                 if index_data.get("type") != content_type:
                     continue
                 if status and index_data.get("status") != status:
+                    continue
+                if session_id and index_data.get("session_id") != session_id:
                     continue
                 
                 # 获取完整内容
@@ -238,7 +273,7 @@ class ContentManager:
         
         # 根据格式导出
         if request.format == "json":
-            export_data = [content.model_dump() for content in contents]
+            export_data = [content.model_dump(mode='json') for content in contents]
             return json.dumps(export_data, ensure_ascii=False, indent=2).encode('utf-8')
         elif request.format == "txt":
             # 简单的文本导出
@@ -251,7 +286,7 @@ class ContentManager:
             return "\n".join(text_parts).encode('utf-8')
         else:
             # 其他格式可扩展
-            export_data = [content.model_dump() for content in contents]
+            export_data = [content.model_dump(mode='json') for content in contents]
             return json.dumps(export_data, ensure_ascii=False, indent=2).encode('utf-8')
     
     async def _add_to_tag_index(self, content_id: str, tag: str):

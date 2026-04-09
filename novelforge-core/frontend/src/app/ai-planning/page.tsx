@@ -2,16 +2,16 @@
 
 import { useState } from 'react';
 import { useAIPlanning } from '@/lib/hooks/use-ai-planning';
-import { StoryOutlineParams } from '@/lib/api';
+import type { StoryOutlineParams, StoryOutline, NovelType } from '@/types';
 
 export default function AIPlanningPage() {
   const { 
-    isGenerating, 
+    isLoading: isGenerating, 
     error, 
-    currentOutline, 
-    generateStoryOutline, 
-    resetPlanning
+    generateStoryOutline
   } = useAIPlanning();
+
+  const [currentOutline, setCurrentOutline] = useState<StoryOutline | null>(null);
 
   const [formData, setFormData] = useState<StoryOutlineParams>({
     novel_type: 'fantasy',
@@ -25,10 +25,21 @@ export default function AIPlanningPage() {
     if (!formData.theme.trim()) return;
     
     try {
-      await generateStoryOutline(formData);
+      const result = await generateStoryOutline(formData);
+      setCurrentOutline(result);
     } catch (err) {
       console.error('Generation failed:', err);
     }
+  };
+
+  const resetPlanning = () => {
+    setCurrentOutline(null);
+    setFormData({
+      novel_type: 'fantasy',
+      theme: '',
+      length: 'medium',
+      target_audience: 'general'
+    });
   };
 
   return (
@@ -42,7 +53,7 @@ export default function AIPlanningPage() {
               <label className="block text-sm font-medium mb-2">小说类型</label>
               <select
                 value={formData.novel_type}
-                onChange={(e) => setFormData({...formData, novel_type: e.target.value})}
+                onChange={(e) => setFormData({...formData, novel_type: e.target.value as NovelType})}
                 className="w-full p-2 border rounded"
               >
                 <option value="fantasy">奇幻</option>

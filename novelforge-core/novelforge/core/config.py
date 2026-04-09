@@ -70,6 +70,31 @@ class Config:
         # 存储配置
         self.storage_type: str = os.getenv("STORAGE_TYPE", "file")
         self.database_path: str = os.getenv("DATABASE_PATH", "./data/novelforge_content.db")
+
+    def clone(self) -> "Config":
+        """Clone the current config without reloading environment variables."""
+        cloned = Config.__new__(Config)
+        cloned.__dict__ = self.__dict__.copy()
+        return cloned
+
+    def with_openai_overrides(
+        self,
+        *,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> "Config":
+        """Return a cloned config with runtime OpenAI overrides applied."""
+        cloned = self.clone()
+        if api_key is not None:
+            cloned.api_key = api_key.strip() or None
+        if base_url is not None:
+            normalized_base_url = base_url.strip()
+            cloned.base_url = normalized_base_url.rstrip("/") if normalized_base_url else cloned.base_url
+        if model is not None:
+            normalized_model = model.strip()
+            cloned.model = normalized_model or cloned.model
+        return cloned
     
     @classmethod
     def load(cls, config_path: Optional[str] = None) -> "Config":

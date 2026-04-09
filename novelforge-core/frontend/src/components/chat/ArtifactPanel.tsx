@@ -1,347 +1,305 @@
 'use client';
-import { useState } from 'react';
-import { X, User, Globe, Calendar, Network, BookOpen, ChevronDown, ChevronRight } from 'lucide-react';
 
-type ArtifactType = 'character_card' | 'world_setting' | 'timeline' | 'relationship' | 'outline';
+import { useState, useEffect, useRef } from 'react';
+import { X, Save, Layers, ListChecks, Check, Loader2 } from 'lucide-react';
+
+type ArtifactType = 'character_card' | 'world_setting' | 'timeline' | 'relationship' | 'outline' | 'chapter';
 
 interface ArtifactData {
   type: ArtifactType;
   title: string;
-  data: Record<string, unknown>;
+  data: Record<string, any>;
+  toolCall?: any;
 }
 
 interface ArtifactPanelProps {
-  artifact: ArtifactData | null;
+  /** 当前选中的资产列表（支持多个并行产出） */
+  artifacts: ArtifactData[];
   onClose: () => void;
   visible: boolean;
+  /** 保存单个资产 */
+  onSaveToProject?: (artifact: ArtifactData, updatedData: Record<string, any>) => void;
+  /** 批量保存所有资产 */
+  onSaveAll?: (dataList: Array<{ artifact: ArtifactData, data: Record<string, any> }>) => void;
 }
 
-// 图标映射
-const ICON_MAP: Record<ArtifactType, React.ReactNode> = {
-  character_card: <User size={16} />,
-  world_setting: <Globe size={16} />,
-  timeline: <Calendar size={16} />,
-  relationship: <Network size={16} />,
-  outline: <BookOpen size={16} />,
+const ICON_MAP: Record<ArtifactType, string> = {
+  character_card: '👤',
+  world_setting: '🌍',
+  timeline: '📅',
+  relationship: '🔗',
+  outline: '📋',
+  chapter: '📝',
 };
 
 const LABEL_MAP: Record<ArtifactType, string> = {
-  character_card: '角色卡',
-  world_setting: '世界设定',
-  timeline: '时间线事件',
-  relationship: '关系图谱',
-  outline: '故事大纲',
+  character_card: '角色设定',
+  world_setting: '世界观',
+  timeline: '时间线',
+  relationship: '关联',
+  outline: '大纲',
+  chapter: '正文章节',
 };
 
-// 递归渲染数据字段（高亮展示 JSON 中的每一各字段）
-function DataSection({
-  label,
-  value,
-  depth = 0,
-}: {
-  label: string;
-  value: unknown;
-  depth?: number;
-}) {
-  const [open, setOpen] = useState(true);
+// ============================================================
+// 主面板
+// ============================================================
+export function ArtifactPanel({ artifacts, onClose, visible, onSaveToProject, onSaveAll }: ArtifactPanelProps) {
+  const [activeIndex, setActiveIndex] = useState(0);
+  // 为每个资产维护一个独立的本地编辑状态
+  const [localDataList, setLocalDataList] = useState<Record<string, any>[]>([]);
+  const [isCopied, setIsCopied] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const panelRef = useRef<HTMLElement>(null);
 
-  // 跳过空值
-  if (value === null || value === undefined || value === '') return null;
+  // 初始化本地数据：当外部 artifacts 改变时，如果是新的 AI 回复，则重置本地列表
+  useEffect(() => {
+    if (artifacts.length > 0) {
+      // 深度拷贝以防污染
+      setLocalDataList(artifacts.map(a => JSON.parse(JSON.stringify(a.data))));
+      // 重置到第一个标签
+      setActiveIndex(0);
+    } else {
+      setLocalDataList([]);
+    }
+  }, [artifacts]);
 
-  // 渲染数组
-  if (Array.isArray(value)) {
-    if (value.length === 0) return null;
-    return (
-      <div style={{ marginBottom: 10 }}>
-        <button
-          onClick={() => setOpen(o => !o)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            color: 'var(--text-muted)',
-            fontSize: 11,
-            fontWeight: 600,
-            letterSpacing: '0.06em',
-            textTransform: 'uppercase',
-            padding: '4px 0',
-            width: '100%',
-            textAlign: 'left',
-          }}
-        >
-          {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-          {label}
-          <span style={{ color: 'var(--text-disabled)', fontWeight: 400 }}>({value.length})</span>
-        </button>
-        {open && (
-          <div style={{ paddingLeft: depth > 0 ? 12 : 0 }}>
-            {value.map((item, i) => (
-              <div
-                key={i}
-                style={{
-                  padding: '6px 10px',
-                  marginBottom: 4,
-                  borderRadius: 6,
-                  background: 'rgba(255,255,255,0.03)',
-                  border: '1px solid var(--border-subtle)',
-                  fontSize: 13,
-                  color: 'var(--text-secondary)',
-                }}
-              >
-                {typeof item === 'object' ? (
-                  Object.entries(item as Record<string, unknown>).map(([k, v]) => (
-                    <DataSection key={k} label={k} value={v} depth={depth + 1} />
-                  ))
-                ) : (
-                  String(item)
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  }
+  // 全局事件监听：ESC 关闭
+  useEffect(() => {
+    if (!visible) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    const handleClickOutside = (e: MouseEvent) => {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('mousedown', handleClickOutside, true);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('mousedown', handleClickOutside, true);
+    };
+  }, [visible, onClose]);
 
-  // 渲染对象
-  if (typeof value === 'object') {
-    return (
-      <div style={{ marginBottom: 10 }}>
-        <button
-          onClick={() => setOpen(o => !o)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            color: 'var(--text-muted)',
-            fontSize: 11,
-            fontWeight: 600,
-            letterSpacing: '0.06em',
-            textTransform: 'uppercase',
-            padding: '4px 0',
-            width: '100%',
-            textAlign: 'left',
-          }}
-        >
-          {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-          {label}
-        </button>
-        {open && (
-          <div style={{ paddingLeft: 8 }}>
-            {Object.entries(value as Record<string, unknown>).map(([k, v]) => (
-              <DataSection key={k} label={k} value={v} depth={depth + 1} />
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  }
+  // 安全获取当前选中的资产
+  const currentArtifact = artifacts[activeIndex] || artifacts[0];
+  const currentLocalData = localDataList[activeIndex] || (localDataList.length > 0 ? localDataList[0] : {});
 
-  // 渲染基本类型
+  const handleFieldChange = (key: string, value: any) => {
+    const targetIdx = artifacts[activeIndex] ? activeIndex : 0;
+    const nextList = [...localDataList];
+    if (nextList[targetIdx]) {
+        nextList[targetIdx] = { ...nextList[targetIdx], [key]: value };
+        setLocalDataList(nextList);
+    }
+  };
+
+  const handleSaveCurrent = async () => {
+    if (!onSaveToProject || isSaving || !currentArtifact) return;
+    setIsSaving(true);
+    try {
+      await onSaveToProject(currentArtifact, currentLocalData);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSaveAll = async () => {
+    if (!onSaveAll || isSaving || artifacts.length === 0) return;
+    setIsSaving(true);
+    try {
+      const payload = artifacts.map((a, i) => ({ artifact: a, data: localDataList[i] }));
+      await onSaveAll(payload);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
-    <div style={{ marginBottom: 8 }}>
-      <div
-        style={{
-          fontSize: 11,
-          fontWeight: 500,
-          color: 'var(--text-muted)',
-          marginBottom: 2,
-          letterSpacing: '0.04em',
-          textTransform: 'uppercase',
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          fontSize: 13,
-          color: 'var(--text-secondary)',
-          background: 'rgba(255,255,255,0.03)',
-          borderRadius: 6,
-          padding: '6px 10px',
-          border: '1px solid var(--border-subtle)',
-          lineHeight: 1.6,
-        }}
-      >
-        {String(value)}
-      </div>
-    </div>
-  );
-}
-
-export function ArtifactPanel({ artifact, onClose, visible }: ArtifactPanelProps) {
-  return (
-    <div
+    <aside
+      ref={panelRef}
       style={{
-        width: visible ? '360px' : '0px',
-        minWidth: visible ? '360px' : '0px',
-        transition: 'width 320ms cubic-bezier(0.4, 0, 0.2, 1), min-width 320ms cubic-bezier(0.4, 0, 0.2, 1)',
-        overflow: 'hidden',
-        flexShrink: 0,
-        display: 'flex',
-        flexDirection: 'column',
+        width: visible ? '640px' : '0px',
+        minWidth: visible ? '640px' : '0px',
+        transition: 'all 350ms cubic-bezier(0.4, 0, 0.2, 1)',
         background: 'var(--bg-surface)',
         borderLeft: visible ? '1px solid var(--border-subtle)' : 'none',
         height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        zIndex: 50,
+        boxShadow: visible ? '-20px 0 50px rgba(0,0,0,0.3)' : 'none',
       }}
     >
-      {artifact && visible && (
+      {artifacts.length > 0 && visible && (
         <>
-          {/* 顶部标题栏 */}
-          <div
-            style={{
-              padding: '18px 20px 14px',
-              borderBottom: '1px solid var(--border-subtle)',
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: 12,
-            }}
-          >
-            {/* 类型图标 */}
-            <div
-              style={{
-                width: 36,
-                height: 36,
-                borderRadius: 10,
-                background: 'rgba(139, 92, 246, 0.15)',
-                border: '1px solid rgba(139, 92, 246, 0.25)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#a78bfa',
-                flexShrink: 0,
-              }}
-            >
-              {ICON_MAP[artifact.type]}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div
+          {/* 顶部：资产库 Tabs */}
+          <div style={{ 
+            display: 'flex', background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border-subtle)',
+            padding: '12px 12px 0 12px', gap: 4, overflowX: 'auto', scrollbarWidth: 'none',
+            flexShrink: 0
+          }}>
+            {artifacts.map((art, idx) => (
+              <button
+                key={idx}
+                onClick={() => setActiveIndex(idx)}
                 style={{
-                  fontSize: 11,
-                  fontWeight: 500,
-                  color: '#a78bfa',
-                  letterSpacing: '0.06em',
-                  textTransform: 'uppercase',
-                  marginBottom: 2,
+                  padding: '10px 16px', borderRadius: '12px 12px 0 0', display: 'flex', alignItems: 'center', gap: 8,
+                  fontSize: 13, fontWeight: activeIndex === idx ? 700 : 500, cursor: 'pointer',
+                  background: activeIndex === idx ? 'var(--bg-surface)' : 'transparent',
+                  color: activeIndex === idx ? 'var(--accent-primary)' : 'var(--text-muted)',
+                  border: 'none', borderBottom: activeIndex === idx ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                  transition: 'all 0.2s', whiteSpace: 'nowrap'
                 }}
               >
-                {LABEL_MAP[artifact.type]}
-              </div>
-              <div
-                style={{
-                  fontSize: 15,
-                  fontWeight: 600,
-                  color: 'var(--text-primary)',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {artifact.title}
-              </div>
-            </div>
-            <button
-              onClick={onClose}
-              style={{
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                color: 'var(--text-muted)',
-                padding: 4,
-                borderRadius: 6,
-                display: 'flex',
-                flexShrink: 0,
-              }}
-            >
-              <X size={15} />
-            </button>
-          </div>
-
-          {/* 数据内容区 */}
-          <div
-            style={{
-              flex: 1,
-              overflowY: 'auto',
-              padding: '16px 20px',
-            }}
-          >
-            {Object.entries(artifact.data).map(([key, value]) => (
-              <DataSection key={key} label={key} value={value} />
+                <span>{ICON_MAP[art.type]}</span>
+                {art.title}
+              </button>
             ))}
+            <div style={{ flex: 1 }} />
+            <button onClick={onClose} style={{ alignSelf: 'center', marginBottom: 8, padding: 6, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>
+               <X size={18} />
+            </button>
           </div>
 
-          {/* 底部操作 */}
-          <div
-            style={{
-              padding: '12px 16px',
-              borderTop: '1px solid var(--border-subtle)',
-              display: 'flex',
-              gap: 8,
-            }}
-          >
+          {/* 资产详情头部 */}
+          <div style={{ padding: '24px 24px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexShrink: 0 }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--accent-primary)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                  {LABEL_MAP[currentArtifact.type]}
+                </span>
+                <span style={{ color: 'var(--border-strong)', fontSize: 10 }}>●</span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>并行创作模式</span>
+              </div>
+              <h2 style={{ fontSize: 22, fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.02em' }}>{currentArtifact.title}</h2>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+                <button 
+                  onClick={() => {
+                    navigator.clipboard.writeText(JSON.stringify(currentLocalData, null, 2));
+                    setIsCopied(true);
+                    setTimeout(() => setIsCopied(false), 2000);
+                  }}
+                  style={{ width: 40, height: 40, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)', cursor: 'pointer' }}
+                >
+                  {isCopied ? <Check size={18} color="#10b981" /> : <Layers size={18} />}
+                </button>
+            </div>
+          </div>
+
+          {/* 编辑表单 */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '0 24px 40px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              {Object.entries(currentLocalData).map(([key, value]) => (
+                <EditableField
+                  key={`${activeIndex}-${key}`}
+                  label={key}
+                  value={value}
+                  onChange={(val) => handleFieldChange(key, val)}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* 底部：动作栏 */}
+          <div style={{ 
+            padding: '20px 24px', borderTop: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)',
+            display: 'flex', gap: 12, alignItems: 'center', flexShrink: 0
+          }}>
             <button
-              style={{
-                flex: 1,
-                padding: '8px',
-                borderRadius: 8,
-                background: 'var(--bg-elevated)',
-                border: '1px solid var(--border-default)',
-                color: 'var(--text-secondary)',
-                fontSize: 12,
-                cursor: 'pointer',
-              }}
-              onClick={() => {
-                navigator.clipboard.writeText(JSON.stringify(artifact.data, null, 2));
-              }}
+               onClick={handleSaveCurrent}
+               disabled={isSaving}
+               style={{
+                 flex: 1, height: 48, borderRadius: 14, background: 'rgba(255,255,255,0.05)',
+                 border: '1px solid var(--border-subtle)', color: 'var(--text-primary)',
+                 fontSize: 14, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8
+               }}
             >
-              复制 JSON
+              <Save size={18} />
+              同步当前项
             </button>
+            
             <button
+              onClick={handleSaveAll}
+              disabled={isSaving}
               style={{
-                flex: 1,
-                padding: '8px',
-                borderRadius: 8,
-                background: 'rgba(139, 92, 246, 0.12)',
-                border: '1px solid rgba(139, 92, 246, 0.3)',
-                color: '#c4b5fd',
-                fontSize: 12,
-                cursor: 'pointer',
+                flex: 1.5, height: 48, borderRadius: 14,
+                background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
+                color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                border: 'none', boxShadow: '0 8px 16px -4px rgba(99, 102, 241, 0.4)', transition: 'transform 0.2s'
               }}
+              onMouseDown={e => e.currentTarget.style.transform = 'scale(0.98)'}
+              onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}
             >
-              保存到项目
+              {isSaving ? <Loader2 size={18} className="spin" /> : <ListChecks size={20} />}
+              同步全部资产 ({artifacts.length})
             </button>
           </div>
         </>
       )}
+    </aside>
+  );
+}
 
-      {/* 空状态 - 在面板展开但无内容时 */}
-      {!artifact && visible && (
-        <div
-          style={{
-            flex: 1,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 32,
-            textAlign: 'center',
-            color: 'var(--text-muted)',
-          }}
-        >
-          <BookOpen size={36} style={{ opacity: 0.3, marginBottom: 16 }} />
-          <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 6 }}>产物预览区</div>
-          <div style={{ fontSize: 12, opacity: 0.6, lineHeight: 1.6 }}>
-            当 NovelForge Agent 为你生成角色卡、世界设定或其他创作产物时，
-            会在这里以可视化方式展示
-          </div>
+// -----------------------------------------------------
+// 内部组件：可编辑字段
+// -----------------------------------------------------
+function EditableField({ label, value, onChange }: { label: string; value: any; onChange: (val: any) => void }) {
+  if (label.startsWith('__')) return null;
+
+  const isLongText = (typeof value === 'string' && value.length > 60) || label === 'content' || label === 'description' || label === 'background';
+  
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <label style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</label>
+      
+      {Array.isArray(value) ? (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {value.map((v, i) => (
+            <input 
+              key={i} 
+              value={String(v)} 
+              onChange={e => {
+                const next = [...value];
+                next[i] = e.target.value;
+                onChange(next);
+              }}
+              style={{ ...inputStyle, width: 'auto', minWidth: '120px' }}
+            />
+          ))}
+          <button onClick={() => onChange([...value, ''])} style={{ padding: '6px 12px', borderRadius: 8, border: '1px dashed var(--border-subtle)', background: 'none', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}>+ Add Item</button>
         </div>
+      ) : isLongText ? (
+        <textarea
+          value={String(value || '')}
+          onChange={e => onChange(e.target.value)}
+          rows={Math.max(3, Math.min(10, String(value || '').split('\n').length))}
+          style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.6, minHeight: 80 }}
+        />
+      ) : (
+        <input
+          value={String(value || '')}
+          onChange={e => onChange(e.target.value)}
+          style={inputStyle}
+        />
       )}
     </div>
   );
 }
+
+const inputStyle: React.CSSProperties = {
+  width: '100%',
+  padding: '12px 14px',
+  borderRadius: 12,
+  background: 'rgba(255,255,255,0.03)',
+  border: '1px solid var(--border-subtle)',
+  color: 'var(--text-primary)',
+  fontSize: 14,
+  outline: 'none',
+  transition: 'all 0.2s',
+};

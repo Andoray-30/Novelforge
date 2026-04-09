@@ -121,23 +121,56 @@ class WorldRule(BaseModel):
     importance: ImportanceLevel = Field(default=ImportanceLevel.MEDIUM)
 
 class WorldSetting(BaseModel):
-    name: str = Field(..., min_length=1, max_length=100)
-    description: str = Field(..., min_length=1, max_length=1000)
-    geography: str = Field(default="", max_length=1000)
-    social_structure: str = Field(default="", max_length=1000)
-    culture: str = Field(default="", max_length=1000)
-    technology_magic: str = Field(default="", max_length=1000)
-    history: str = Field(default="", max_length=2000)
-    core_conflicts: List[str] = Field(default_factory=list)
-    locations: List[Location] = Field(default_factory=list)
-    cultures: List[Culture] = Field(default_factory=list)
-    rules: List[WorldRule] = Field(default_factory=list)
+    name: str = Field(default="", min_length=0, max_length=100, description="世界名称")
+    description: str = Field(default="", max_length=1000, description="世界描述")
+    geography: str = Field(default="", max_length=1000, description="地理环境")
+    social_structure: str = Field(default="", max_length=1000, description="社会结构")
+    culture: str = Field(default="", max_length=1000, description="文化背景")
+    technology_magic: str = Field(default="", max_length=1000, description="科技/魔法体系")
+    history: str = Field(default="", max_length=2000, description="历史背景")
+    core_conflicts: List[str] = Field(default_factory=list, description="核心冲突")
+    locations: List[Location] = Field(default_factory=list, description="地点列表")
+    cultures: List[Culture] = Field(default_factory=list, description="文化列表")
+    rules: List[str] = Field(default_factory=list, description="世界规则列表")
+    themes: List[str] = Field(default_factory=list, description="主题元素")
 
 # 错误响应模型
 class ErrorResponse(BaseModel):
     error: str = Field(..., description="错误信息")
     detail: Optional[str] = Field(default=None, description="详细错误信息")
     timestamp: datetime = Field(default_factory=datetime.now)
+
+
+class OpenAIProviderConfig(BaseModel):
+    """Runtime OpenAI or compatible API configuration."""
+
+    api_key: Optional[str] = Field(default=None, description="API Key")
+    base_url: Optional[str] = Field(default=None, description="API Base URL")
+    model: Optional[str] = Field(default=None, description="Selected model")
+
+
+class OpenAIModelInfo(BaseModel):
+    """Model metadata returned by the upstream provider."""
+
+    id: str = Field(..., description="Model ID")
+    owned_by: Optional[str] = Field(default=None, description="Owner")
+    created: Optional[int] = Field(default=None, description="Creation timestamp")
+    supports_chat: bool = Field(default=True, description="Whether the model looks chat-capable")
+
+
+class OpenAIModelListRequest(BaseModel):
+    """Load models using the current or runtime OpenAI config."""
+
+    openai_config: Optional[OpenAIProviderConfig] = Field(default=None, description="Runtime OpenAI config")
+
+
+class OpenAIModelListResponse(BaseModel):
+    """Detected models for the configured provider."""
+
+    models: List[OpenAIModelInfo] = Field(default_factory=list, description="Available models")
+    current_model: Optional[str] = Field(default=None, description="Current selected/default model")
+    base_url: Optional[str] = Field(default=None, description="Resolved provider base URL")
+    using_default_config: bool = Field(default=False, description="Whether backend defaults were used")
 
 
 # AI对话创作相关模型
@@ -165,6 +198,12 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=5000, description="用户消息")
     context: Optional[dict] = Field(default=None, description="上下文信息")
     settings: Optional[dict] = Field(default=None, description="生成设置")
+    openai_config: Optional[OpenAIProviderConfig] = Field(default=None, description="Runtime OpenAI config")
+
+class ExtractionRequest(BaseModel):
+    """提取请求"""
+    text: str = Field(..., min_length=1, description="待提取的文本内容")
+    openai_config: Optional[OpenAIProviderConfig] = Field(default=None, description="Runtime OpenAI config")
 
 
 class ChatResponse(BaseModel):
@@ -245,6 +284,8 @@ class AITask(BaseModel):
     completed_at: Optional[datetime] = Field(default=None)
     result: Optional[dict] = Field(default=None)
     error: Optional[str] = Field(default=None)
+    progress: float = Field(default=0.0, description="任务进度 (0.0-1.0)")
+    message: str = Field(default="", description="当前进度描述")
 
 
 class TaskQueueRequest(BaseModel):

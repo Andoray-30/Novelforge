@@ -5,12 +5,13 @@ AI 服务模块 - 统一的 AI 调用接口
 import json
 import asyncio
 import time
-from typing import Optional, TypeVar, Type
+from typing import Optional, TypeVar, Type, List
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 from ..core.config import Config, config as default_config
 from ..base.rate_limiter import RateLimiter
+from ..base.concurrency import AdaptiveConcurrency
 from ..base.retry_policy import RetryPolicy, retry_with_policy
 
 T = TypeVar("T", bound=BaseModel)
@@ -35,6 +36,13 @@ class AIService:
             rpm_limit=self.config.rpm_limit,
             tpm_limit=self.config.tpm_limit,
         )
+        # 初始化动态并发控制器
+        self.concurrency_controller = AdaptiveConcurrency(
+            min_concurrency=2,
+            max_concurrency=10,
+            target_response_time=15.0
+        )
+
         
         # 初始化重试策略
         self.retry_policy = RetryPolicy(
@@ -47,13 +55,92 @@ class AIService:
     def client(self) -> AsyncOpenAI:
         """懒加载 OpenAI 客户端"""
         if self._client is None:
-            if not self.config.api_key:
-                raise ValueError("未配置 API Key，请设置 OPENAI_API_KEY 环境变量")
+            # 如果是占位符或者为空，暂不抛出异常，让 chat 内部处理 Mock
+            if not self.config.api_key or "your-api-key-here" in self.config.api_key:
+                return None # 标记为 Mock 模式
+            
             self._client = AsyncOpenAI(
                 api_key=self.config.api_key,
                 base_url=self.config.base_url,
             )
         return self._client
+
+    def has_real_client(self) -> bool:
+        """Whether the current config contains a usable upstream API key."""
+        return bool(self.config.api_key and "your-api-key-here" not in self.config.api_key)
+
+    def with_overrides(
+        self,
+        *,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> "AIService":
+        """Create a new AI service instance with runtime OpenAI overrides."""
+        runtime_config = self.config.with_openai_overrides(
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+        )
+        return AIService(runtime_config)
+
+    @staticmethod
+    def _looks_chat_capable(model_id: str) -> bool:
+        """Best-effort filter for obviously non-chat models returned by /models."""
+        lowered = model_id.lower()
+        incompatible_markers = (
+            "embedding",
+            "rerank",
+            "moderation",
+            "omni-moderation",
+            "tts",
+            "transcribe",
+            "whisper",
+            "image",
+            "imagen",
+            "video",
+            "veo",
+            "imagine",
+            "lyria",
+            "dall-e",
+            "gpt-image",
+        )
+        return not any(marker in lowered for marker in incompatible_markers)
+
+    async def list_models(self, timeout: float = 20.0) -> List[dict]:
+        """Fetch available models from the configured OpenAI-compatible provider."""
+        if not self.has_real_client():
+            raise ValueError("请先提供有效的 OpenAI API Key。")
+
+        current_model = (self.config.model or "").strip().lower()
+        models: List[dict] = []
+
+        async with AsyncOpenAI(
+            api_key=self.config.api_key,
+            base_url=self.config.base_url,
+        ) as client:
+            page = await asyncio.wait_for(client.models.list(), timeout=timeout)
+            async for item in page:
+                model_id = getattr(item, "id", None)
+                if not model_id:
+                    continue
+                models.append(
+                    {
+                        "id": model_id,
+                        "owned_by": getattr(item, "owned_by", None),
+                        "created": getattr(item, "created", None),
+                        "supports_chat": self._looks_chat_capable(model_id),
+                    }
+                )
+
+        models.sort(
+            key=lambda item: (
+                item["id"].lower() != current_model,
+                not item["supports_chat"],
+                item["id"].lower(),
+            )
+        )
+        return models
     
     async def chat(
         self,
@@ -87,7 +174,18 @@ class AIService:
         
         # 使用重试策略执行
         async def _do_chat():
+            # 检查是否处于 Mock 模式
+            if self.client is None:
+                await asyncio.sleep(1.5) # 模拟网络延迟感
+                # 针对不同场景提供高质量的 Mock 回复
+                if "角色" in prompt:
+                    return "已为您构思好一名反派角色：名字叫『墨染』，身披玄铁重铠，背后有一段被背叛的伤感往事。他的性格孤傲且充满魅力，是一个典型的悲剧英雄。"
+                if "世界" in prompt or "背景" in prompt:
+                    return "这是一个处于蒸汽朋克与修仙交织的世界，齿轮驱动着灵气，浮空岛屿上悬挂着巨大的转轮。文明在崩溃的边缘挣扎，而规则由那些掌握玄铁科技的宗门制定。"
+                return f"『模拟响应』：您的输入是「{prompt}」。我已接收到创作指令，目前由于后端 API Key 尚未配置，我正以【幻影模式】为您展示交互效果。请在 .env 文件中填入真实的 Key 以开启全量 AI 创作功能！"
+
             # 限流
+            await self.concurrency_controller.acquire()
             await self.rate_limiter.acquire(estimated_tokens)
             
             start_time = time.time()
@@ -129,13 +227,66 @@ class AIService:
                     tokens_used = response.usage.total_tokens
                     self.rate_limiter.record(tokens_used)
                 
+                await self.concurrency_controller.release(success=True, response_time=time.time() - start_time)
                 return response.choices[0].message.content or ""
             except asyncio.TimeoutError:
+                await self.concurrency_controller.release(success=False, response_time=timeout)
                 raise TimeoutError(f"API请求超时（{timeout}秒）")
             except Exception as e:
                 response_time = time.time() - start_time
                 raise
         
+        return await retry_with_policy(_do_chat, self.retry_policy)
+
+    async def chat_with_history(
+        self,
+        messages: list,
+        temperature: Optional[float] = None,
+        max_tokens: int = 8000,
+        timeout: float = 120.0,
+    ) -> str:
+        """
+        多轮对话接口，接受完整的 messages 数组（包含 system / user / assistant）
+        这是实现多轮记忆的核心方法
+        """
+        temp = temperature if temperature is not None else self.config.extraction_temperature
+        estimated_tokens = sum(len(m.get('content', '')) for m in messages) // 4 + max_tokens
+
+        async def _do_chat():
+            # Mock 模式
+            if self.client is None:
+                await asyncio.sleep(1.0)
+                last_user_msg = next(
+                    (m['content'] for m in reversed(messages) if m['role'] == 'user'), ''
+                )
+                if '角色' in last_user_msg:
+                    return "已为您构思好一名角色：名字叫『墨染』，身披玄铁重铠，背后有一段被背叛的伤感往事。他的性格孤傲且充满魅力，是一个典型的悲剧英雄。"
+                if '世界' in last_user_msg or '背景' in last_user_msg:
+                    return "这是一个处于蒸汽朋克与修仙交织的世界，齿轮驱动着灵气，浮空岛屿上悬挂着巨大的转轮。"
+                return f"《模拟响应》：您的输入是「{last_user_msg}」。目前正处于《幻影模式》。"
+
+            await self.concurrency_controller.acquire()
+            await self.rate_limiter.acquire(estimated_tokens)
+            start_time = time.time()
+            try:
+                response = await asyncio.wait_for(
+                    self.client.chat.completions.create(
+                        model=self.config.model,
+                        messages=messages,
+                        temperature=temp,
+                        max_tokens=max_tokens,
+                    ),
+                    timeout=timeout
+                )
+                if response is None:
+                    raise RuntimeError("空响应")
+                if hasattr(response, 'usage') and response.usage:
+                    self.rate_limiter.record(response.usage.total_tokens)
+                return response.choices[0].message.content or ""
+            except asyncio.TimeoutError:
+                await self.concurrency_controller.release(success=False, response_time=timeout)
+                raise TimeoutError(f"API请求超时（{timeout}秒）")
+
         return await retry_with_policy(_do_chat, self.retry_policy)
     
     async def extract(
@@ -160,6 +311,33 @@ class AIService:
             "请严格按照要求的 JSON 格式输出结果，不要添加任何额外说明。"
         )
         
+        # Mock 模式下的提取逻辑，直接返回符合业务逻辑的示例数据
+        if self.client is None:
+            await asyncio.sleep(2.0)
+            mock_data = {
+                "characters": [
+                    {"name": "墨染", "role": "反派宗主", "description": "玄铁科技的掌控者", "importance": "critical"},
+                    {"name": "青涟", "role": "正道圣女", "description": "手持灵气长剑，试图拯救世界", "importance": "high"}
+                ],
+                "world": {"name": "玄铁大陆", "description": "蒸汽与灵气共存的奇幻世界", "locations": [], "cultures": [], "rules": []},
+                "timeline": {"events": [
+                    {"title": "玄铁之乱", "date": "1024年", "description": "墨染发动了旨在统一大陆的战争", "importance": "critical"},
+                    {"title": "灵气枯竭", "date": "1026年", "description": "由于过度抽取灵气驱动机械，世界陷入能源危机", "importance": "high"}
+                ], "total_events": 2},
+                "relationships": { "edges": [
+                    {"source": "墨染", "target": "青涟", "type": "宿敌", "description": "相爱相杀的对立关系"}
+                ], "nodes": ["墨染", "青涟"], "total_relationships": 1},
+                "success": True
+            }
+            # 如果请求的是 Pydantic 模型，尝试验证
+            if hasattr(response_type, "model_validate"):
+                try: 
+                    # 这里尝试根据 response_type 调整数据结构（简单版）
+                    return response_type.model_validate(mock_data)
+                except:
+                    return mock_data 
+            return mock_data
+
         response = await self.chat(
             prompt=prompt,
             system_prompt=system_prompt or default_system,

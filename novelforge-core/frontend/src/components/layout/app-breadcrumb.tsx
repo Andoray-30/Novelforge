@@ -2,6 +2,7 @@
 
 import * as React from 'react'
 import { usePathname } from 'next/navigation'
+import Link from 'next/link'
 import { Home } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -80,12 +81,12 @@ export function AppBreadcrumb({
                     {item.title}
                   </span>
                 ) : (
-                  <a 
+                  <Link
                     href={item.href}
                     className="text-gray-500 hover:text-gray-700 transition-colors"
                   >
                     {item.title}
-                  </a>
+                  </Link>
                 )}
               </li>
               {!isLast && (

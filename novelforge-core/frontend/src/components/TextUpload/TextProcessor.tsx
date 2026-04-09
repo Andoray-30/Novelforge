@@ -13,17 +13,8 @@ const TextProcessor: React.FC<TextProcessorProps> = ({ onTextProcessed, onTextAn
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [fileInfo, setFileInfo] = useState<{ name: string; size: number; type: string } | null>(null);
-
-  const handleFileUpload = useCallback((file: File) => {
-    setFileInfo({
-      name: file.name,
-      size: file.size,
-      type: file.type
-    });
-    processTextFile(file);
-  }, []);
-
-  const processTextFile = async (file: File) => {
+  
+  const processTextFile = useCallback(async (file: File) => {
     setIsProcessing(true);
     setError(null);
     setProgress(10);
@@ -51,7 +42,16 @@ const TextProcessor: React.FC<TextProcessorProps> = ({ onTextProcessed, onTextAn
     } finally {
       setIsProcessing(false);
     }
-  };
+  }, [onTextAnalyzed, onTextProcessed]);
+
+  const handleFileUpload = useCallback((file: File) => {
+    setFileInfo({
+      name: file.name,
+      size: file.size,
+      type: file.type
+    });
+    processTextFile(file);
+  }, [processTextFile]);
 
   const readFileAsText = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {

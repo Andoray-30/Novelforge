@@ -1,0 +1,20 @@
+# 忽略大型依赖和编译输出
+node_modules/
+.next/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.db/
+data/
+archives/
+dist/
+build/
+.vscode/
+.git/
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.log

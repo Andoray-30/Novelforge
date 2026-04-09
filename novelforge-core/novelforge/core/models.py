@@ -5,7 +5,7 @@
 """
 
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
 from enum import Enum
 import uuid
@@ -47,6 +47,17 @@ class CharacterRelationship(BaseModel):
 
 class Character(BaseModel):
     """角色卡"""
+    model_config = {
+        **ConfigDict(extra="allow"),
+        "json_schema_extra": {
+            "examples": [{
+                "name": "张三",
+                "description": "故事的主角，一个普通的年轻人",
+                "personality": "勇敢、善良、有些冲动",
+                "role": "protagonist"
+            }]
+        }
+    }
     name: str = Field(..., description="角色名称")
     description: Optional[str] = Field(None, description="角色描述")
     personality: Optional[str] = Field(None, description="性格特征")
@@ -61,22 +72,11 @@ class Character(BaseModel):
     tags: list[str] = Field(default_factory=list, description="标签")
     relationships: list[CharacterRelationship] = Field(default_factory=list, description="角色关系")
     mentions: int = Field(default=0, description="出现次数")
-    
+
     # 增加原文上下文字段
     source_contexts: list[str] = Field(default_factory=list, description="角色在原文中的上下文片段")
     example_dialogues: list[str] = Field(default_factory=list, description="角色在原文中的对话示例")
     behavior_examples: list[str] = Field(default_factory=list, description="角色在原文中的行为示例")
-    
-    model_config = {
-        "json_schema_extra": {
-            "examples": [{
-                "name": "张三",
-                "description": "故事的主角，一个普通的年轻人",
-                "personality": "勇敢、善良、有些冲动",
-                "role": "protagonist"
-            }]
-        }
-    }
 
 
 class LocationType(str, Enum):
@@ -179,6 +179,7 @@ class TimePrecision(str, Enum):
 
 class TimelineEvent(BaseModel):
     """时间线事件"""
+    model_config = ConfigDict(extra="allow")
     id: str = Field(default_factory=lambda: str(uuid.uuid4())[:8], description="事件唯一标识")
     title: str = Field(..., description="事件标题")
     description: str = Field(..., description="事件描述")

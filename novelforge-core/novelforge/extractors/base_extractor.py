@@ -4,9 +4,10 @@
 """
 
 import asyncio
+import re
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Protocol
+from typing import Any, Dict, List, Optional, Protocol, NamedTuple
 from dataclasses import dataclass
 
 from ..core.models import (
@@ -18,6 +19,87 @@ from ..core.models import (
     Timeline,
     RelationshipNetwork
 )
+
+
+class Chunk(NamedTuple):
+    """文本片段"""
+    content: str
+    index: int
+    start: int
+    end: int
+
+
+class SmartChunker:
+    """智能文本分片器"""
+
+    def __init__(self, chunk_size: int = 2000, chunk_overlap: int = 200):
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
+
+    def chunk(self, text: str) -> List[Chunk]:
+        """将文本分片"""
+        if not text:
+            return []
+
+        # 如果文本长度小于chunk_size，直接返回一个片段
+        if len(text) <= self.chunk_size:
+            return [Chunk(content=text, index=0, start=0, end=len(text))]
+
+        chunks = []
+        start = 0
+        index = 0
+
+        while start < len(text):
+            # 计算片段结束位置
+            end = start + self.chunk_size
+
+            # 如果超出文本长度，直接到结尾
+            if end >= len(text):
+                chunks.append(Chunk(
+                    content=text[start:],
+                    index=index,
+                    start=start,
+                    end=len(text)
+                ))
+                break
+
+            # 尝试在句子边界处分割
+            chunk_text = text[start:end]
+
+            # 寻找最后一个句子结束符
+            sentence_end = -1
+            for i in range(len(chunk_text) - 1, -1, -1):
+                if chunk_text[i] in '。！？.!?\n':
+                    sentence_end = i + 1
+                    break
+
+            if sentence_end > 0 and sentence_end > self.chunk_size * 0.5:
+                # 在句子边界处分割
+                actual_end = start + sentence_end
+            else:
+                # 寻找最后一个空格或标点
+                for i in range(len(chunk_text) - 1, -1, -1):
+                    if chunk_text[i] in ' \t，,；;：:':
+                        actual_end = start + i + 1
+                        break
+                else:
+                    actual_end = end
+
+            chunks.append(Chunk(
+                content=text[start:actual_end],
+                index=index,
+                start=start,
+                end=actual_end
+            ))
+
+            # 下一个片段的起始位置（考虑重叠）
+            start = actual_end - self.chunk_overlap
+            if start <= chunks[-1].start:
+                start = actual_end
+
+            index += 1
+
+        return chunks
 
 
 class ExtractionResult(Protocol):
@@ -137,27 +219,27 @@ class RelationshipExtractorInterface(ABC):
 
 class ExtractorFactory:
     """提取器工厂类"""
-    
+
     @staticmethod
-    def create_character_extractor(config: ExtractionConfig) -> CharacterExtractorInterface:
+    def create_character_extractor(config: ExtractionConfig, ai_service=None) -> CharacterExtractorInterface:
         """创建角色提取器"""
-        from novelforge.extractors.character_extractor import CharacterExtractor
-        return CharacterExtractor(config)
-    
+        from novelforge.extractors.unified_character_extractor import UnifiedCharacterExtractor
+        return UnifiedCharacterExtractor(config=config, ai_service=ai_service)
+
     @staticmethod
-    def create_world_extractor(config: ExtractionConfig) -> WorldExtractorInterface:
+    def create_world_extractor(config: ExtractionConfig, ai_service=None) -> WorldExtractorInterface:
         """创建世界书提取器"""
-        from novelforge.extractors.world_extractor import WorldExtractor
-        return WorldExtractor(config)
-    
+        from novelforge.extractors.unified_world_extractor import UnifiedWorldExtractor
+        return UnifiedWorldExtractor(config=config, ai_service=ai_service)
+
     @staticmethod
-    def create_timeline_extractor(config: ExtractionConfig) -> TimelineExtractorInterface:
+    def create_timeline_extractor(config: ExtractionConfig, ai_service=None) -> TimelineExtractorInterface:
         """创建时间线提取器"""
-        from novelforge.extractors.timeline_extractor import TimelineExtractor
-        return TimelineExtractor(config)
-    
+        from novelforge.extractors.unified_timeline_extractor import UnifiedTimelineExtractor
+        return UnifiedTimelineExtractor(config=config, ai_service=ai_service)
+
     @staticmethod
-    def create_relationship_extractor(config: ExtractionConfig) -> RelationshipExtractorInterface:
+    def create_relationship_extractor(config: ExtractionConfig, ai_service=None) -> RelationshipExtractorInterface:
         """创建关系网络提取器"""
-        from novelforge.extractors.relationship_extractor import RelationshipExtractor
-        return RelationshipExtractor(config)
+        from novelforge.extractors.unified_relationship_extractor import UnifiedRelationshipExtractor
+        return UnifiedRelationshipExtractor(config=config, ai_service=ai_service)

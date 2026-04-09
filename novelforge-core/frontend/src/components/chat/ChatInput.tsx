@@ -1,47 +1,111 @@
 'use client';
-import { useRef, useState, useEffect } from 'react';
-import { ArrowUp, Paperclip, Mic, X, Sparkles } from 'lucide-react';
 
-const PROMPT_SUGGESTIONS = [
-  '帮我设计一个反派角色，背景是唐朝，性格复杂且有魅力',
-  '我的故事需要一个神秘的世界观设定，想要有东方神话元素',
-  '分析一下我上传的这段文本，提取出所有登场角色',
-  '帮我规划一条从序章到结局的完整时间线',
-  '设计主角和反派之间的关系网络',
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowUp, Loader2, Mic, Paperclip, Sparkles, X } from 'lucide-react';
+import { aiService } from '@/lib/api';
+import type { OpenAIConfig } from '@/types';
+
+const DEFAULT_PROMPT_SUGGESTIONS = [
+  '帮我设计一个有魅力且复杂的反派角色。',
+  '构建一个带有神话色彩和社会冲突的世界观。',
+  '分析我上传的文本并提取角色与关系。',
+  '按章节规划从开端到结局的完整时间线。',
+  '把这段剧情改写得更有情绪张力。',
 ];
 
 interface ChatInputProps {
   onSend: (message: string) => void;
   disabled?: boolean;
   placeholder?: string;
+  sessionId?: string;
+  openAIConfig?: OpenAIConfig;
 }
 
-export function ChatInput({ onSend, disabled = false, placeholder }: ChatInputProps) {
+export function ChatInput({
+  onSend,
+  disabled = false,
+  placeholder,
+  sessionId,
+  openAIConfig,
+}: ChatInputProps) {
   const [input, setInput] = useState('');
   const [isFocused, setIsFocused] = useState(false);
+  const [promptSuggestions, setPromptSuggestions] = useState<string[]>(DEFAULT_PROMPT_SUGGESTIONS);
+  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const apiKeyInput = openAIConfig?.api_key ?? '';
+  const baseUrlInput = openAIConfig?.base_url ?? '';
+  const modelInput = openAIConfig?.model ?? '';
 
-  // 自动调整高度
+  const requestConfig = useMemo(() => {
+    const normalized: OpenAIConfig = {};
+    const apiKey = apiKeyInput.trim();
+    const baseUrl = baseUrlInput.trim();
+    const model = modelInput.trim();
+
+    if (apiKey) normalized.api_key = apiKey;
+    if (baseUrl) normalized.base_url = baseUrl;
+    if (model) normalized.model = model;
+
+    return Object.keys(normalized).length > 0 ? normalized : undefined;
+  }, [apiKeyInput, baseUrlInput, modelInput]);
+
   useEffect(() => {
-    const ta = textareaRef.current;
-    if (!ta) return;
-    ta.style.height = 'auto';
-    ta.style.height = Math.min(ta.scrollHeight, 180) + 'px';
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 180)}px`;
   }, [input]);
 
-  function handleSend() {
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchSuggestions = async () => {
+      if (!sessionId) {
+        setPromptSuggestions(DEFAULT_PROMPT_SUGGESTIONS);
+        return;
+      }
+
+      setIsLoadingSuggestions(true);
+      try {
+        const result = await aiService.suggestPrompts(sessionId, requestConfig);
+        if (cancelled) return;
+        if (Array.isArray(result) && result.length > 0) {
+          setPromptSuggestions(result.slice(0, 8));
+        } else {
+          setPromptSuggestions(DEFAULT_PROMPT_SUGGESTIONS);
+        }
+      } catch {
+        if (!cancelled) {
+          setPromptSuggestions(DEFAULT_PROMPT_SUGGESTIONS);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingSuggestions(false);
+        }
+      }
+    };
+
+    void fetchSuggestions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, requestConfig]);
+
+  const handleSend = () => {
     const trimmed = input.trim();
     if (!trimmed || disabled) return;
     onSend(trimmed);
     setInput('');
-  }
+  };
 
-  function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
       handleSend();
     }
-  }
+  };
 
   const canSend = input.trim().length > 0 && !disabled;
 
@@ -53,54 +117,74 @@ export function ChatInput({ onSend, disabled = false, placeholder }: ChatInputPr
         flexShrink: 0,
       }}
     >
-      {/* 快捷提示词（仅在输入为空时显示）*/}
       {input.length === 0 && !disabled && (
         <div
           style={{
             display: 'flex',
+            flexDirection: 'column',
             gap: 8,
             marginBottom: 12,
-            overflowX: 'auto',
-            paddingBottom: 4,
-            msOverflowStyle: 'none',
-            scrollbarWidth: 'none' as const,
           }}
         >
-          {PROMPT_SUGGESTIONS.map((s, i) => (
-            <button
-              key={i}
-              onClick={() => {
-                setInput(s);
-                textareaRef.current?.focus();
-              }}
+          <div
+            style={{
+              display: 'flex',
+              gap: 8,
+              overflowX: 'auto',
+              paddingBottom: 4,
+              msOverflowStyle: 'none',
+              scrollbarWidth: 'none',
+            }}
+          >
+            {promptSuggestions.map((suggestion, index) => (
+              <button
+                key={`${suggestion}-${index}`}
+                onClick={() => {
+                  setInput(suggestion);
+                  textareaRef.current?.focus();
+                }}
+                style={{
+                  flexShrink: 0,
+                  padding: '6px 12px',
+                  borderRadius: 999,
+                  background: 'var(--bg-elevated)',
+                  border: '1px solid var(--border-default)',
+                  color: 'var(--text-muted)',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  transition: 'all 150ms',
+                }}
+                onMouseEnter={(event) => {
+                  event.currentTarget.style.borderColor = 'var(--accent-primary)';
+                  event.currentTarget.style.color = 'var(--text-secondary)';
+                }}
+                onMouseLeave={(event) => {
+                  event.currentTarget.style.borderColor = 'var(--border-default)';
+                  event.currentTarget.style.color = 'var(--text-muted)';
+                }}
+              >
+                {suggestion.length > 34 ? `${suggestion.slice(0, 34)}...` : suggestion}
+              </button>
+            ))}
+          </div>
+          {isLoadingSuggestions && (
+            <div
               style={{
-                flexShrink: 0,
-                padding: '6px 12px',
-                borderRadius: 999,
-                background: 'var(--bg-elevated)',
-                border: '1px solid var(--border-default)',
-                color: 'var(--text-muted)',
-                fontSize: 12,
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-                transition: 'all 150ms',
-              }}
-              onMouseEnter={e => {
-                (e.currentTarget as HTMLElement).style.borderColor = 'var(--accent-primary)';
-                (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)';
-              }}
-              onMouseLeave={e => {
-                (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-default)';
-                (e.currentTarget as HTMLElement).style.color = 'var(--text-muted)';
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                color: 'var(--text-disabled)',
+                fontSize: 11,
               }}
             >
-              {s.length > 24 ? s.slice(0, 24) + '…' : s}
-            </button>
-          ))}
+              <Loader2 size={12} className="animate-spin" />
+              正在刷新提示词...
+            </div>
+          )}
         </div>
       )}
 
-      {/* 输入框主容器 */}
       <div
         style={{
           display: 'flex',
@@ -117,7 +201,7 @@ export function ChatInput({ onSend, disabled = false, placeholder }: ChatInputPr
         <textarea
           ref={textareaRef}
           value={input}
-          onChange={e => setInput(e.target.value)}
+          onChange={(event) => setInput(event.target.value)}
           onKeyDown={handleKeyDown}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
@@ -125,7 +209,7 @@ export function ChatInput({ onSend, disabled = false, placeholder }: ChatInputPr
           rows={1}
           placeholder={
             placeholder ??
-            (disabled ? 'Agent 正在思考中...' : '告诉 NovelForge 你想要创作什么... (Shift+Enter 换行)')
+            (disabled ? 'Agent 正在生成中...' : '告诉 NovelForge 你想创作什么...（Shift+Enter 换行）')
           }
           style={{
             background: 'none',
@@ -143,7 +227,6 @@ export function ChatInput({ onSend, disabled = false, placeholder }: ChatInputPr
           }}
         />
 
-        {/* 底部工具栏 */}
         <div
           style={{
             display: 'flex',
@@ -152,13 +235,11 @@ export function ChatInput({ onSend, disabled = false, placeholder }: ChatInputPr
             marginTop: 10,
           }}
         >
-          {/* 左侧：附件/语音（预留功能）*/}
           <div style={{ display: 'flex', gap: 4 }}>
             <ToolButton icon={<Paperclip size={15} />} title="上传文本文件" disabled />
             <ToolButton icon={<Mic size={15} />} title="语音输入（即将支持）" disabled />
           </div>
 
-          {/* 右侧：字符计数 + 发送按钮 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {input.length > 0 && (
               <span style={{ fontSize: 11, color: 'var(--text-disabled)' }}>
@@ -177,6 +258,7 @@ export function ChatInput({ onSend, disabled = false, placeholder }: ChatInputPr
                   borderRadius: 4,
                   display: 'flex',
                 }}
+                title="清空输入"
               >
                 <X size={13} />
               </button>
@@ -184,7 +266,7 @@ export function ChatInput({ onSend, disabled = false, placeholder }: ChatInputPr
             <button
               onClick={handleSend}
               disabled={!canSend}
-              title="发送 (Enter)"
+              title="发送（Enter）"
               style={{
                 width: 32,
                 height: 32,
@@ -201,11 +283,11 @@ export function ChatInput({ onSend, disabled = false, placeholder }: ChatInputPr
                 transition: 'background 200ms, transform 100ms',
                 boxShadow: canSend ? '0 2px 8px rgba(139, 92, 246, 0.4)' : 'none',
               }}
-              onMouseDown={e => {
-                if (canSend) (e.currentTarget as HTMLElement).style.transform = 'scale(0.92)';
+              onMouseDown={(event) => {
+                if (canSend) event.currentTarget.style.transform = 'scale(0.92)';
               }}
-              onMouseUp={e => {
-                (e.currentTarget as HTMLElement).style.transform = 'scale(1)';
+              onMouseUp={(event) => {
+                event.currentTarget.style.transform = 'scale(1)';
               }}
             >
               <ArrowUp size={16} />
@@ -214,7 +296,6 @@ export function ChatInput({ onSend, disabled = false, placeholder }: ChatInputPr
         </div>
       </div>
 
-      {/* 底部说明 */}
       <div
         style={{
           marginTop: 8,
@@ -228,13 +309,12 @@ export function ChatInput({ onSend, disabled = false, placeholder }: ChatInputPr
         }}
       >
         <Sparkles size={10} />
-        NovelForge 由 OpenAI 模型驱动，生成结果仅供创作参考
+        AI 生成内容可能存在误差，请在使用前自行核对。
       </div>
     </div>
   );
 }
 
-// 工具栏小按钮
 function ToolButton({
   icon,
   title,

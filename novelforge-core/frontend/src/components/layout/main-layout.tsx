@@ -7,6 +7,7 @@ import { AppBreadcrumb } from '@/components/layout/app-breadcrumb'
 import { Container } from '@/components/layout/layout-utils'
 import { Toaster } from '@/components/ui/toast'
 import { MobileNav } from '@/components/layout/mobile-nav'
+import { TaskCenter } from './TaskCenter'
 
 export interface MainLayoutProps {
   children: React.ReactNode
@@ -55,6 +56,7 @@ export function MainLayout({ children, sidebar }: MainLayoutProps) {
 
       {/* Toast Notifications */}
       <Toaster />
+      <TaskCenter />
     </div>
   )
 }

@@ -27,6 +27,7 @@ class ContentType(str, Enum):
     TIMELINE = "timeline"
     RELATIONSHIP = "relationship"
     CONVERSATION = "conversation"
+    OUTLINE = "outline"
 
 
 class ContentMetadata(BaseModel):
@@ -42,6 +43,7 @@ class ContentMetadata(BaseModel):
     version: int = Field(default=1, description="版本号")
     parent_id: Optional[str] = Field(default=None, description="父内容ID")
     children_ids: List[str] = Field(default_factory=list, description="子内容ID列表")
+    session_id: Optional[str] = Field(default=None, description="所绑定的会话/项目ID")
 
 
 class ContentItem(BaseModel):
@@ -55,11 +57,13 @@ class ContentItem(BaseModel):
 
 class ContentSearchRequest(BaseModel):
     """内容搜索请求"""
-    query: str = Field(..., description="搜索查询")
+    # TODO: 将 query 改为 Optional，支持纯 tags 过滤时不传 query 的场景
+    query: Optional[str] = Field(default='', description="搜索查询，为空时返回全部")
     content_type: Optional[ContentType] = Field(default=None, description="内容类型")
     tags: Optional[List[str]] = Field(default=None, description="标签")
     status: Optional[ContentStatus] = Field(default=None, description="内容状态")
-    limit: int = Field(default=20, ge=1, le=100, description="返回数量限制")
+    session_id: Optional[str] = Field(default=None, description="所属会话ID过滤")
+    limit: int = Field(default=20, ge=1, le=500, description="返回数量限制")
     offset: int = Field(default=0, ge=0, description="偏移量")
 
 

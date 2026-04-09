@@ -8,6 +8,11 @@ NovelForge Core - 高质量角色卡和世界书提取核心模块
 - 关系网络提取
 - 世界树构建和导出
 - SillyTavern 格式转换
+
+重构说明：
+- 2026-03-25: 移除了旧的提取器（character_extractor, world_extractor等）
+- 2026-03-25: 统一使用 unified_*_extractor 系列
+- 旧的提取器已备份到 archives/old_extractors_backup/
 """
 
 # 核心层
@@ -82,14 +87,20 @@ from .api.types import (
     ErrorResponse
 )
 
-# 提取器层
+# 提取器层 - 统一提取器（新架构）
 from .extractors import (
+    # 统一提取器
+    UnifiedCharacterExtractor,
+    UnifiedWorldExtractor,
+    UnifiedTimelineExtractor,
+    UnifiedRelationshipExtractor,
+    UnifiedExtractor,
+    # 向后兼容别名
     CharacterExtractor,
     WorldExtractor,
     TimelineExtractor,
     RelationshipExtractor,
-    MultiWindowExtractor,
-    MultiWindowConfig,
+    # 基础组件
     SmartChunker,
     Chunk,
     BaseExtractor,
@@ -99,13 +110,8 @@ from .extractors import (
     RelationshipExtractorInterface,
     ExtractionConfig,
     ExtractorFactory,
-    NewCharacterExtractor,
-    NewWorldExtractor,
-    NewTimelineExtractor,
-    NewRelationshipExtractor,
+    # 工具
     TavernConverter,
-    MultiWindowOrchestrator,
-    NewMultiWindowConfig,
 )
 
 # 质量评估层
@@ -133,7 +139,7 @@ from .base import RateLimiter, RateUsage
 from .base import AdaptiveConcurrency, ConcurrencyState, ConcurrencyStats
 from .base import RetryPolicy, RetryStats, retry_with_policy
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 __all__ = [
     # 配置和服务
     "Config",
@@ -162,13 +168,18 @@ __all__ = [
     "ParsedDocument",
     "DocumentParser",
     "parse_document",
-    # 提取器
+    # 统一提取器（新架构）
+    "UnifiedCharacterExtractor",
+    "UnifiedWorldExtractor",
+    "UnifiedTimelineExtractor",
+    "UnifiedRelationshipExtractor",
+    "UnifiedExtractor",
+    # 向后兼容别名
     "CharacterExtractor",
     "WorldExtractor",
     "TimelineExtractor",
     "RelationshipExtractor",
-    "MultiWindowExtractor",
-    "MultiWindowConfig",
+    # 基础组件
     "SmartChunker",
     "Chunk",
     "BaseExtractor",
@@ -178,13 +189,8 @@ __all__ = [
     "RelationshipExtractorInterface",
     "ExtractionConfig",
     "ExtractorFactory",
-    "NewCharacterExtractor",
-    "NewWorldExtractor",
-    "NewTimelineExtractor",
-    "NewRelationshipExtractor",
+    # 工具
     "TavernConverter",
-    "MultiWindowOrchestrator",
-    "NewMultiWindowConfig",
     # 质量评估
     "QualityScorer",
     "create_quality_scorer",

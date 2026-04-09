@@ -1,10 +1,50 @@
-// 类型定义 - 与后端Pydantic模型保持一致
+// Frontend shared types aligned with backend API/contracts.
+
+export type NovelType =
+  | 'fantasy'
+  | 'science_fiction'
+  | 'romance'
+  | 'mystery'
+  | 'historical'
+  | 'wuxia';
+
+export type LengthType = 'short' | 'medium' | 'long';
+export type TargetAudience = 'general' | 'young_adult' | 'adult';
+export type PlotPosition = 'beginning' | 'development' | 'climax' | 'ending';
+export type ImportanceLevel = 'low' | 'medium' | 'high' | 'critical';
+
 export interface StoryOutlineParams {
-  novel_type: string;
+  novel_type: NovelType;
   theme: string;
-  length: 'short' | 'medium' | 'long';
+  length: LengthType;
   constraints?: string[];
-  target_audience?: string;
+  target_audience?: TargetAudience;
+}
+
+export interface CharacterDesignRequest {
+  context: string;
+  roles: string[];
+}
+
+export interface WorldBuildingRequest {
+  story_outline: Record<string, unknown>;
+}
+
+export interface PlotPoint {
+  id: string;
+  title: string;
+  description: string;
+  position: PlotPosition;
+  importance: ImportanceLevel;
+}
+
+export interface CharacterRole {
+  role: 'protagonist' | 'antagonist' | 'supporting' | 'mentor' | 'love_interest';
+  name: string;
+  description: string;
+  keyTraits: string[];
+  background: string;
+  relationships: string[];
 }
 
 export interface StoryOutline {
@@ -17,25 +57,15 @@ export interface StoryOutline {
   worldElements: string[];
   tone: string;
   targetAudience: string;
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt: string | Date;
+  updatedAt: string | Date;
 }
 
-export interface PlotPoint {
-  id: string;
-  title: string;
-  description: string;
-  position: 'beginning' | 'development' | 'climax' | 'ending';
-  importance: 'low' | 'medium' | 'high' | 'critical';
-}
-
-export interface CharacterRole {
-  role: 'protagonist' | 'antagonist' | 'supporting' | 'mentor' | 'love_interest';
-  name: string;
-  description: string;
-  keyTraits: string[];
-  background: string;
-  relationships: string[];
+export interface CharacterArc {
+  current_belief: string;
+  target_truth: string;
+  transformation_steps: Array<Record<string, unknown>>;
+  setbacks: Array<Record<string, unknown>>;
 }
 
 export interface CharacterDesign {
@@ -47,39 +77,6 @@ export interface CharacterDesign {
   keyTraits: string[];
   relationships: Record<string, string>;
   arc: CharacterArc;
-}
-
-export interface CharacterArc {
-  current_belief: string;
-  target_truth: string;
-  transformation_steps: ArcStep[];
-  setbacks: ArcSetback[];
-}
-
-export interface ArcStep {
-  stage: string;
-  description: string;
-  key_events: string[];
-}
-
-export interface ArcSetback {
-  trigger: string;
-  impact: string;
-  resolution: string;
-}
-
-export interface WorldSetting {
-  name: string;
-  description: string;
-  geography: string;
-  social_structure: string;
-  culture: string;
-  technology_magic: string;
-  history: string;
-  core_conflicts: string[];
-  locations: Location[];
-  cultures: Culture[];
-  rules: WorldRule[];
 }
 
 export interface Location {
@@ -104,19 +101,27 @@ export interface WorldRule {
   name: string;
   description: string;
   category: string;
-  importance: 'low' | 'medium' | 'high' | 'critical';
+  importance: ImportanceLevel;
 }
 
-export interface ExtractionResult {
-  characters: Character[];
-  world: WorldSetting;
-  timeline: Timeline;
-  relationships: RelationshipNetwork;
-  metadata: {
-    sourceFile: string;
-    extractionTime: Date;
-    qualityScore: number;
-  };
+export interface WorldSetting {
+  name: string;
+  description: string;
+  geography: string;
+  social_structure: string;
+  culture: string;
+  technology_magic: string;
+  history: string;
+  core_conflicts: string[];
+  locations: Location[];
+  cultures: Culture[];
+  rules: WorldRule[];
+}
+
+export interface Relationship {
+  target_name: string;
+  relationship: string;
+  description: string;
 }
 
 export interface Character {
@@ -129,23 +134,15 @@ export interface Character {
   age?: number;
   gender?: string;
   appearance?: string;
+  occupation?: string;
   abilities: string[];
+  tags: string[];
   relationships: Relationship[];
-  example_messages: string[];
-  importance: 'low' | 'medium' | 'high' | 'critical';
-}
-
-export interface Relationship {
-  target_name: string;
-  relationship: string;
-  description: string;
-}
-
-export interface Timeline {
-  events: TimelineEvent[];
-  start_point?: string;
-  end_point?: string;
-  total_events: number;
+  example_messages?: string[];
+  example_dialogues?: string[];
+  behavior_examples?: string[];
+  source_contexts?: string[];
+  importance: ImportanceLevel;
 }
 
 export interface TimelineEvent {
@@ -155,8 +152,33 @@ export interface TimelineEvent {
   event_type: 'historical' | 'political' | 'cultural' | 'technological' | 'natural' | 'social';
   characters: string[];
   locations: string[];
-  importance: 'low' | 'medium' | 'high' | 'critical';
+  importance: ImportanceLevel;
   date?: string;
+}
+
+export interface Timeline {
+  events: TimelineEvent[];
+  start_point?: string;
+  end_point?: string;
+  total_events: number;
+}
+
+export interface NetworkEdge {
+  source: string;
+  target: string;
+  relationship_type:
+    | 'family'
+    | 'friendship'
+    | 'romantic'
+    | 'professional'
+    | 'conflict'
+    | 'alliance'
+    | 'mentorship'
+    | 'other';
+  description: string;
+  strength: number;
+  status?: 'active' | 'inactive' | 'unknown';
+  evidence?: string[];
 }
 
 export interface RelationshipNetwork {
@@ -165,77 +187,151 @@ export interface RelationshipNetwork {
   total_relationships: number;
 }
 
-export interface NetworkEdge {
-  source: string;
-  target: string;
-  relationship_type: 'family' | 'friendship' | 'romantic' | 'professional' | 'conflict' | 'alliance' | 'mentorship';
-  description: string;
-  strength: number;
-}
-
-export interface ExtractOptions {
-  max_characters?: number;
-  include_timeline?: boolean;
-  include_relationships?: boolean;
-  quality_threshold?: number;
-}
-
-export interface SillyTavernOutput {
-  characters: SillyTavernCharacter[];
-  worldInfo: WorldInfoEntry[];
-  narrator: SillyTavernCharacter;
-  groups: GroupChat[];
-}
-
-export interface SillyTavernCharacter {
-  spec: 'chara_card_v3';
-  spec_version: '3.0';
-  data: {
-    name: string;
-    description: string;
-    personality: string;
-    scenario: string;
-    first_mes: string;
-    mes_example: string;
-    alternate_greetings: string[];
-    tags: string[];
-    creator: string;
-    character_version: string;
+export interface ExtractionResult {
+  characters: Character[];
+  world: WorldSetting;
+  timeline: Timeline;
+  relationships: RelationshipNetwork;
+  metadata?: {
+    sourceFile?: string;
+    extractionTime?: string | Date;
+    qualityScore?: number;
   };
-}
-
-export interface WorldInfoEntry {
-  key: string[];
-  comment: string;
-  content: string;
-  constant: boolean;
-  selective: boolean;
-  order: number;
-}
-
-export interface GroupChat {
-  name: string;
-  members: string[];
-  description: string;
-}
-
-export interface ImportResult {
-  success: boolean;
-  message: string;
-  imported_items: string[];
-}
-
-export interface Conversation {
-  id: string;
-  messages: Message[];
-  metadata: Record<string, any>;
 }
 
 export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
-  timestamp: Date;
+  timestamp: string | Date;
+}
+
+export interface Conversation {
+  id: string;
+  title?: string;
+  messages: Message[];
+  metadata?: Record<string, unknown>;
+  created_at?: string | Date;
+  updated_at?: string | Date;
+}
+
+export interface ChatResponse {
+  conversation_id: string;
+  message: Message;
+  context?: Record<string, unknown>;
+  suggestions: string[];
+}
+
+export interface OpenAIConfig {
+  api_key?: string;
+  base_url?: string;
+  model?: string;
+}
+
+export interface OpenAIModelInfo {
+  id: string;
+  owned_by?: string | null;
+  created?: number | null;
+  supports_chat: boolean;
+}
+
+export interface OpenAIModelListResponse {
+  models: OpenAIModelInfo[];
+  current_model?: string | null;
+  base_url?: string | null;
+  using_default_config: boolean;
+}
+
+export interface Session {
+  id: string;
+  title: string;
+  preview: string;
+  time: string;
+}
+
+export type ContentType =
+  | 'novel'
+  | 'chapter'
+  | 'scene'
+  | 'character'
+  | 'world'
+  | 'timeline'
+  | 'relationship'
+  | 'conversation'
+  | 'outline';
+
+export type ContentStatus = 'draft' | 'review' | 'published' | 'archived' | 'deleted';
+
+export interface ContentMetadata {
+  id: string;
+  title: string;
+  type: ContentType;
+  status: ContentStatus;
+  author?: string;
+  tags: string[];
+  created_at: string;
+  updated_at: string;
+  version: number;
+  parent_id?: string;
+  children_ids?: string[];
+  session_id?: string;
+}
+
+export interface ContentItem {
+  metadata: ContentMetadata;
+  content: string;
+  extracted_data?: Record<string, unknown> | null;
+  stats?: Record<string, unknown> | null;
+  relations?: Record<string, string[]> | null;
+  // Compatibility with older frontend fields.
+  data?: unknown;
+  type?: string;
+}
+
+export interface ContentSearchRequest {
+  query?: string;
+  content_type?: ContentType;
+  content_types?: ContentType[];
+  tags?: string[];
+  status?: ContentStatus;
+  session_id?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ContentSearchResult {
+  items: ContentItem[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type TaskPriority = 'low' | 'medium' | 'high' | 'critical';
+
+export interface AITask {
+  id: string;
+  type: string;
+  status: TaskStatus;
+  priority?: TaskPriority;
+  parameters?: Record<string, unknown>;
+  created_at?: string;
+  started_at?: string;
+  completed_at?: string;
+  result?: Record<string, unknown>;
+  error?: string;
+  progress: number;
+  message: string;
+}
+
+export interface TaskProgress {
+  id: string;
+  type: string;
+  status: string;
+  progress: number;
+  message: string;
+  result?: unknown;
+  error?: string;
 }
 
 export interface QualityReport {
@@ -253,3 +349,9 @@ export interface QualityReport {
 }
 
 export type QualityLevel = 'S' | 'A' | 'B' | 'C' | 'D' | 'F';
+
+export interface ImportResult {
+  success: boolean;
+  message: string;
+  imported_items: string[];
+}

@@ -1,24 +1,20 @@
 """
-提取器层 - 角色、世界书、时间线、关系网络、多窗口提取器
-重构版本：模块化架构，保持向后兼容性
+提取器层 - 统一提取器架构
+
+重构说明：
+- 2026-03-25: 移除了旧的提取器（character_extractor, world_extractor等）
+- 2026-03-25: 统一使用 unified_*_extractor 系列
+- 旧的提取器已备份到 archives/old_extractors_backup/
 """
 
-# 基础提取器（使用新模块化架构）
-from .character_extractor import CharacterExtractor
-from .world_extractor import WorldExtractor
-from .timeline_extractor import TimelineExtractor
-from .relationship_extractor import RelationshipExtractor
+# 统一提取器（新架构 - 批量处理，充分利用上下文）
+from .unified_character_extractor import UnifiedCharacterExtractor
+from .unified_world_extractor import UnifiedWorldExtractor
+from .unified_timeline_extractor import UnifiedTimelineExtractor
+from .unified_relationship_extractor import UnifiedRelationshipExtractor
 from .unified_extractor import UnifiedExtractor
 
-# 多窗口并发提取器（保持向后兼容）
-from .multi_window_orchestrator import (
-    MultiWindowOrchestrator as MultiWindowExtractor,
-    MultiWindowConfig,
-    MultiWindowOrchestrator,
-)
-from .character_extractor import SmartChunker, Chunk
-
-# 新增重构模块
+# 基础接口和配置
 from .base_extractor import (
     BaseExtractor,
     CharacterExtractorInterface,
@@ -27,34 +23,32 @@ from .base_extractor import (
     RelationshipExtractorInterface,
     ExtractionConfig,
     ExtractorFactory,
+    SmartChunker,
+    Chunk,
 )
 
-from .character_extractor import CharacterExtractor as NewCharacterExtractor
-from .world_extractor import WorldExtractor as NewWorldExtractor
-from .timeline_extractor import TimelineExtractor as NewTimelineExtractor
-from .relationship_extractor import RelationshipExtractor as NewRelationshipExtractor
-from .enhanced_character_extractor import EnhancedCharacterExtractor
-from .enhanced_world_extractor import EnhancedWorldExtractor
-from .enhanced_timeline_extractor import EnhancedTimelineExtractor
-from .enhanced_orchestrator import EnhancedMultiWindowOrchestrator
+# 工具类
 from .tavern_converter import TavernConverter
-from .multi_window_orchestrator import (
-    MultiWindowOrchestrator,
-    MultiWindowConfig as NewMultiWindowConfig,
-)
+
+# 为了保持向后兼容，将统一提取器别名导出为原名称
+CharacterExtractor = UnifiedCharacterExtractor
+WorldExtractor = UnifiedWorldExtractor
+TimelineExtractor = UnifiedTimelineExtractor
+RelationshipExtractor = UnifiedRelationshipExtractor
 
 __all__ = [
-    # 基础提取器（使用新模块化架构）
+    # 统一提取器（新架构）
+    "UnifiedCharacterExtractor",
+    "UnifiedWorldExtractor",
+    "UnifiedTimelineExtractor",
+    "UnifiedRelationshipExtractor",
+    "UnifiedExtractor",
+    # 向后兼容别名
     "CharacterExtractor",
     "WorldExtractor",
     "TimelineExtractor",
     "RelationshipExtractor",
-    # 多窗口并发提取器（推荐 - 稳定高效）
-    "MultiWindowExtractor",
-    "MultiWindowConfig",
-    "SmartChunker",
-    "Chunk",
-    # 新增重构模块
+    # 基础接口
     "BaseExtractor",
     "CharacterExtractorInterface",
     "WorldExtractorInterface",
@@ -62,16 +56,8 @@ __all__ = [
     "RelationshipExtractorInterface",
     "ExtractionConfig",
     "ExtractorFactory",
-    "NewCharacterExtractor",
-    "NewWorldExtractor",
-    "NewTimelineExtractor",
-    "NewRelationshipExtractor",
-    "EnhancedCharacterExtractor",
-    "EnhancedWorldExtractor",
-    "EnhancedTimelineExtractor",
-    "EnhancedMultiWindowOrchestrator",
+    "SmartChunker",
+    "Chunk",
+    # 工具
     "TavernConverter",
-    "MultiWindowOrchestrator",
-    "NewMultiWindowConfig",
-    "UnifiedExtractor",
 ]

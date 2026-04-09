@@ -14,7 +14,8 @@ export default function RootLayout({
 }) {
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      {/* suppressHydrationWarning: 防止浏览器扩展（如 Antigravity）注入 class 导致水合错误 */}
+      <body suppressHydrationWarning>{children}</body>
     </html>
   );
 }

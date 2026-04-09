@@ -42,9 +42,16 @@ class ContentDatabaseStorage(BaseStorage):
                     updated_at TIMESTAMP NOT NULL,
                     version INTEGER NOT NULL DEFAULT 1,
                     parent_id TEXT,
-                    children_ids TEXT
+                    children_ids TEXT,
+                    session_id TEXT
                 )
             ''')
+            
+            # 添加 session_id 到现有表的容错机制
+            try:
+                conn.execute('ALTER TABLE content ADD COLUMN session_id TEXT')
+            except Exception:
+                pass
             
             # 创建标签表（多对多关系）
             conn.execute('''
@@ -62,6 +69,7 @@ class ContentDatabaseStorage(BaseStorage):
             conn.execute('CREATE INDEX IF NOT EXISTS idx_content_created ON content (created_at)')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_content_updated ON content (updated_at)')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_content_parent ON content (parent_id)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_content_session ON content (session_id)')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_tags_content ON tags (content_id)')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_tags_tag ON tags (tag)')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_content_title ON content (title)')
@@ -90,7 +98,8 @@ class ContentDatabaseStorage(BaseStorage):
             'updated_at': metadata.updated_at.isoformat(),
             'version': metadata.version,
             'parent_id': metadata.parent_id,
-            'children_ids': json.dumps(metadata.children_ids) if metadata.children_ids else '[]'
+            'children_ids': json.dumps(metadata.children_ids) if metadata.children_ids else '[]',
+            'session_id': metadata.session_id
         }
     
     def _deserialize_metadata(self, data: Dict[str, Any]) -> ContentMetadata:
@@ -106,7 +115,8 @@ class ContentDatabaseStorage(BaseStorage):
             updated_at=datetime.fromisoformat(data['updated_at']),
             version=data.get('version', 1),
             parent_id=data.get('parent_id'),
-            children_ids=json.loads(data.get('children_ids', '[]'))
+            children_ids=json.loads(data.get('children_ids', '[]')),
+            session_id=data.get('session_id')
         )
     
     def _serialize_content_item(self, content_item: ContentItem) -> Dict[str, Any]:
@@ -145,8 +155,8 @@ class ContentDatabaseStorage(BaseStorage):
                     conn.execute('''
                         INSERT OR REPLACE INTO content 
                         (id, title, type, status, author, content, extracted_data, stats, relations, 
-                         created_at, updated_at, version, parent_id, children_ids)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         created_at, updated_at, version, parent_id, children_ids, session_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         content_dict['id'],
                         content_dict['title'],
@@ -161,7 +171,8 @@ class ContentDatabaseStorage(BaseStorage):
                         content_dict['updated_at'],
                         content_dict['version'],
                         content_dict.get('parent_id'),
-                        content_dict.get('children_ids')
+                        content_dict.get('children_ids'),
+                        content_dict.get('session_id')
                     ))
                     
                     # 处理标签
@@ -211,6 +222,21 @@ class ContentDatabaseStorage(BaseStorage):
         except Exception as e:
             print(f"删除内容失败: {e}")
             return False
+
+    async def delete_content_by_session(self, session_id: str) -> int:
+        """物理删除指定会话的所有内容"""
+        try:
+            async with self._lock:
+                with self._get_connection() as conn:
+                    # 获取该 session 的所有 content_id，以便触发 tags 级联（如果没配外键级联）
+                    # 实际上上面 init_db 已经配了 FOREIGN KEY ... ON DELETE CASCADE
+                    cursor = conn.execute('DELETE FROM content WHERE session_id = ?', (session_id,))
+                    count = cursor.rowcount
+                    conn.commit()
+                    return count
+        except Exception as e:
+            print(f"批量删除会话内容失败: {e}")
+            return 0
     
     async def search_content(
         self, 
@@ -218,6 +244,7 @@ class ContentDatabaseStorage(BaseStorage):
         content_type: Optional[ContentType] = None,
         tags: Optional[List[str]] = None,
         status: Optional[ContentStatus] = None,
+        session_id: Optional[str] = None,
         limit: int = 20,
         offset: int = 0
     ) -> Dict[str, Any]:
@@ -235,6 +262,10 @@ class ContentDatabaseStorage(BaseStorage):
                 if status:
                     conditions.append("status = ?")
                     params.append(status.value)
+                
+                if session_id:
+                    conditions.append("session_id = ?")
+                    params.append(session_id)
                 
                 if query:
                     conditions.append("title LIKE ?")
@@ -291,21 +322,27 @@ class ContentDatabaseStorage(BaseStorage):
     async def list_content_by_type(
         self, 
         content_type: ContentType, 
-        status: Optional[ContentStatus] = None
+        status: Optional[ContentStatus] = None,
+        session_id: Optional[str] = None
     ) -> List[ContentItem]:
         """按类型列出内容"""
         try:
             with self._get_connection() as conn:
+                conditions = ["type = ?"]
+                params = [content_type.value]
+                
                 if status:
-                    cursor = conn.execute(
-                        'SELECT * FROM content WHERE type = ? AND status = ? ORDER BY updated_at DESC',
-                        (content_type.value, status.value)
-                    )
-                else:
-                    cursor = conn.execute(
-                        'SELECT * FROM content WHERE type = ? ORDER BY updated_at DESC',
-                        (content_type.value,)
-                    )
+                    conditions.append("status = ?")
+                    params.append(status.value)
+                if session_id:
+                    conditions.append("session_id = ?")
+                    params.append(session_id)
+                
+                where_clause = " WHERE " + " AND ".join(conditions)
+                cursor = conn.execute(
+                    f'SELECT * FROM content{where_clause} ORDER BY updated_at DESC',
+                    tuple(params)
+                )
                 
                 rows = cursor.fetchall()
                 results = []

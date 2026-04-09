@@ -1,383 +1,393 @@
-# NovelForge - 智能小说创作辅助系统
+> [!TIP]
+> **Building in Public**
+>
+> The maintainer builds and maintains oh-my-opencode in real-time with Jobdori, an AI assistant built on a heavily customized fork of OpenClaw.
+> Every feature, every fix, every issue triage — live in our Discord.
+>
+> [![Building in Public](./.github/assets/building-in-public.png)](https://discord.gg/PUwSMR9XNk)
+>
+> [**→ Watch it happen in #building-in-public**](https://discord.gg/PUwSMR9XNk)
 
-<p align="center">
-  <strong>导入小说/文本 → 提取核心要素 → AI对话创作 → 生成新剧情</strong>
-</p>
+> [!NOTE]
+>
+> [![Sisyphus Labs - Sisyphus is the agent that codes like your team.](./.github/assets/sisyphuslabs.png?v=2)](https://sisyphuslabs.ai)
+> > **We're building a fully productized version of Sisyphus to define the future of frontier agents. <br />Join the waitlist [here](https://sisyphuslabs.ai).**
 
-<p align="center">
-  一个基于AI的小说创作辅助工具，支持从现有文本中智能提取角色、关系网络、时间线和世界设定，并通过AI对话形式进行创作。
-</p>
+> [!TIP]
+> Be with us!
+>
+> | [<img alt="Discord link" src="https://img.shields.io/discord/1452487457085063218?color=5865F2&label=discord&labelColor=black&logo=discord&logoColor=white&style=flat-square" width="156px" />](https://discord.gg/PUwSMR9XNk) | Join our [Discord community](https://discord.gg/PUwSMR9XNk) to connect with contributors and fellow `oh-my-opencode` users. |
+> | :-----| :----- |
+> | [<img alt="X link" src="https://img.shields.io/badge/Follow-%40justsisyphus-00CED1?style=flat-square&logo=x&labelColor=black" width="156px" />](https://x.com/justsisyphus) | News and updates for `oh-my-opencode` used to be posted on my X account. <br /> Since it was suspended mistakenly, [@justsisyphus](https://x.com/justsisyphus) now posts updates on my behalf. |
+> | [<img alt="GitHub Follow" src="https://img.shields.io/github/followers/code-yeongyu?style=flat-square&logo=github&labelColor=black&color=24292f" width="156px" />](https://github.com/code-yeongyu) | Follow [@code-yeongyu](https://github.com/code-yeongyu) on GitHub for more projects. |
+
+<!-- <CENTERED SECTION FOR GITHUB DISPLAY> -->
+
+<div align="center">
+
+[![Oh My OpenCode](./.github/assets/hero.jpg)](https://github.com/code-yeongyu/oh-my-openagent#oh-my-opencode)
+
+[![Preview](./.github/assets/omo.png)](https://github.com/code-yeongyu/oh-my-openagent#oh-my-opencode)
+
+
+</div>
+
+> Anthropic [**blocked OpenCode because of us.**](https://x.com/thdxr/status/2010149530486911014) **Yes this is true.**
+> They want you locked in. Claude Code's a nice prison, but it's still a prison.
+>
+> We don't do lock-in here. We ride every model. Claude / Kimi / GLM for orchestration. GPT for reasoning. Minimax for speed. Gemini for creativity.
+> The future isn't picking one winner—it's orchestrating them all. Models get cheaper every month. Smarter every month. No single provider will dominate. We're building for that open market, not their walled gardens.
+
+<div align="center">
+
+[![GitHub Release](https://img.shields.io/github/v/release/code-yeongyu/oh-my-openagent?color=369eff&labelColor=black&logo=github&style=flat-square)](https://github.com/code-yeongyu/oh-my-openagent/releases)
+[![npm downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fohmyopenagent.com%2Fapi%2Fnpm-downloads&style=flat-square)](https://www.npmjs.com/package/oh-my-opencode)
+[![GitHub Contributors](https://img.shields.io/github/contributors/code-yeongyu/oh-my-openagent?color=c4f042&labelColor=black&style=flat-square)](https://github.com/code-yeongyu/oh-my-openagent/graphs/contributors)
+[![GitHub Forks](https://img.shields.io/github/forks/code-yeongyu/oh-my-openagent?color=8ae8ff&labelColor=black&style=flat-square)](https://github.com/code-yeongyu/oh-my-openagent/network/members)
+[![GitHub Stars](https://img.shields.io/github/stars/code-yeongyu/oh-my-openagent?color=ffcb47&labelColor=black&style=flat-square)](https://github.com/code-yeongyu/oh-my-openagent/stargazers)
+[![GitHub Issues](https://img.shields.io/github/issues/code-yeongyu/oh-my-openagent?color=ff80eb&labelColor=black&style=flat-square)](https://github.com/code-yeongyu/oh-my-openagent/issues)
+[![License](https://img.shields.io/badge/license-SUL--1.0-white?labelColor=black&style=flat-square)](https://github.com/code-yeongyu/oh-my-openagent/blob/dev/LICENSE.md)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/code-yeongyu/oh-my-openagent)
+
+[English](README.md) | [한국어](README.ko.md) | [日本語](README.ja.md) | [简体中文](README.zh-cn.md)
+
+</div>
+
+<!-- </CENTERED SECTION FOR GITHUB DISPLAY> -->
+
+## Reviews
+
+> "It made me cancel my Cursor subscription. Unbelievable things are happening in the open source community." - [Arthur Guiot](https://x.com/arthur_guiot/status/2008736347092382053?s=20)
+
+> "If Claude Code does in 7 days what a human does in 3 months, Sisyphus does it in 1 hour. It just works until the task is done. It is a discipline agent." <br/>- B, Quant Researcher
+
+> "Knocked out 8000 eslint warnings with Oh My Opencode, just in a day" <br/>- [Jacob Ferrari](https://x.com/jacobferrari_/status/2003258761952289061)
+
+> "I converted a 45k line tauri app into a SaaS web app overnight using Ohmyopencode and ralph loop. Started with interview me prompt, asked it for ratings and recommendations on the questions. It was amazing to watch it work and to wake up this morning to a mostly working website!" - [James Hargis](https://x.com/hargabyte/status/2007299688261882202)
+
+> "use oh-my-opencode, you will never go back" <br/>- [d0t3ch](https://x.com/d0t3ch/status/2001685618200580503)
+
+> "I haven't really been able to articulate exactly what makes it so great yet, but the development experience has reached a completely different dimension." - [
+苔硯:こけすずり](https://x.com/kokesuzuri/status/2008532913961529372?s=20)
+
+> "Experimenting with open code, oh my opencode and supermemory this weekend to build some minecraft/souls-like abomination."
+> "Asking it to add crouch animations while I go take my post-lunch walk. [Video]" - [MagiMetal](https://x.com/MagiMetal/status/2005374704178373023)
+
+> "You guys should pull this into core and recruit him. Seriously. It's really, really, really good." <br/>- Henning Kilset
+
+> "Hire @yeon_gyu_kim if you can convince him, this dude has revolutionized opencode." <br/>- [mysticaltech](https://x.com/mysticaltech/status/2001858758608376079)
+
+> "Oh My OpenCode Is Actually Insane" - [YouTube - Darren Builds AI](https://www.youtube.com/watch?v=G_Snfh2M41M)
 
 ---
 
-## 📖 项目简介
+# Oh My OpenCode
 
-NovelForge 是一个完整的小说创作辅助生态系统，旨在帮助作者从现有文本中提取核心要素，并通过AI对话形式进行创作。系统支持导入TXT/EPUB/PDF格式的文本，自动提取角色信息、关系网络、剧情时间线和世界设定，并提供类似ChatGPT的对话式创作界面。
+You're juggling Claude Code, Codex, random OSS models. Configuring workflows. Debugging agents.
 
-### 🎯 核心目标
+We did the work. Tested everything. Kept what actually shipped.
 
-实现类似网页AI工具的体验：通过对话形式确认需求，智能调度生成，完整前后端功能。
+Install OmO. Type `ultrawork`. Done.
 
----
 
-## ✨ 项目特性
+## Installation
 
-### 核心功能
+### For Humans
 
-- 📁 **多格式文件导入** - 支持TXT、EPUB、PDF格式
-- 👤 **智能角色提取** - AI驱动的实体识别，自动提取角色信息、性格特征
-- 🔗 **关系网络构建** - 自动分析并映射角色间关系
-- 📅 **时间线提取** - 识别关键事件并整理时序
-- 🌍 **世界设定提取** - 提取地点环境、文化背景、规则体系
-- 💬 **AI对话创作** - 类似ChatGPT的对话式创作界面
-- ✍️ **多模式内容生成** - 角色视角、情节续写、平行宇宙、风格模仿
-- 💾 **内容管理系统** - 项目管理、版本控制、标签分类
-- 📤 **多格式导出** - TXT、PDF、EPUB等
-
-### 技术特性
-
-- 🚀 高性能异步处理
-- 🔄 任务调度系统支持并发
-- 📊 存储容量监控和清理
-- 🛡️ 完善的错误处理机制
-
----
-
-## 🛠 技术栈
-
-### 后端 (novelforge-core)
-
-| 技术 | 版本 | 说明 |
-|------|------|------|
-| Python | >=3.10 | 核心运行时 |
-| FastAPI | >=0.104.0 | Web框架 |
-| Pydantic | >=2.0.0 | 数据验证 |
-| OpenAI | >=1.0.0 | AI接口 |
-| Uvicorn | >=0.24.0 | ASGI服务器 |
-| Click | >=8.0.0 | CLI工具 |
-
-### 前端 (novelforge-core/frontend)
-
-| 技术 | 版本 | 说明 |
-|------|------|------|
-| Next.js | ^15.0.0 | React框架 |
-| React | ^18.3.0 | UI库 |
-| TypeScript | ^5.6.0 | 类型安全 |
-| Tailwind CSS | ^3.4.0 | 样式框架 |
-| Radix UI | - | 无障碍组件库 |
-| Zustand | ^5.0.11 | 状态管理 |
-| React Hook Form | ^7.71.2 | 表单处理 |
-| Zod | ^4.3.6 | 模式验证 |
-
----
-
-## 📁 项目结构
+Copy and paste this prompt to your LLM agent (Claude Code, AmpCode, Cursor, etc.):
 
 ```
-NovelForge/
-├── novelforge-core/                 # 核心模块
-│   ├── novelforge/                  # Python后端包
-│   │   ├── api/                     # API端点
-│   │   ├── base/                    # 基础类
-│   │   ├── cli/                     # 命令行工具
-│   │   ├── content/                 # 内容管理
-│   │   ├── core/                    # 核心功能
-│   │   ├── extractors/              # 提取器模块
-│   │   ├── quality/                 # 质量控制
-│   │   ├── services/                # 服务层
-│   │   ├── storage/                 # 存储层
-│   │   ├── types/                   # 类型定义
-│   │   └── world_tree/              # 世界树模块
-│   ├── frontend/                    # Next.js前端
-│   │   ├── src/
-│   │   │   ├── app/                 # 页面路由
-│   │   │   ├── components/          # UI组件
-│   │   │   ├── lib/                 # 工具库
-│   │   │   └── types/               # 类型定义
-│   │   └── tests/                   # 前端测试
-│   ├── scripts/                     # 工具脚本
-│   └── docs/                        # 文档
-├── docs/                            # 项目文档
-│   ├── analysis/                    # 分析文档
-│   ├── design/                      # 设计文档
-│   ├── guides/                      # 指南
-│   └── overview/                    # 概述
-├── SillyTavern/                     # SillyTavern集成
-├── ARCHITECTURE_OVERVIEW.md         # 架构概览文档
-├── IMPLEMENTATION_STATUS.md          # 实现状态文档
-├── data/                            # 数据目录
-└── archives/                        # 归档文件
+Install and configure oh-my-opencode by following the instructions here:
+https://raw.githubusercontent.com/code-yeongyu/oh-my-openagent/refs/heads/dev/docs/guide/installation.md
 ```
 
----
+Or read the [Installation Guide](docs/guide/installation.md), but seriously, let an agent do it. Humans fat-finger configs.
 
-## 📄 核心文档
+### For LLM Agents
 
-- **[ARCHITECTURE_OVERVIEW.md](ARCHITECTURE_OVERVIEW.md)** - 项目架构概览，展示六层架构和数据流转
-- **[IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md)** - 各模块实现状态和进度跟踪
-
----
-
-## 🚀 安装和运行
-
-### 环境要求
-
-- Python 3.10+
-- Node.js 18+
-- npm 或 pnpm
-
-### 后端安装
+Fetch the installation guide and follow it:
 
 ```bash
-# 进入后端目录
-cd novelforge-core
-
-# 创建虚拟环境 (推荐)
-python -m venv .venv
-.venv\Scripts\activate  # Windows
-# source .venv/bin/activate  # Linux/Mac
-
-# 安装依赖
-pip install -e .
-
-# 或安装开发依赖
-pip install -e ".[dev]"
-
-# 配置环境变量
-cp .env.example .env
-# 编辑 .env 文件，配置 OpenAI API Key 等参数
+curl -s https://raw.githubusercontent.com/code-yeongyu/oh-my-openagent/refs/heads/dev/docs/guide/installation.md
 ```
 
-### 前端安装
-
-```bash
-# 进入前端目录
-cd novelforge-core/frontend
-
-# 安装依赖
-npm install
-# 或使用 pnpm
-# pnpm install
-```
-
-### 启动服务
-
-**启动后端服务：**
-
-```bash
-cd novelforge-core
-
-# 开发模式
-python -m novelforge.api.main
-
-# 或使用 uvicorn
-uvicorn novelforge.api.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-**启动前端服务：**
-
-```bash
-cd novelforge-core/frontend
-
-# 开发模式
-npm run dev
-
-# 生产构建
-npm run build
-npm run start
-```
-
-### 访问应用
-
-- 前端界面: <http://localhost:3000>
-- 后端API: <http://localhost:8000>
-- API文档: <http://localhost:8000/docs>
+**Note**: Use the published package and binary name `oh-my-opencode`. Inside `opencode.json`, the compatibility layer now prefers the plugin entry `oh-my-openagent`, while legacy `oh-my-opencode` entries still load with a warning. Plugin config files still commonly use `oh-my-opencode.json` or `oh-my-opencode.jsonc`, and both legacy and renamed basenames are recognized during the transition.
 
 ---
 
-## 🔌 API端点列表
+## Skip This README
 
-### 核心端点
+We're past the era of reading docs. Just paste this into your agent:
 
-| 方法 | 端点 | 说明 |
-|------|------|------|
-| GET | `/` | API根路径 |
-| GET | `/health` | 健康检查 |
-
-### AI规划端点
-
-| 方法 | 端点 | 说明 |
-|------|------|------|
-| POST | `/api/ai/generate-story-outline` | 生成故事架构 |
-| POST | `/api/ai/design-characters` | 设计角色 |
-| POST | `/api/ai/build-world-setting` | 构建世界设定 |
-
-### 文本提取端点
-
-| 方法 | 端点 | 说明 |
-|------|------|------|
-| POST | `/api/extract/text` | 从文本提取完整信息 |
-| POST | `/api/extract/file` | 从文件提取完整信息 |
-| POST | `/api/extract/characters` | 单独提取角色 |
-| POST | `/api/extract/world-setting` | 单独提取世界设定 |
-| POST | `/api/extract/timeline` | 单独提取时间线 |
-| POST | `/api/extract/relationships` | 单独提取关系网络 |
-
-### AI对话端点
-
-| 方法 | 端点 | 说明 |
-|------|------|------|
-| POST | `/api/chat/start-conversation` | 开始新对话 |
-| POST | `/api/chat/send-message` | 发送消息到AI |
-| GET | `/api/chat/conversation/{conversation_id}` | 获取对话历史 |
-
-### 内容生成端点
-
-| 方法 | 端点 | 说明 |
-|------|------|------|
-| POST | `/api/generate/novel` | 生成新小说内容 |
-| POST | `/api/generate/text` | 通用文本生成 |
-
-### 任务调度端点
-
-| 方法 | 端点 | 说明 |
-|------|------|------|
-| POST | `/api/scheduler/submit` | 提交任务到调度器 |
-| GET | `/api/scheduler/task/{task_id}` | 获取任务状态 |
-| POST | `/api/scheduler/cancel/{task_id}` | 取消任务 |
-| GET | `/api/scheduler/stats` | 获取调度器统计信息 |
-| GET | `/api/scheduler/user-tasks/{user_id}` | 获取用户任务 |
-
-### 内容管理端点
-
-| 方法 | 端点 | 说明 |
-|------|------|------|
-| POST | `/api/content/create` | 创建内容 |
-| GET | `/api/content/{content_id}` | 获取内容 |
-| PUT | `/api/content/{content_id}` | 更新内容 |
-| DELETE | `/api/content/{content_id}` | 删除内容 |
-| POST | `/api/content/search` | 搜索内容 |
-| POST | `/api/content/export` | 导出内容 |
-| GET | `/api/content/stats` | 获取内容统计 |
-| GET | `/api/content/type/{content_type}` | 按类型列出内容 |
-
----
-
-## 📊 开发进度
-
-### 已完成 (约95%)
-
-<details>
-<summary>点击查看详细进度</summary>
-
-#### ✅ 大目标 1: 数据基础设施 (已完成)
-
-- [x] 数据存储系统 (local-storage, indexed-db, storage-manager)
-- [x] 状态管理系统 (zustand stores)
-- [x] 数据模型完善
-- [x] 分层世界树模型
-
-#### ✅ 大目标 2: 智能文本提取 (已完成)
-
-- [x] 文本处理与导入
-- [x] 角色提取系统
-- [x] 角色卡去重和合并机制
-- [x] 剧情要素提取
-- [x] 时间线事件合并优化
-- [x] 世界设定提取
-- [x] 增强世界设定树
-
-#### 🔄 大目标 3: 交互展示系统 (进行中)
-
-- [ ] 角色卡片组件
-- [ ] 角色详情页面
-- [ ] 角色编辑功能
-- [ ] 角色关系图谱
-- [ ] 时间线组件
-- [ ] 情节流程图
-- [ ] 世界设定展示
-
-#### ✅ 大目标 4: AI对话创作 (已完成)
-
-- [x] 对话界面设计
-- [x] 创作需求解析
-- [x] 智能调度系统
-- [x] 创作模式设计
-
-#### ✅ 大目标 5: 内容生成引擎 (已完成)
-
-- [x] 内容生成核心
-- [x] 质量控制机制
-- [x] 生成结果优化
-
-#### ✅ 大目标 6: 内容管理系统 (已完成)
-
-- [x] 内容组织管理
-- [x] 导出与分享
-- [x] 创作过程追踪
-
-</details>
-
-### 技术指标达成
-
-| 指标 | 目标 | 状态 |
-|------|------|------|
-| 提取准确率 | > 85% | ✅ |
-| 生成内容连贯性 | > 90% | ✅ |
-| 系统响应时间 | < 3秒 | ✅ |
-| 文本处理能力 | 10万字 | ✅ |
-| 角色关系网络 | 100+角色 | ✅ |
-| 角色去重准确率 | > 90% | ✅ |
-
----
-
-## 🧪 测试说明
-
-### 后端测试
-
-```bash
-cd novelforge-core
-
-# 运行所有测试
-pytest
-
-# 运行特定测试文件
-pytest test_backend_features.py
-pytest test_text_processing.py
-
-# 详细输出
-pytest -v
-
-# 覆盖率报告
-pytest --cov=novelforge
+```
+Read this and tell me why it's not just another boilerplate: https://raw.githubusercontent.com/code-yeongyu/oh-my-openagent/refs/heads/dev/README.md
 ```
 
-### 前端测试
+## Highlights
 
-```bash
-cd novelforge-core/frontend
+### 🪄 `ultrawork`
 
-# 运行linter
-npm run lint
+You're actually reading this? Wild.
 
-# 类型检查
-npx tsc --noEmit
+Install. Type `ultrawork` (or `ulw`). Done.
+
+Everything below, every feature, every optimization, you don't need to know it. It just works.
+
+Even only with following subscriptions, ultrawork will work well (this project is not affiliated, this is just personal recommendation):
+- [ChatGPT Subscription ($20)](https://chatgpt.com/)
+- [Kimi Code Subscription ($0.99) (*only this month)](https://www.kimi.com/kimiplus/sale)
+- [GLM Coding Plan ($10)](https://z.ai/subscribe)
+- If you are eligible for pay-per-token, using kimi and gemini models won't cost you that much.
+
+|       | Feature                                                  | What it does                                                                                                                                                                                                     |
+| :---: | :------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|   🤖   | **Discipline Agents**                                    | Sisyphus orchestrates Hephaestus, Oracle, Librarian, Explore. A full AI dev team in parallel.                                                                                                                    |
+|   ⚡   | **`ultrawork` / `ulw`**                                  | One word. Every agent activates. Doesn't stop until done.                                                                                                                                                        |
+|   🚪   | **[IntentGate](https://factory.ai/news/terminal-bench)** | Analyzes true user intent before classifying or acting. No more literal misinterpretations.                                                                                                                      |
+|   🔗   | **Hash-Anchored Edit Tool**                              | `LINE#ID` content hash validates every change. Zero stale-line errors. Inspired by [oh-my-pi](https://github.com/can1357/oh-my-pi). [The Harness Problem →](https://blog.can.ac/2026/02/12/the-harness-problem/) |
+|   🛠️   | **LSP + AST-Grep**                                       | Workspace rename, pre-build diagnostics, AST-aware rewrites. IDE precision for agents.                                                                                                                           |
+|   🧠   | **Background Agents**                                    | Fire 5+ specialists in parallel. Context stays lean. Results when ready.                                                                                                                                         |
+|   📚   | **Built-in MCPs**                                        | Exa (web search), Context7 (official docs), Grep.app (GitHub search). Always on.                                                                                                                                 |
+|   🔁   | **Ralph Loop / `/ulw-loop`**                             | Self-referential loop. Doesn't stop until 100% done.                                                                                                                                                             |
+|   ✅   | **Todo Enforcer**                                        | Agent goes idle? System yanks it back. Your task gets done, period.                                                                                                                                              |
+|   💬   | **Comment Checker**                                      | No AI slop in comments. Code reads like a senior wrote it.                                                                                                                                                       |
+|   🖥️   | **Tmux Integration**                                     | Full interactive terminal. REPLs, debuggers, TUIs. All live.                                                                                                                                                     |
+|   🔌   | **Claude Code Compatible**                               | Your hooks, commands, skills, MCPs, and plugins? All work here.                                                                                                                                                  |
+|   🎯   | **Skill-Embedded MCPs**                                  | Skills carry their own MCP servers. No context bloat.                                                                                                                                                            |
+|   📋   | **Prometheus Planner**                                   | Interview-mode strategic planning before any execution.                                                                                                                                                          |
+|   🔍   | **`/init-deep`**                                         | Auto-generates hierarchical `AGENTS.md` files throughout your project. Great for both token efficiency and your agent's performance                                                                              |
+
+### Discipline Agents
+
+<table><tr>
+<td align="center"><img src=".github/assets/sisyphus.png" height="300" /></td>
+<td align="center"><img src=".github/assets/hephaestus.png" height="300" /></td>
+</tr></table>
+
+**Sisyphus** (`claude-opus-4-6` / **`kimi-k2.5`** / **`glm-5`** ) is your main orchestrator. He plans, delegates to specialists, and drives tasks to completion with aggressive parallel execution. He does not stop halfway.
+
+**Hephaestus** (`gpt-5.4`) is your autonomous deep worker. Give him a goal, not a recipe. He explores the codebase, researches patterns, and executes end-to-end without hand-holding. *The Legitimate Craftsman.*
+
+**Prometheus** (`claude-opus-4-6` / **`kimi-k2.5`** / **`glm-5`** ) is your strategic planner. Interview mode: it questions, identifies scope, and builds a detailed plan before a single line of code is touched.
+
+Every agent is tuned to its model's specific strengths. No manual model-juggling. [Learn more →](docs/guide/overview.md)
+
+> Anthropic [blocked OpenCode because of us.](https://x.com/thdxr/status/2010149530486911014) That's why Hephaestus is called "The Legitimate Craftsman." The irony is intentional.
+>
+> We run best on Opus, but Kimi K2.5 + GPT-5.4 already beats vanilla Claude Code. Zero config needed.
+
+### Agent Orchestration
+
+When Sisyphus delegates to a subagent, it doesn't pick a model. It picks a **category**. The category maps automatically to the right model:
+
+| Category             | What it's for                      |
+| :------------------- | :--------------------------------- |
+| `visual-engineering` | Frontend, UI/UX, design            |
+| `deep`               | Autonomous research + execution    |
+| `quick`              | Single-file changes, typos         |
+| `ultrabrain`         | Hard logic, architecture decisions |
+
+Agent says what kind of work. Harness picks the right model. `ultrabrain` now routes to GPT-5.4 xhigh by default. You touch nothing.
+
+### Claude Code Compatibility
+
+You dialed in your Claude Code setup. Good.
+
+Every hook, command, skill, MCP, plugin works here unchanged. Full compatibility, including plugins.
+
+### World-Class Tools for Your Agents
+
+LSP, AST-Grep, Tmux, MCP actually integrated, not duct-taped together.
+
+- **LSP**: `lsp_rename`, `lsp_goto_definition`, `lsp_find_references`, `lsp_diagnostics`. IDE precision for every agent
+- **AST-Grep**: Pattern-aware code search and rewriting across 25 languages
+- **Tmux**: Full interactive terminal. REPLs, debuggers, TUI apps. Your agent stays in session
+- **MCP**: Web search, official docs, GitHub code search. All baked in
+
+### Skill-Embedded MCPs
+
+MCP servers eat your context budget. We fixed that.
+
+Skills bring their own MCP servers. Spin up on-demand, scoped to task, gone when done. Context window stays clean.
+
+### Codes Better. Hash-Anchored Edits
+
+The harness problem is real. Most agent failures aren't the model. It's the edit tool.
+
+> *"None of these tools give the model a stable, verifiable identifier for the lines it wants to change... They all rely on the model reproducing content it already saw. When it can't - and it often can't - the user blames the model."*
+>
+> <br/>- [Can Bölük, The Harness Problem](https://blog.can.ac/2026/02/12/the-harness-problem/)
+
+Inspired by [oh-my-pi](https://github.com/can1357/oh-my-pi), we implemented **Hashline**. Every line the agent reads comes back tagged with a content hash:
+
+```
+11#VK| function hello() {
+22#XJ|   return "world";
+33#MB| }
 ```
 
+The agent edits by referencing those tags. If the file changed since the last read, the hash won't match and the edit is rejected before corruption. No whitespace reproduction. No stale-line errors.
+
+Grok Code Fast 1: **6.7% → 68.3%** success rate. Just from changing the edit tool.
+
+### Deep Initialization. `/init-deep`
+
+Run `/init-deep`. It generates hierarchical `AGENTS.md` files:
+
+```
+project/
+├── AGENTS.md              ← project-wide context
+├── src/
+│   ├── AGENTS.md          ← src-specific context
+│   └── components/
+│       └── AGENTS.md      ← component-specific context
+```
+
+Agents auto-read relevant context. Zero manual management.
+
+### Planning. Prometheus
+
+Complex task? Don't prompt and pray.
+
+`/start-work` calls Prometheus. **Interviews you like a real engineer**, identifies scope and ambiguities, builds a verified plan before touching code. Agent knows what it's building before it starts.
+
+### Skills
+
+Skills aren't just prompts. Each brings:
+
+- Domain-tuned system instructions
+- Embedded MCP servers, on-demand
+- Scoped permissions. Agents stay in bounds
+
+Built-ins: `playwright` (browser automation), `git-master` (atomic commits, rebase surgery), `frontend-ui-ux` (design-first UI).
+
+Add your own: `.opencode/skills/*/SKILL.md` or `~/.config/opencode/skills/*/SKILL.md`.
+
+**Want the full feature breakdown?** See the **[Features Documentation](docs/reference/features.md)** for agents, hooks, tools, MCPs, and everything else in detail.
+
 ---
 
-## 📄 许可证
+> **New to oh-my-opencode?** Read the **[Overview](docs/guide/overview.md)** to understand what you have, or check the **[Orchestration Guide](docs/guide/orchestration.md)** for how agents collaborate.
 
-本项目采用相关开源许可证，详见 `docs/licenses/` 目录。
+## Uninstallation
+
+To remove oh-my-opencode:
+
+1. **Remove the plugin from your OpenCode config**
+
+   Edit `~/.config/opencode/opencode.json` (or `opencode.jsonc`) and remove either `"oh-my-openagent"` or the legacy `"oh-my-opencode"` entry from the `plugin` array:
+
+   ```bash
+   # Using jq
+   jq '.plugin = [.plugin[] | select(. != "oh-my-openagent" and . != "oh-my-opencode")]' \
+       ~/.config/opencode/opencode.json > /tmp/oc.json && \
+       mv /tmp/oc.json ~/.config/opencode/opencode.json
+   ```
+
+2. **Remove configuration files (optional)**
+
+   ```bash
+   # Remove plugin config files recognized during the compatibility window
+   rm -f ~/.config/opencode/oh-my-openagent.jsonc ~/.config/opencode/oh-my-openagent.json \
+         ~/.config/opencode/oh-my-opencode.jsonc ~/.config/opencode/oh-my-opencode.json
+
+   # Remove project config (if exists)
+   rm -f .opencode/oh-my-openagent.jsonc .opencode/oh-my-openagent.json \
+         .opencode/oh-my-opencode.jsonc .opencode/oh-my-opencode.json
+   ```
+
+3. **Verify removal**
+
+   ```bash
+   opencode --version
+   # Plugin should no longer be loaded
+   ```
+
+## Features
+
+Features you'll think should've always existed. Once you use them, you can't go back.
+
+See full [Features Documentation](docs/reference/features.md).
+
+**Quick Overview:**
+- **Agents**: Sisyphus (the main agent), Prometheus (planner), Oracle (architecture/debugging), Librarian (docs/code search), Explore (fast codebase grep), Multimodal Looker
+- **Background Agents**: Run multiple agents in parallel like a real dev team
+- **LSP & AST Tools**: Refactoring, rename, diagnostics, AST-aware code search
+- **Hash-anchored Edit Tool**: `LINE#ID` references validate content before applying every change. Surgical edits, zero stale-line errors
+- **Context Injection**: Auto-inject AGENTS.md, README.md, conditional rules
+- **Claude Code Compatibility**: Full hook system, commands, skills, agents, MCPs
+- **Built-in MCPs**: websearch (Exa), context7 (docs), grep_app (GitHub search)
+- **Session Tools**: List, read, search, and analyze session history
+- **Productivity Features**: Ralph Loop, Todo Enforcer, Comment Checker, Think Mode, and more
+- **Doctor Command**: Built-in diagnostics (`bunx oh-my-opencode doctor`) verify plugin registration, config, models, and environment
+- **Model Fallbacks**: `fallback_models` can mix plain model strings with per-fallback object settings in the same array
+- **File Prompts**: Load prompts from files with `file://` support in agent configurations
+- **Session Recovery**: Automatic recovery from session errors, context window limits, and API failures
+- **Model Setup**: Agent-model matching is built into the [Installation Guide](docs/guide/installation.md#step-5-understand-your-model-setup)
+
+## Configuration
+
+Opinionated defaults, adjustable if you insist.
+
+See [Configuration Documentation](docs/reference/configuration.md).
+
+**Quick Overview:**
+- **Config Locations**: The compatibility layer recognizes both `oh-my-openagent.json[c]` and legacy `oh-my-opencode.json[c]` plugin config files. Existing installs still commonly use the legacy basename.
+- **JSONC Support**: Comments and trailing commas supported
+- **Agents**: Override models, temperatures, prompts, and permissions for any agent
+- **Built-in Skills**: `playwright` (browser automation), `git-master` (atomic commits)
+- **Sisyphus Agent**: Main orchestrator with Prometheus (Planner) and Metis (Plan Consultant)
+- **Background Tasks**: Configure concurrency limits per provider/model
+- **Categories**: Domain-specific task delegation (`visual`, `business-logic`, custom)
+- **Hooks**: 25+ built-in hooks, all configurable via `disabled_hooks`
+- **MCPs**: Built-in websearch (Exa), context7 (docs), grep_app (GitHub search)
+- **LSP**: Full LSP support with refactoring tools
+- **Experimental**: Aggressive truncation, auto-resume, and more
+
+
+## Author's Note
+
+**Want the philosophy?** Read the [Ultrawork Manifesto](docs/manifesto.md).
 
 ---
 
-## 🤝 贡献指南
+I burned through $24K in LLM tokens on personal projects. Tried every tool. Configured everything to death. OpenCode won.
 
-欢迎贡献！请查看相关文档了解如何参与开发。
+Every problem I hit, the fix is baked into this plugin. Install and go.
 
----
+If OpenCode is Debian/Arch, OmO is Ubuntu/[Omarchy](https://omarchy.org/).
 
-<p align="center">
-  <strong>NovelForge</strong> - 让AI助力您的创作之旅
-</p>
+Heavy influence from [AmpCode](https://ampcode.com) and [Claude Code](https://code.claude.com/docs/overview). Features ported, often improved. Still building. It's **Open**Code.
+
+Other harnesses promise multi-model orchestration. We ship it. Stability too. And features that actually work.
+
+I'm this project's most obsessive user:
+- Which model has the sharpest logic?
+- Who's the debugging god?
+- Who writes the best prose?
+- Who dominates frontend?
+- Who owns backend?
+- What's fastest for daily driving?
+- What are competitors shipping?
+
+This plugin is the distillation. Take the best. Got improvements? PRs welcome.
+
+**Stop agonizing over harness choices.**
+**I'll research, steal the best, and ship it here.**
+
+Sounds arrogant? Have a better way? Contribute. You're welcome.
+
+No affiliation with any project/model mentioned. Just personal experimentation.
+
+99% of this project was built with OpenCode. I don't really know TypeScript. **But I personally reviewed and largely rewrote this doc.**
+
+## Loved by professionals at
+
+- [Indent](https://indentcorp.com)
+  - Making Spray - influencer marketing solution, vovushop - crossborder commerce platform, vreview - ai commerce review marketing solution
+- [Google](https://google.com)
+- [Microsoft](https://microsoft.com)
+- [ELESTYLE](https://elestyle.jp)
+  - Making elepay - multi-mobile payment gateway, OneQR - mobile application SaaS for cashless solutions
+
+*Special thanks to [@junhoyeo](https://github.com/junhoyeo) for this amazing hero image.*

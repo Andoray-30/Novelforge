@@ -45,7 +45,7 @@ from ..core.models import (
     Character, WorldSetting as WorldSettingModel, Timeline, RelationshipNetwork,
     CharacterRole as CharacterRoleEnum, RelationshipType, ExtractionResult, TimelineEvent, NetworkEdge
 )
-from ..extractors.enhanced_orchestrator import EnhancedMultiWindowOrchestrator
+from ..extractors import UnifiedExtractor, ExtractionConfig
 from ..services.extraction_service import get_extraction_service, ExtractionService
 # FIXME: 解决 TaskPriority 与 api.types 的同名导出冲突
 from ..services.ai_scheduler import get_ai_scheduler, AITaskScheduler, TaskPriority as SchedulerTaskPriority
@@ -55,7 +55,7 @@ from ..core.config import Config
 from .ai_planning_service import get_ai_planning_service, AIPlanningService
 from ..storage.storage_manager import StorageManager
 from ..content.manager import ContentManager
-from ..content.models import ContentItem, ContentSearchRequest, ContentSearchResult, ContentExportRequest
+from .text_processing import router as text_processing_router
 
 # 全局配置和AI服务
 config = Config.load()
@@ -63,9 +63,9 @@ ai_service = AIService(config)
 ai_planning_service = get_ai_planning_service(ai_service)
 
 # 创建提取器协调器
-extractor_orchestrator = EnhancedMultiWindowOrchestrator(
+extractor_orchestrator = UnifiedExtractor(
     ai_service=ai_service,
-    config=config
+    config=ExtractionConfig()
 )
 
 # 创建存储管理器
@@ -98,6 +98,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 挂载子路由
+app.include_router(text_processing_router, prefix="/api")
 
 # API路由
 
@@ -459,9 +462,29 @@ async def send_message(request: ChatRequest):
        )
 
 
-@app.get("/api/chat/conversation/{conversation_id}", response_model=Conversation)
-async def get_conversation(conversation_id: str):
-   """获取对话历史"""
+@app.get("/api/chat/conversations", response_model=List[Conversation])
+async def get_conversations():
+   """列出所有对话"""
+   try:
+       all_keys = await storage_manager.list_keys()
+       conversation_keys = [key for key in all_keys if key.startswith("conversation_")]
+       conversations = []
+       for key in conversation_keys:
+           loaded = await storage_manager.load(key)
+           if loaded:
+               conversations.append(Conversation(**loaded))
+       conversations.sort(key=lambda item: item.updated_at, reverse=True)
+       return conversations
+   except Exception as e:
+       raise HTTPException(
+           status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+           detail=f"获取对话列表失败: {str(e)}"
+       )
+
+
+@app.delete("/api/chat/conversations/{conversation_id}", response_model=dict)
+async def delete_conversation(conversation_id: str):
+   """删除对话及其关联内容"""
    try:
        loaded = await storage_manager.load(f"conversation_{conversation_id}")
        if not loaded:
@@ -469,15 +492,51 @@ async def get_conversation(conversation_id: str):
                status_code=status.HTTP_404_NOT_FOUND,
                detail="对话不存在"
            )
-       return Conversation(**loaded)
+       await storage_manager.delete(f"conversation_{conversation_id}")
+       await content_manager.delete_by_session(conversation_id)
+       return {
+           "success": True,
+           "message": "对话删除成功"
+       }
+   except HTTPException:
+       raise
    except Exception as e:
        raise HTTPException(
            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-           detail=f"获取对话失败: {str(e)}"
+           detail=f"删除对话失败: {str(e)}"
        )
 
 
-# 新剧情生成相关端点
+@app.post("/api/openai/models", response_model=dict)
+async def list_openai_models(payload: Optional[dict] = None):
+   """列出当前 OpenAI 兼容配置可用的模型"""
+   try:
+       payload = payload or {}
+       openai_config = payload.get("openai_config") or {}
+       runtime_service = ai_service.with_overrides(
+           api_key=openai_config.get("api_key"),
+           base_url=openai_config.get("base_url"),
+           model=openai_config.get("model"),
+       )
+       models = await runtime_service.list_models()
+       return {
+           "models": models,
+           "current_model": runtime_service.config.model,
+           "base_url": runtime_service.config.base_url,
+           "using_default_config": not bool(openai_config),
+       }
+   except ValueError as e:
+       raise HTTPException(
+           status_code=status.HTTP_400_BAD_REQUEST,
+           detail=str(e)
+       )
+   except Exception as e:
+       raise HTTPException(
+           status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+           detail=f"获取模型列表失败: {str(e)}"
+       )
+
+
 @app.post("/api/generate/novel", response_model=NovelGenerationResult)
 async def generate_novel_content(request: NovelGenerationRequest):
    """生成新小说内容"""
@@ -684,68 +743,6 @@ async def create_content(content_item: ContentItem):
        )
 
 
-@app.get("/api/content/{content_id}", response_model=ContentItem)
-async def get_content(content_id: str):
-   """获取内容"""
-   try:
-       content = await content_manager.get_content(content_id)
-       if not content:
-           raise HTTPException(
-               status_code=status.HTTP_404_NOT_FOUND,
-               detail="内容不存在"
-           )
-       return content
-   except Exception as e:
-       raise HTTPException(
-           status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-           detail=f"获取内容失败: {str(e)}"
-       )
-
-
-@app.put("/api/content/{content_id}", response_model=dict)
-async def update_content(content_id: str, content_item: ContentItem):
-   """更新内容"""
-   try:
-       # 设置正确的ID
-       content_item.metadata.id = content_id
-       success = await content_manager.update_content(content_id, content_item)
-       if not success:
-           raise HTTPException(
-               status_code=status.HTTP_404_NOT_FOUND,
-               detail="内容不存在"
-           )
-       return {
-           "success": True,
-           "message": "内容更新成功"
-       }
-   except Exception as e:
-       raise HTTPException(
-           status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-           detail=f"内容更新失败: {str(e)}"
-       )
-
-
-@app.delete("/api/content/{content_id}", response_model=dict)
-async def delete_content(content_id: str):
-   """删除内容"""
-   try:
-       success = await content_manager.delete_content(content_id)
-       if not success:
-           raise HTTPException(
-               status_code=status.HTTP_404_NOT_FOUND,
-               detail="内容不存在"
-           )
-       return {
-           "success": True,
-           "message": "内容删除成功"
-       }
-   except Exception as e:
-       raise HTTPException(
-           status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-           detail=f"内容删除失败: {str(e)}"
-       )
-
-
 @app.post("/api/content/search", response_model=ContentSearchResult)
 async def search_content(request: ContentSearchRequest):
    """搜索内容"""
@@ -805,20 +802,89 @@ async def get_content_stats():
        stats = await content_manager.get_content_stats()
        return stats
    except Exception as e:
+       
        raise HTTPException(
            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
            detail=f"获取内容统计失败: {str(e)}"
        )
 
 
+
+@app.get("/api/content/topology/{session_id}")
+async def get_content_topology(session_id: str):
+    """
+    获取内容的拓扑结构结构，用于世界树可视化
+    """
+    from ..content.models import ContentSearchRequest
+    try:
+        search_req = ContentSearchRequest(session_id=session_id, limit=200)
+        result = await content_manager.search_content(search_req)
+
+        nodes = []
+        edges = []
+        seen_edges = set()
+
+        for item in result.items:
+            node_id = str(item.metadata.id)
+            node_type = str(item.metadata.type)
+            nodes.append({
+                "id": node_id,
+                "type": node_type,
+                "title": item.metadata.title,
+            })
+
+            if item.metadata.parent_id:
+                edge_key = (item.metadata.parent_id, node_id, "parent")
+                if edge_key not in seen_edges:
+                    seen_edges.add(edge_key)
+                    edges.append({
+                        "source": item.metadata.parent_id,
+                        "target": node_id,
+                        "type": "parent"
+                    })
+
+            for child_id in item.metadata.children_ids or []:
+                edge_key = (node_id, child_id, "child")
+                if edge_key not in seen_edges:
+                    seen_edges.add(edge_key)
+                    edges.append({
+                        "source": node_id,
+                        "target": child_id,
+                        "type": "child"
+                    })
+
+            for relation_type, relation_targets in (item.relations or {}).items():
+                for target in relation_targets:
+                    edge_key = (node_id, target, relation_type)
+                    if edge_key not in seen_edges:
+                        seen_edges.add(edge_key)
+                        edges.append({
+                            "source": node_id,
+                            "target": target,
+                            "type": relation_type
+                        })
+
+        return {
+            "nodes": nodes,
+            "edges": edges,
+            "total_nodes": len(nodes),
+            "total_edges": len(edges)
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取拓扑结构失败: {str(e)}"
+        )
+
 @app.get("/api/content/type/{content_type}", response_model=List[ContentItem])
 async def list_content_by_type(
    content_type: str,
-   status: Optional[str] = None
+   content_status: Optional[str] = None,
+   session_id: Optional[str] = None
 ):
    """按类型列出内容"""
    try:
-       contents = await content_manager.list_content_by_type(content_type, status)
+       contents = await content_manager.list_content_by_type(content_type, content_status, session_id)
        return contents
    except Exception as e:
        raise HTTPException(
@@ -828,6 +894,73 @@ async def list_content_by_type(
 
 
 # AI调度系统相关端点
+
+@app.get("/api/content/{content_id}", response_model=ContentItem)
+async def get_content(content_id: str):
+   """获取内容"""
+   try:
+       content = await content_manager.get_content(content_id)
+       if not content:
+           raise HTTPException(
+               status_code=status.HTTP_404_NOT_FOUND,
+               detail="内容不存在"
+           )
+       return content
+   except Exception as e:
+       
+       raise HTTPException(
+           status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+           detail=f"获取内容失败: {str(e)}"
+       )
+
+
+
+@app.put("/api/content/{content_id}", response_model=dict)
+async def update_content(content_id: str, content_item: ContentItem):
+   """更新内容"""
+   try:
+       # 设置正确的ID
+       content_item.metadata.id = content_id
+       success = await content_manager.update_content(content_id, content_item)
+       if not success:
+           raise HTTPException(
+               status_code=status.HTTP_404_NOT_FOUND,
+               detail="内容不存在"
+           )
+       return {
+           "success": True,
+           "message": "内容更新成功"
+       }
+   except Exception as e:
+       raise HTTPException(
+           status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+           detail=f"内容更新失败: {str(e)}"
+       )
+
+
+
+@app.delete("/api/content/{content_id}", response_model=dict)
+async def delete_content(content_id: str):
+   """删除内容"""
+   try:
+       success = await content_manager.delete_content(content_id)
+       if not success:
+           raise HTTPException(
+               status_code=status.HTTP_404_NOT_FOUND,
+               detail="内容不存在"
+           )
+       return {
+           "success": True,
+           "message": "内容删除成功"
+       }
+   except Exception as e:
+       raise HTTPException(
+           status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+           detail=f"内容删除失败: {str(e)}"
+       )
+
+
+
 @app.post("/api/scheduler/submit", response_model=dict)
 async def submit_task(
     task_type: str,
@@ -901,8 +1034,36 @@ async def cancel_task(task_id: str):
         )
 
 
-@app.get("/api/scheduler/stats", response_model=dict)
-async def get_scheduler_stats():
+@app.get("/api/scheduler/active/{session_id}", response_model=List[dict])
+async def get_active_tasks_by_session(session_id: str):
+    """获取指定会话最近的任务"""
+    try:
+        tasks = await ai_scheduler.get_active_tasks_by_session(session_id)
+        return [
+            {
+                "id": task.id,
+                "type": task.type,
+                "status": task.status.value,
+                "priority": task.priority.value,
+                "parameters": task.parameters,
+                "created_at": task.created_at.isoformat(),
+                "started_at": task.started_at.isoformat() if task.started_at else None,
+                "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+                "result": task.result,
+                "error": task.error,
+                "progress": task.progress,
+                "message": task.message,
+                "user_id": task.user_id,
+            }
+            for task in tasks
+        ]
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取会话任务失败: {str(e)}"
+        )
+
+
     """获取调度器统计信息"""
     try:
         stats = ai_scheduler.get_queue_stats()
