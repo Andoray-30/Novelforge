@@ -4,8 +4,11 @@
 import json
 import os
 import logging
+from datetime import date, datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any, Optional, List
+from pydantic import BaseModel
 from .base_storage import BaseStorage
 
 # 设置日志
@@ -36,13 +39,33 @@ class FileStorage(BaseStorage):
             raise ValueError("Invalid key that would cause path traversal")
         
         return file_path
+
+    def _to_jsonable(self, value: Any) -> Any:
+        """将常见 Python/Pydantic 类型转换为可 JSON 序列化的结构。"""
+        if isinstance(value, BaseModel):
+            return value.model_dump(mode='json')
+        if isinstance(value, dict):
+            return {str(key): self._to_jsonable(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self._to_jsonable(item) for item in value]
+        if isinstance(value, tuple):
+            return [self._to_jsonable(item) for item in value]
+        if isinstance(value, set):
+            return [self._to_jsonable(item) for item in value]
+        if isinstance(value, (datetime, date)):
+            return value.isoformat()
+        if isinstance(value, Enum):
+            return value.value
+        if isinstance(value, Path):
+            return str(value)
+        return value
     
     async def save(self, key: str, data: Any) -> bool:
         """保存数据到文件"""
         try:
             file_path = self._get_file_path(key)
             with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+                json.dump(self._to_jsonable(data), f, ensure_ascii=False, indent=2)
             return True
         except Exception as e:
             logger.error(f"保存数据失败 (key: {key}): {e}")

@@ -19,15 +19,18 @@ export interface StoryOutlineParams {
   length: LengthType;
   constraints?: string[];
   target_audience?: TargetAudience;
+  openai_config?: OpenAIConfig;
 }
 
 export interface CharacterDesignRequest {
   context: string;
   roles: string[];
+  openai_config?: OpenAIConfig;
 }
 
 export interface WorldBuildingRequest {
   story_outline: Record<string, unknown>;
+  openai_config?: OpenAIConfig;
 }
 
 export interface PlotPoint {
@@ -189,9 +192,11 @@ export interface RelationshipNetwork {
 
 export interface ExtractionResult {
   characters: Character[];
-  world: WorldSetting;
-  timeline: Timeline;
-  relationships: RelationshipNetwork;
+  world?: WorldSetting | null;
+  timeline?: Timeline | null;
+  relationships?: RelationshipNetwork | null;
+  success?: boolean;
+  errors?: string[];
   metadata?: {
     sourceFile?: string;
     extractionTime?: string | Date;
@@ -283,10 +288,28 @@ export interface ContentItem {
   extracted_data?: Record<string, unknown> | null;
   stats?: Record<string, unknown> | null;
   relations?: Record<string, string[]> | null;
-  // Compatibility with older frontend fields.
-  data?: unknown;
-  type?: string;
 }
+
+export interface ContentWriteMetadata {
+  title: string;
+  type: ContentType;
+  status?: ContentStatus;
+  author?: string;
+  tags?: string[];
+  parent_id?: string;
+  children_ids?: string[];
+  session_id?: string;
+}
+
+export interface ContentCreateRequest {
+  metadata: ContentWriteMetadata;
+  content: string;
+  extracted_data?: Record<string, unknown> | null;
+  stats?: Record<string, unknown> | null;
+  relations?: Record<string, string[]> | null;
+}
+
+export interface ContentUpdateRequest extends ContentCreateRequest {}
 
 export interface ContentSearchRequest {
   query?: string;
@@ -304,6 +327,25 @@ export interface ContentSearchResult {
   total: number;
   page: number;
   limit: number;
+}
+
+export interface ContentTopologyNode {
+  id: string;
+  type: ContentType | string;
+  title: string;
+}
+
+export interface ContentTopologyEdge {
+  source: string;
+  target: string;
+  type: string;
+}
+
+export interface ContentTopology {
+  nodes: ContentTopologyNode[];
+  edges: ContentTopologyEdge[];
+  total_nodes?: number;
+  total_edges?: number;
 }
 
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';

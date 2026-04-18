@@ -63,6 +63,7 @@ class ContentManager:
         # 保持原始创建时间
         content_item.metadata.created_at = existing.metadata.created_at
         content_item.metadata.updated_at = datetime.now()
+        content_item.metadata.version = existing.metadata.version + 1
         
         if self.use_database:
             # 使用数据库存储

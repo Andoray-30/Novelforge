@@ -55,6 +55,31 @@ class ContentItem(BaseModel):
     relations: Optional[Dict[str, List[str]]] = Field(default=None, description="关系信息")
 
 
+class ContentWriteMetadata(BaseModel):
+    """鐢ㄤ簬鍒涘缓/鏇存柊鐨勫唴瀹瑰厓鏁版嵁"""
+    title: str = Field(..., description="鍐呭鏍囬")
+    type: ContentType = Field(..., description="鍐呭绫诲瀷")
+    status: ContentStatus = Field(default=ContentStatus.DRAFT, description="鍐呭鐘舵€?")
+    author: Optional[str] = Field(default=None, description="浣滆€?")
+    tags: List[str] = Field(default_factory=list, description="鏍囩")
+    parent_id: Optional[str] = Field(default=None, description="鐖跺唴瀹笽D")
+    children_ids: List[str] = Field(default_factory=list, description="瀛愬唴瀹笽D鍒楄〃")
+    session_id: Optional[str] = Field(default=None, description="鎵€缁戝畾鐨勪細璇?椤圭洰ID")
+
+
+class ContentCreateRequest(BaseModel):
+    """鍐呭鍒涘缓璇锋眰"""
+    metadata: ContentWriteMetadata = Field(..., description="鍐呭鍏冩暟鎹?")
+    content: str = Field(default="", description="鍐呭姝ｆ枃")
+    extracted_data: Optional[Dict[str, Any]] = Field(default=None, description="缁撴瀯鍖栨暟鎹?")
+    stats: Optional[Dict[str, Any]] = Field(default=None, description="缁熻淇℃伅")
+    relations: Optional[Dict[str, List[str]]] = Field(default=None, description="鍏崇郴淇℃伅")
+
+
+class ContentUpdateRequest(ContentCreateRequest):
+    """鍐呭鏇存柊璇锋眰"""
+
+
 class ContentSearchRequest(BaseModel):
     """内容搜索请求"""
     # TODO: 将 query 改为 Optional，支持纯 tags 过滤时不传 query 的场景

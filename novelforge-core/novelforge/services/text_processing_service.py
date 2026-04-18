@@ -111,7 +111,7 @@ class TextProcessingService:
         """读取TXT文件"""
         try:
             # 尝试不同的编码格式
-            encodings = ['utf-8', 'gbk', 'gb2312', 'latin-1']
+            encodings = ['utf-8-sig', 'utf-8', 'gb18030', 'gbk', 'gb2312', 'utf-16', 'latin-1']
             
             for encoding in encodings:
                 try:

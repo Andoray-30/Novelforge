@@ -1,153 +1,134 @@
-'use client'
+'use client';
 
-import * as React from 'react'
-import Link from 'next/link'
-import { cn } from '@/lib/utils'
-import { Menu, X, BookOpen } from 'lucide-react'
+import type { ReactNode } from 'react';
+import Link from 'next/link';
+import { BookOpen, FolderKanban, Menu, Plus } from 'lucide-react';
+import { cn } from '@/lib/utils';
+
+type ProjectOption = {
+  id: string;
+  title: string;
+};
 
 export interface AppHeaderProps {
-  className?: string
-  title?: string
-  onMenuClick?: () => void
-  showMenuButton?: boolean
-  children?: React.ReactNode
+  className?: string;
+  title?: string;
+  description?: string;
+  currentSessionTitle?: string | null;
+  currentSessionId?: string | null;
+  projects?: ProjectOption[];
+  onProjectChange?: (id: string) => void;
+  onCreateProject?: () => void;
+  onMenuClick?: () => void;
+  showMenuButton?: boolean;
+  actions?: ReactNode;
 }
 
-export function AppHeader({ 
-  className, 
-  title = 'NovelForge', 
-  onMenuClick, 
+export function AppHeader({
+  className,
+  title = 'NovelForge',
+  description,
+  currentSessionTitle,
+  currentSessionId,
+  projects = [],
+  onProjectChange,
+  onCreateProject,
+  onMenuClick,
   showMenuButton = true,
-  children 
+  actions,
 }: AppHeaderProps) {
-  const [isMenuOpen, setIsMenuOpen] = React.useState(false)
-
-  const handleMenuClick = () => {
-    setIsMenuOpen(!isMenuOpen)
-    onMenuClick?.()
-  }
-
   return (
-    <header className={cn(
-      "bg-white border-b border-gray-200 shadow-sm",
-      className
-    )}>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
-          {/* Left Section */}
-          <div className="flex items-center gap-4">
-            {showMenuButton && (
-              <button
-                onClick={handleMenuClick}
-                className="p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500 lg:hidden"
-                aria-label="打开菜单"
-              >
-                {isMenuOpen ? (
-                  <X className="h-6 w-6" />
-                ) : (
-                  <Menu className="h-6 w-6" />
-                )}
-              </button>
-            )}
-            
-            <Link href="/" className="flex items-center gap-2">
-              <div className="flex items-center justify-center w-8 h-8 bg-blue-600 rounded-lg">
-                <BookOpen className="h-5 w-5 text-white" />
-              </div>
-              <h1 className="text-xl font-bold text-gray-900">{title}</h1>
-            </Link>
-          </div>
-
-          {/* Center Section */}
-          {children && (
-            <div className="hidden lg:flex items-center justify-center flex-1">
-              {children}
-            </div>
-          )}
-
-          {/* Right Section */}
-          <div className="flex items-center gap-4">
-            {/* Search */}
-            <div className="hidden md:block">
-              <div className="relative">
-                <input
-                  type="text"
-                  placeholder="搜索..."
-                  className="w-64 pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <svg className="h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
-                </div>
-              </div>
-            </div>
-
-            {/* Notifications */}
-            <button className="p-2 text-gray-400 hover:text-gray-500 hover:bg-gray-100 rounded-lg relative">
-              <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-5 5v-5zM9 7h6m0 0v6m0-6L9 13" />
-              </svg>
-              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
-                3
-              </span>
+    <header
+      className={cn(
+        'sticky top-0 z-30 border-b border-white/10 bg-[rgba(9,9,11,0.82)] backdrop-blur-md',
+        className
+      )}
+    >
+      <div className="flex h-16 items-center justify-between gap-4 px-4 sm:px-6">
+        <div className="flex min-w-0 items-center gap-4">
+          {showMenuButton ? (
+            <button
+              onClick={onMenuClick}
+              className="rounded-lg border border-white/10 p-2 text-zinc-300 transition-colors hover:bg-white/5 lg:hidden"
+              aria-label="打开导航"
+            >
+              <Menu className="h-5 w-5" />
             </button>
+          ) : null}
 
-            {/* User Menu */}
-            <div className="relative">
-              <button className="flex items-center gap-2 p-2 rounded-lg hover:bg-gray-100">
-                <div className="w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center">
-                  <span className="text-sm font-medium text-gray-600">U</span>
-                </div>
-                <span className="hidden md:block text-sm font-medium text-gray-700">用户</span>
-              </button>
+          <Link href="/" className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-500 text-white shadow-lg shadow-violet-500/20">
+              <BookOpen className="h-5 w-5" />
             </div>
+            <div className="hidden sm:block">
+              <div className="text-[11px] uppercase tracking-[0.24em] text-zinc-500">NovelForge</div>
+              <div className="text-sm font-semibold text-white">工作区</div>
+            </div>
+          </Link>
+
+          <div className="hidden h-8 w-px bg-white/10 md:block" />
+
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold text-white">{title}</div>
+            {description ? (
+              <div className="hidden truncate text-xs text-zinc-400 md:block">{description}</div>
+            ) : null}
           </div>
         </div>
 
-        {/* Mobile Menu */}
-        {isMenuOpen && (
-          <div className="lg:hidden">
-            <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3 border-t border-gray-200">
-              <Link
-                href="/"
-                className="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-50"
-                onClick={() => setIsMenuOpen(false)}
+        <div className="flex items-center gap-3">
+          {projects.length > 0 ? (
+            <div className="hidden items-center gap-2 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-2 py-1.5 text-xs text-emerald-100 md:flex">
+              <FolderKanban className="ml-1 h-4 w-4 flex-shrink-0" />
+              <select
+                value={currentSessionId ?? ''}
+                onChange={(event) => {
+                  if (event.target.value && onProjectChange) {
+                    onProjectChange(event.target.value);
+                  }
+                }}
+                className="max-w-56 truncate bg-transparent text-xs font-medium text-emerald-50 outline-none"
+                aria-label="切换当前项目"
               >
-                首页
-              </Link>
-              <Link
-                href="/ai-planning"
-                className="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-50"
-                onClick={() => setIsMenuOpen(false)}
-              >
-                AI规划
-              </Link>
-              <Link
-                href="/characters"
-                className="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-50"
-                onClick={() => setIsMenuOpen(false)}
-              >
-                角色管理
-              </Link>
-              <Link
-                href="/world"
-                className="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-50"
-                onClick={() => setIsMenuOpen(false)}
-              >
-                世界设定
-              </Link>
-              <Link
-                href="/editor"
-                className="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-50"
-                onClick={() => setIsMenuOpen(false)}
-              >
-                小说编辑
-              </Link>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id} className="bg-zinc-950 text-zinc-100">
+                    {project.title}
+                  </option>
+                ))}
+              </select>
+              {onCreateProject ? (
+                <button
+                  type="button"
+                  onClick={onCreateProject}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-emerald-50 transition-colors hover:bg-white/10"
+                  aria-label="新建项目"
+                  title="新建项目"
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              ) : null}
             </div>
-          </div>
-        )}
+          ) : currentSessionTitle ? (
+            <div className="hidden items-center gap-2 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-100 md:flex">
+              <FolderKanban className="h-4 w-4" />
+              <span className="max-w-56 truncate">{currentSessionTitle}</span>
+            </div>
+          ) : (
+            <div className="hidden rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-zinc-400 md:block">
+              当前没有激活项目
+            </div>
+          )}
+
+          {actions}
+
+          <Link
+            href="/settings"
+            className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:bg-white/10"
+          >
+            设置
+          </Link>
+        </div>
       </div>
     </header>
-  )
+  );
 }

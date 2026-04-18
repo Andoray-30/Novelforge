@@ -1,16 +1,16 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { CSSProperties } from 'react';
-import { Check, Cpu, Globe, KeyRound, Loader2, RefreshCw, X } from 'lucide-react';
+import { Check, Cpu, Globe, KeyRound, Loader2, RefreshCw, ShieldCheck, X } from 'lucide-react';
 import { openAIService } from '@/lib/api';
+import { hasOpenAIConfig, normalizeOpenAIConfig, type OpenAIConfigState } from '@/lib/openai-config';
 import type { OpenAIConfig, OpenAIModelInfo } from '@/types';
 
 interface OpenAIConfigPanelProps {
   open: boolean;
-  value?: OpenAIConfig;
+  value?: OpenAIConfigState;
   onOpenChange: (open: boolean) => void;
-  onApply: (config: OpenAIConfig) => void;
+  onApply: (state: OpenAIConfigState) => void;
 }
 
 interface DraftConfig {
@@ -19,37 +19,33 @@ interface DraftConfig {
   model: string;
 }
 
-function toDraft(value?: OpenAIConfig): DraftConfig {
+function toDraft(value?: OpenAIConfigState): DraftConfig {
   return {
-    api_key: value?.api_key ?? '',
-    base_url: value?.base_url ?? '',
-    model: value?.model ?? '',
+    api_key: value?.config.api_key ?? '',
+    base_url: value?.config.base_url ?? '',
+    model: value?.config.model ?? '',
   };
 }
 
-function normalizeDraft(draft: DraftConfig): OpenAIConfig | undefined {
-  const normalized: OpenAIConfig = {};
-  const apiKey = draft.api_key.trim();
-  const baseUrl = draft.base_url.trim();
-  const model = draft.model.trim();
-
-  if (apiKey) normalized.api_key = apiKey;
-  if (baseUrl) normalized.base_url = baseUrl;
-  if (model) normalized.model = model;
-
-  return Object.keys(normalized).length > 0 ? normalized : undefined;
+function normalizeDraft(draft: DraftConfig): OpenAIConfig {
+  return normalizeOpenAIConfig(draft);
 }
 
 function getSuggestedModelId(models: OpenAIModelInfo[], currentModel?: string | null, draftModel?: string): string {
   const modelIds = new Set(models.map((item) => item.id));
-  if (draftModel && modelIds.has(draftModel)) return draftModel;
-  if (currentModel && modelIds.has(currentModel)) return currentModel;
+  if (draftModel && modelIds.has(draftModel)) {
+    return draftModel;
+  }
+  if (currentModel && modelIds.has(currentModel)) {
+    return currentModel;
+  }
   const firstChatModel = models.find((item) => item.supports_chat);
   return firstChatModel?.id ?? models[0]?.id ?? draftModel ?? '';
 }
 
 export function OpenAIConfigPanel({ open, value, onOpenChange, onApply }: OpenAIConfigPanelProps) {
   const [draft, setDraft] = useState<DraftConfig>(() => toDraft(value));
+  const [overrideEnabled, setOverrideEnabled] = useState(value?.enabled ?? false);
   const [models, setModels] = useState<OpenAIModelInfo[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
@@ -57,14 +53,18 @@ export function OpenAIConfigPanel({ open, value, onOpenChange, onApply }: OpenAI
   const [usingDefaultConfig, setUsingDefaultConfig] = useState(false);
 
   const normalizedDraft = useMemo(() => normalizeDraft(draft), [draft]);
+  const hasDraftConfig = useMemo(() => hasOpenAIConfig(normalizedDraft), [normalizedDraft]);
   const selectableModels = useMemo(() => {
     const chatModels = models.filter((item) => item.supports_chat);
     return chatModels.length > 0 ? chatModels : models;
   }, [models]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      return;
+    }
     setDraft(toDraft(value));
+    setOverrideEnabled(value?.enabled ?? false);
     setModels([]);
     setModelError(null);
     setResolvedBaseUrl(null);
@@ -76,7 +76,7 @@ export function OpenAIConfigPanel({ open, value, onOpenChange, onApply }: OpenAI
     setModelError(null);
 
     try {
-      const result = await openAIService.listModels(normalizedDraft);
+      const result = await openAIService.listModels(hasDraftConfig ? normalizedDraft : undefined);
       const nextModels = result.models || [];
       setModels(nextModels);
       setResolvedBaseUrl(result.base_url ?? null);
@@ -88,17 +88,20 @@ export function OpenAIConfigPanel({ open, value, onOpenChange, onApply }: OpenAI
       }
     } catch (error) {
       setModels([]);
-      setModelError(error instanceof Error ? error.message : '获取模型失败。');
+      setModelError(error instanceof Error ? error.message : '获取模型列表失败，请检查配置后重试。');
     } finally {
       setIsLoadingModels(false);
     }
-  }, [draft.model, normalizedDraft]);
+  }, [draft.model, hasDraftConfig, normalizedDraft]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      return;
+    }
+
     const timeoutId = window.setTimeout(() => {
       void refreshModels();
-    }, 550);
+    }, 400);
 
     return () => window.clearTimeout(timeoutId);
   }, [open, draft.api_key, draft.base_url, refreshModels]);
@@ -108,410 +111,209 @@ export function OpenAIConfigPanel({ open, value, onOpenChange, onApply }: OpenAI
   }
 
   return (
-    <div style={overlayStyle} onClick={() => onOpenChange(false)}>
-      <div style={panelStyle} onClick={(event) => event.stopPropagation()}>
-        <div style={headerStyle}>
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 p-4 backdrop-blur-md"
+      onClick={() => onOpenChange(false)}
+    >
+      <div
+        className="max-h-[calc(100vh-24px)] w-full max-w-[560px] overflow-y-auto rounded-3xl border border-white/10 bg-[linear-gradient(180deg,rgba(18,20,28,0.98),rgba(11,13,18,0.98))] shadow-[0_30px_90px_rgba(0,0,0,0.45)]"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 px-6 pb-4 pt-6">
           <div>
-            <div style={eyebrowStyle}>AI 连接配置</div>
-            <h2 style={titleStyle}>OpenAI 兼容 API 配置</h2>
-            <p style={subtitleStyle}>
-              可为当前页面配置 API Key、Base URL 和模型，不会修改后端 `.env` 文件。
+            <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">AI 连接配置</div>
+            <h2 className="mt-2 text-3xl font-black text-white">OpenAI 兼容 API 配置</h2>
+            <p className="mt-3 max-w-xl text-sm leading-6 text-zinc-400">
+              这里保存的是浏览器本地覆盖配置。开启后，当前浏览器会优先使用这里的 API Key、Base URL 和模型；
+              关闭后，则回退到后端 `.env` 默认配置。
             </p>
           </div>
-          <button onClick={() => onOpenChange(false)} style={closeButtonStyle} title="关闭">
+          <button
+            onClick={() => onOpenChange(false)}
+            className="rounded-2xl border border-white/10 p-3 text-zinc-400 transition hover:bg-white/5 hover:text-white"
+            title="关闭"
+          >
             <X size={16} />
           </button>
         </div>
 
-        <div style={heroCardStyle}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={heroIconWrapStyle}>
-              <Cpu size={18} />
+        <div className="px-6">
+          <div className="rounded-3xl border border-indigo-400/20 bg-indigo-500/10 p-5">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-500/20 text-indigo-100">
+                  <Cpu size={20} />
+                </div>
+                <div>
+                  <div className="text-lg font-semibold text-white">{draft.model.trim() || '未指定模型'}</div>
+                  <div className="text-sm text-zinc-400">
+                    {resolvedBaseUrl || draft.base_url.trim() || '将沿用后端默认 Base URL'}
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs text-zinc-200">
+                {overrideEnabled && hasDraftConfig ? '当前使用浏览器覆盖配置' : '当前使用后端默认配置'}
+              </div>
             </div>
+          </div>
+
+          <div className="mt-5 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 p-4 text-sm text-emerald-100">
+            <div className="flex items-center gap-2 font-semibold">
+              <ShieldCheck size={16} />
+              浏览器覆盖是独立开关
+            </div>
+            <p className="mt-2 leading-6 text-emerald-100/85">
+              如果你希望继续使用前端里保存的模型和网关，请保持开关开启；如果只想临时回退到后端 `.env`，直接关闭开关即可，
+              不需要删除你已经保存的配置。
+            </p>
+          </div>
+
+          <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className="text-sm font-semibold text-white">启用浏览器覆盖配置</div>
+                <div className="mt-1 text-sm text-zinc-400">
+                  启用后，本浏览器会优先使用下方配置向后端发起请求。
+                </div>
+              </div>
+              <input
+                type="checkbox"
+                checked={overrideEnabled}
+                onChange={(event) => setOverrideEnabled(event.target.checked)}
+                className="h-5 w-5"
+              />
+            </div>
+          </div>
+
+          <div className="mt-5 space-y-5 pb-6">
             <div>
-              <div style={{ color: '#f5f7fb', fontSize: 15, fontWeight: 600 }}>
-                {draft.model.trim() || '当前未选择模型'}
-              </div>
-              <div style={{ color: 'rgba(245, 247, 251, 0.72)', fontSize: 12 }}>
-                {resolvedBaseUrl || draft.base_url.trim() || '将使用后端默认 OpenAI Base URL'}
-              </div>
-            </div>
-          </div>
-          <div style={heroBadgeStyle}>
-            {usingDefaultConfig && !draft.api_key.trim() ? '后端默认配置' : '当前页面自定义配置'}
-          </div>
-        </div>
-
-        <div style={bodyStyle}>
-          <div style={fieldGroupStyle}>
-            <label style={labelStyle}>
-              <KeyRound size={14} />
-              API Key
-            </label>
-            <input
-              type="password"
-              value={draft.api_key}
-              onChange={(event) => setDraft((current) => ({ ...current, api_key: event.target.value }))}
-              placeholder="sk-... 或兼容平台 Key"
-              style={inputStyle}
-              autoComplete="off"
-            />
-            <div style={helpTextStyle}>
-              仅在当前浏览器上下文保存，用于本次前端请求。
-            </div>
-          </div>
-
-          <div style={fieldGroupStyle}>
-            <label style={labelStyle}>
-              <Globe size={14} />
-              Base URL
-            </label>
-            <input
-              type="text"
-              value={draft.base_url}
-              onChange={(event) => setDraft((current) => ({ ...current, base_url: event.target.value }))}
-              placeholder="https://api.openai.com/v1"
-              style={inputStyle}
-            />
-            <div style={helpTextStyle}>
-              留空则沿用后端默认 Base URL。
-            </div>
-          </div>
-
-          <div style={fieldGroupStyle}>
-            <div style={inlineHeaderStyle}>
-              <label style={labelStyle}>
-                <Cpu size={14} />
-                已探测模型
+              <label className="mb-2 flex items-center gap-2 text-sm font-medium text-zinc-200">
+                <KeyRound size={14} />
+                API Key
               </label>
-              <button
-                onClick={() => void refreshModels()}
-                style={secondaryButtonStyle}
-                disabled={isLoadingModels}
-                type="button"
-              >
-                {isLoadingModels ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                {isLoadingModels ? '加载中...' : '刷新'}
-              </button>
+              <input
+                type="password"
+                value={draft.api_key}
+                onChange={(event) => setDraft((current) => ({ ...current, api_key: event.target.value }))}
+                placeholder="sk-... 或兼容平台密钥"
+                autoComplete="off"
+                className="w-full rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white outline-none transition focus:border-indigo-400/60"
+              />
+              <p className="mt-2 text-xs text-zinc-500">仅保存在当前浏览器，用于本次前端请求覆盖。</p>
             </div>
 
-            {selectableModels.length > 0 ? (
-              <div style={modelListStyle}>
-                {selectableModels.map((item) => {
-                  const isActive = item.id === draft.model;
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => setDraft((current) => ({ ...current, model: item.id }))}
-                      style={{
-                        ...modelItemStyle,
-                        borderColor: isActive ? 'rgba(109,124,255,0.62)' : 'rgba(255,255,255,0.08)',
-                        background: isActive ? 'rgba(109,124,255,0.2)' : 'rgba(255,255,255,0.02)',
-                        color: isActive ? '#f5f7ff' : 'rgba(233,238,249,0.86)',
-                      }}
-                    >
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.id}</span>
-                      {isActive ? <Check size={14} /> : null}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : (
-              <div style={emptyStateStyle}>
-                {isLoadingModels ? '正在探测可用模型...' : '暂未获取到模型，你也可以手动输入模型 ID。'}
-              </div>
-            )}
+            <div>
+              <label className="mb-2 flex items-center gap-2 text-sm font-medium text-zinc-200">
+                <Globe size={14} />
+                基础 URL
+              </label>
+              <input
+                type="text"
+                value={draft.base_url}
+                onChange={(event) => setDraft((current) => ({ ...current, base_url: event.target.value }))}
+                placeholder="https://api.openai.com/v1"
+                className="w-full rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white outline-none transition focus:border-indigo-400/60"
+              />
+              <p className="mt-2 text-xs text-zinc-500">留空时会沿用后端默认 Base URL。</p>
+            </div>
 
-            <input
-              type="text"
-              value={draft.model}
-              onChange={(event) => setDraft((current) => ({ ...current, model: event.target.value }))}
-              placeholder="例如：gpt-4.1、gpt-4o-mini、deepseek-chat"
-              style={inputStyle}
-            />
-
-            {modelError ? (
-              <div style={errorBoxStyle}>{modelError}</div>
-            ) : (
-              <div style={successBoxStyle}>
-                {models.length > 0
-                  ? `已加载 ${models.length} 个模型，当前展示 ${selectableModels.length} 个可对话模型。`
-                  : '填写配置后会自动探测模型列表，也可直接手动输入模型 ID。'}
+            <div>
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <label className="flex items-center gap-2 text-sm font-medium text-zinc-200">
+                  <Cpu size={14} />
+                  已探测模型
+                </label>
+                <button
+                  onClick={() => void refreshModels()}
+                  type="button"
+                  disabled={isLoadingModels}
+                  className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-sm text-zinc-200 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isLoadingModels ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                  {isLoadingModels ? '刷新中...' : '刷新'}
+                </button>
               </div>
-            )}
+
+              {selectableModels.length > 0 ? (
+                <div className="max-h-64 space-y-2 overflow-y-auto rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+                  {selectableModels.map((item) => {
+                    const isActive = item.id === draft.model;
+
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => setDraft((current) => ({ ...current, model: item.id }))}
+                        className={[
+                          'flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left text-sm transition',
+                          isActive
+                            ? 'border-indigo-400/60 bg-indigo-500/20 text-white'
+                            : 'border-white/10 bg-transparent text-zinc-300 hover:bg-white/[0.04]',
+                        ].join(' ')}
+                      >
+                        <span className="truncate">{item.id}</span>
+                        {isActive ? <Check size={14} /> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-4 py-5 text-sm text-zinc-400">
+                  {isLoadingModels ? '正在探测可用模型...' : '暂时没有拿到模型列表，你也可以直接手动输入模型 ID。'}
+                </div>
+              )}
+
+              <input
+                type="text"
+                value={draft.model}
+                onChange={(event) => setDraft((current) => ({ ...current, model: event.target.value }))}
+                placeholder="例如：qwen3.6-plus、gemini-3-flash-preview、gemini-2.5-flash"
+                className="mt-3 w-full rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white outline-none transition focus:border-indigo-400/60"
+              />
+
+              {modelError ? (
+                <div className="mt-3 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                  {modelError}
+                </div>
+              ) : (
+                <div className="mt-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+                  {models.length > 0
+                    ? `已载入 ${models.length} 个模型，可聊天模型 ${selectableModels.length} 个。`
+                    : usingDefaultConfig
+                      ? '当前显示的是后端默认配置对应的模型列表。'
+                      : '填写配置后会自动探测模型列表，也可以直接手动输入模型 ID。'}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
-        <div style={footerStyle}>
+        <div className="flex items-center justify-between gap-3 border-t border-white/10 px-6 py-5">
           <button
             type="button"
             onClick={() => {
-              onApply({});
+              onApply({ enabled: false, config: {} });
               onOpenChange(false);
             }}
-            style={ghostButtonStyle}
+            className="rounded-full border border-white/10 bg-white/[0.03] px-4 py-2 text-sm text-zinc-200 transition hover:bg-white/[0.08]"
           >
-            恢复后端默认
+            清空本地配置
           </button>
           <button
             type="button"
             onClick={() => {
-              onApply(normalizedDraft ?? {});
+              onApply({
+                enabled: overrideEnabled && hasDraftConfig,
+                config: normalizedDraft,
+              });
               onOpenChange(false);
             }}
-            style={primaryButtonStyle}
+            className="rounded-full bg-indigo-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-indigo-400"
           >
-            应用到当前界面
+            保存当前配置
           </button>
         </div>
       </div>
     </div>
   );
 }
-
-const overlayStyle: CSSProperties = {
-  position: 'fixed',
-  inset: 0,
-  background: 'rgba(5, 8, 16, 0.72)',
-  backdropFilter: 'blur(12px)',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  padding: 16,
-  zIndex: 200,
-};
-
-const panelStyle: CSSProperties = {
-  width: 'min(560px, calc(100vw - 24px))',
-  maxHeight: 'min(780px, calc(100vh - 24px))',
-  overflowY: 'auto',
-  borderRadius: 24,
-  background: 'linear-gradient(180deg, rgba(18, 20, 28, 0.98), rgba(11, 13, 18, 0.98))',
-  border: '1px solid rgba(255,255,255,0.08)',
-  boxShadow: '0 30px 90px rgba(0,0,0,0.45)',
-  color: 'var(--text-primary)',
-};
-
-const headerStyle: CSSProperties = {
-  display: 'flex',
-  justifyContent: 'space-between',
-  alignItems: 'flex-start',
-  gap: 12,
-  padding: '24px 24px 18px',
-};
-
-const eyebrowStyle: CSSProperties = {
-  fontSize: 11,
-  letterSpacing: '0.14em',
-  textTransform: 'uppercase',
-  color: 'rgba(155, 166, 194, 0.82)',
-  marginBottom: 8,
-};
-
-const titleStyle: CSSProperties = {
-  margin: 0,
-  fontSize: 24,
-  fontWeight: 700,
-  color: '#f6f7fb',
-};
-
-const subtitleStyle: CSSProperties = {
-  margin: '8px 0 0',
-  color: 'rgba(214, 221, 236, 0.7)',
-  fontSize: 13,
-  lineHeight: 1.6,
-};
-
-const closeButtonStyle: CSSProperties = {
-  width: 36,
-  height: 36,
-  borderRadius: 10,
-  background: 'rgba(255,255,255,0.04)',
-  border: '1px solid rgba(255,255,255,0.08)',
-  color: 'var(--text-muted)',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  cursor: 'pointer',
-  flexShrink: 0,
-};
-
-const heroCardStyle: CSSProperties = {
-  margin: '0 24px',
-  padding: '18px 20px',
-  borderRadius: 18,
-  background: 'linear-gradient(135deg, rgba(47, 86, 212, 0.28), rgba(17, 29, 56, 0.9))',
-  border: '1px solid rgba(118, 154, 255, 0.18)',
-  display: 'flex',
-  justifyContent: 'space-between',
-  alignItems: 'center',
-  gap: 12,
-};
-
-const heroIconWrapStyle: CSSProperties = {
-  width: 40,
-  height: 40,
-  borderRadius: 12,
-  background: 'rgba(255,255,255,0.12)',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  color: '#edf2ff',
-  flexShrink: 0,
-};
-
-const heroBadgeStyle: CSSProperties = {
-  padding: '6px 10px',
-  borderRadius: 999,
-  background: 'rgba(255,255,255,0.08)',
-  color: '#eef2ff',
-  fontSize: 12,
-  whiteSpace: 'nowrap',
-};
-
-const bodyStyle: CSSProperties = {
-  padding: 24,
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 20,
-};
-
-const fieldGroupStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 10,
-};
-
-const inlineHeaderStyle: CSSProperties = {
-  display: 'flex',
-  justifyContent: 'space-between',
-  alignItems: 'center',
-  gap: 12,
-  flexWrap: 'wrap',
-};
-
-const labelStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 8,
-  fontSize: 13,
-  fontWeight: 600,
-  color: '#eef2ff',
-};
-
-const inputStyle: CSSProperties = {
-  width: '100%',
-  height: 44,
-  borderRadius: 12,
-  border: '1px solid rgba(255,255,255,0.08)',
-  background: 'rgba(255,255,255,0.04)',
-  color: '#f5f7fb',
-  padding: '0 14px',
-  outline: 'none',
-  fontSize: 14,
-};
-
-const helpTextStyle: CSSProperties = {
-  fontSize: 12,
-  color: 'rgba(195, 203, 220, 0.72)',
-  lineHeight: 1.5,
-};
-
-const modelListStyle: CSSProperties = {
-  borderRadius: 12,
-  border: '1px solid rgba(255,255,255,0.08)',
-  background: 'rgba(255,255,255,0.02)',
-  padding: 8,
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 8,
-  maxHeight: 190,
-  overflowY: 'auto',
-};
-
-const modelItemStyle: CSSProperties = {
-  height: 36,
-  borderRadius: 10,
-  border: '1px solid rgba(255,255,255,0.08)',
-  background: 'rgba(255,255,255,0.02)',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  gap: 8,
-  width: '100%',
-  padding: '0 12px',
-  cursor: 'pointer',
-  fontSize: 13,
-};
-
-const emptyStateStyle: CSSProperties = {
-  padding: '12px 14px',
-  borderRadius: 12,
-  border: '1px dashed rgba(255,255,255,0.12)',
-  color: 'rgba(195, 203, 220, 0.72)',
-  fontSize: 13,
-};
-
-const successBoxStyle: CSSProperties = {
-  padding: '12px 14px',
-  borderRadius: 12,
-  background: 'rgba(46, 160, 67, 0.1)',
-  border: '1px solid rgba(46, 160, 67, 0.22)',
-  color: '#b4f0bf',
-  fontSize: 13,
-  lineHeight: 1.5,
-};
-
-const errorBoxStyle: CSSProperties = {
-  padding: '12px 14px',
-  borderRadius: 12,
-  background: 'rgba(255, 107, 107, 0.1)',
-  border: '1px solid rgba(255, 107, 107, 0.22)',
-  color: '#ffb2b2',
-  fontSize: 13,
-  lineHeight: 1.5,
-};
-
-const footerStyle: CSSProperties = {
-  padding: '0 24px 24px',
-  display: 'flex',
-  justifyContent: 'space-between',
-  alignItems: 'center',
-  gap: 12,
-  flexWrap: 'wrap',
-};
-
-const secondaryButtonStyle: CSSProperties = {
-  height: 34,
-  padding: '0 12px',
-  borderRadius: 10,
-  border: '1px solid rgba(255,255,255,0.1)',
-  background: 'rgba(255,255,255,0.04)',
-  color: '#e7ebf6',
-  display: 'flex',
-  alignItems: 'center',
-  gap: 8,
-  cursor: 'pointer',
-};
-
-const ghostButtonStyle: CSSProperties = {
-  ...secondaryButtonStyle,
-  background: 'transparent',
-  color: 'rgba(215, 222, 238, 0.86)',
-};
-
-const primaryButtonStyle: CSSProperties = {
-  height: 42,
-  padding: '0 16px',
-  borderRadius: 12,
-  border: 'none',
-  background: 'linear-gradient(135deg, #6d7cff, #3d5af1)',
-  color: '#fff',
-  fontWeight: 600,
-  display: 'flex',
-  alignItems: 'center',
-  gap: 8,
-  cursor: 'pointer',
-  boxShadow: '0 14px 30px rgba(61, 90, 241, 0.3)',
-};

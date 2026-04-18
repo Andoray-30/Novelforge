@@ -46,11 +46,16 @@ class StoryOutlineParams(BaseModel):
     constraints: Optional[List[str]] = Field(default=None, description="创作约束条件")
     target_audience: TargetAudience = Field(default=TargetAudience.GENERAL, description="目标受众")
 
+    openai_config: Optional[dict] = Field(default=None, description="Runtime OpenAI config")
+
 class CharacterDesignRequest(BaseModel):
     context: str = Field(..., min_length=1, max_length=2000, description="故事背景信息")
     roles: List[str] = Field(..., min_items=1, max_items=10, description="角色职责列表")
 
+    openai_config: Optional[dict] = Field(default=None, description="Runtime OpenAI config")
+
 class WorldBuildingRequest(BaseModel):
+    openai_config: Optional[dict] = Field(default=None, description="Runtime OpenAI config")
     story_outline: dict = Field(..., description="故事架构信息")
 
 # 响应模型
@@ -147,6 +152,7 @@ class OpenAIProviderConfig(BaseModel):
     api_key: Optional[str] = Field(default=None, description="API Key")
     base_url: Optional[str] = Field(default=None, description="API Base URL")
     model: Optional[str] = Field(default=None, description="Selected model")
+    strict_model: Optional[bool] = Field(default=None, description="Whether to disable model fallback")
 
 
 class OpenAIModelInfo(BaseModel):
@@ -222,7 +228,8 @@ class GenerationRequest(BaseModel):
     length: Optional[int] = Field(default=500, ge=100, le=5000, description="生成长度")
     style: Optional[str] = Field(default="neutral", description="写作风格")
     temperature: Optional[float] = Field(default=0.7, ge=0.0, le=1.0, description="创造性")
-    extract_info: Optional[dict] = Field(default=None, description="提取的信息")
+    extract_info: bool = Field(default=False, description="是否启用额外提取")
+    openai_config: Optional[OpenAIProviderConfig] = Field(default=None, description="Runtime OpenAI config")
 
 
 class GenerationResult(BaseModel):
@@ -242,6 +249,7 @@ class NovelGenerationRequest(BaseModel):
     target_length: int = Field(default=1000, ge=200, le=10000, description="目标长度")
     focus_on: Optional[List[str]] = Field(default=None, description="关注点")
     exclude_elements: Optional[List[str]] = Field(default=None, description="排除元素")
+    openai_config: Optional[OpenAIProviderConfig] = Field(default=None, description="Runtime OpenAI config")
 
 
 class NovelGenerationResult(BaseModel):

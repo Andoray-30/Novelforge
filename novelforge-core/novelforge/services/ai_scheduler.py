@@ -5,6 +5,7 @@ import asyncio
 import time
 import logging
 import sys
+import os
 from typing import Dict, List, Optional, Callable, Any
 from datetime import datetime
 from enum import Enum
@@ -69,6 +70,7 @@ class AITaskScheduler:
         self.tasks: Dict[str, Task] = {}
         self.queue: List[Task] = []
         self.running_tasks: List[Task] = []
+        self.running_handles: Dict[str, asyncio.Task[Any]] = {}
         self.max_concurrent_tasks = config.max_concurrent_tasks if hasattr(config, 'max_concurrent_tasks') else 3
         self.is_running = False
         self._event_loop = None
@@ -130,7 +132,8 @@ class AITaskScheduler:
             await self._save_task(task)
             
             # 异步执行任务
-            asyncio.create_task(self._execute_task(task))
+            task_handle = asyncio.create_task(self._execute_task(task))
+            self.running_handles[task.id] = task_handle
             
             # 重新获取待处理任务列表
             ready_tasks = [task for task in self.queue if task.status == TaskStatus.PENDING]
@@ -138,37 +141,80 @@ class AITaskScheduler:
     
     async def _execute_task(self, task: Task):
         """执行单个任务"""
+        rate_limit_retries = 0
+        max_rate_limit_retries = max(getattr(self.config, "max_retries", 3), 3)
         while True: # 增加重试循环以应对 429
             try:
                 # 执行任务
+                if task.status == TaskStatus.CANCELLED:
+                    if not task.completed_at:
+                        task.completed_at = datetime.now()
+                    if not task.message:
+                        task.message = "Task cancelled."
+                    break
+
                 handler = self._get_task_handler(task.type)
                 result = await handler(task)
+
+                if task.status == TaskStatus.CANCELLED:
+                    if not task.completed_at:
+                        task.completed_at = datetime.now()
+                    if not task.message:
+                        task.message = "Task cancelled."
+                    break
                 
                 # 更新任务状态为完成
                 task.status = TaskStatus.COMPLETED
                 task.completed_at = datetime.now()
                 task.result = result
+                task.progress = 1.0
+                if not task.message:
+                    task.message = "任务已完成"
                 break # 成功执行，退出循环
                 
+            except asyncio.CancelledError:
+                task.status = TaskStatus.CANCELLED
+                task.completed_at = datetime.now()
+                task.message = "Task cancelled."
+                break
             except Exception as e:
                 error_str = str(e)
                 # 识别 API 限流错误 (429)
                 if "429" in error_str or "rate limit" in error_str.lower():
-                    task.message = f"API 频率限制，正在等待重试... (出错: {error_str[:30]}...)"
+                    rate_limit_retries += 1
+                    if rate_limit_retries > max_rate_limit_retries:
+                        task.status = TaskStatus.FAILED
+                        task.completed_at = datetime.now()
+                        task.error = error_str
+                        task.message = f"API 限流重试超过 {max_rate_limit_retries} 次，任务失败"
+                        break
+
+                    retry_delay = min(20 * (2 ** (rate_limit_retries - 1)), 300)
+                    task.message = f"API 频率限制，将在 {retry_delay} 秒后第 {rate_limit_retries} 次重试..."
                     await self._save_task(task)
-                    # 指数级避让延迟：第 N 次失败等待 2^N * 10 秒
-                    await asyncio.sleep(20) # 简单起点 20 秒
+                    await asyncio.sleep(retry_delay)
                     continue # 回到循环开始重试
                 
                 # 其他真实错误，标记为失败
                 task.status = TaskStatus.FAILED
                 task.completed_at = datetime.now()
                 task.error = error_str
+                task.message = f"任务失败: {error_str[:120]}"
                 break # 失败退场
                 
         # 最终清理 (finally 逻辑)
         if task in self.running_tasks:
             self.running_tasks.remove(task)
+        self.running_handles.pop(task.id, None)
+
+        # 导入任务无论成功、失败或取消，都尝试清理临时文件
+        if task.type == "novel_import":
+            file_path = task.parameters.get("file_path")
+            if isinstance(file_path, str) and file_path and os.path.exists(file_path):
+                try:
+                    os.unlink(file_path)
+                except Exception as cleanup_error:
+                    logger.warning(f"清理导入临时文件失败: {file_path}, error={cleanup_error}")
         # 保存最终任务状态
         await self._save_task(task)
     def _get_task_handler(self, task_type: str) -> Callable[[Task], Any]:
@@ -279,18 +325,24 @@ class AITaskScheduler:
     async def _process_novel_import_task(self, task: Task) -> Dict[str, Any]:
         """处理小说导入异步任务"""
         from ..services.text_processing_service import text_processing_service
-        from ..types.text_processing import TextProcessingConfig
+        from ..types.text_processing import Chapter, TextProcessingConfig
         from ..services.extraction_service import get_extraction_service
         from ..content.models import ContentItem, ContentMetadata
         from pathlib import Path
         import os
+        import hashlib
         
         params = task.parameters
         file_path = params.get("file_path")
+        source_file_name = params.get("source_file_name") or (os.path.basename(file_path) if file_path else None)
         book_title = params.get("book_title")
         session_id = params.get("session_id")
         parent_id = params.get("parent_id")
+        import_run_id = params.get("import_run_id") or f"import_{uuid.uuid4().hex[:12]}"
         
+        if self.content_manager is None:
+            raise ValueError("内容管理器未初始化，无法执行导入任务")
+
         if not file_path or not os.path.exists(file_path):
             raise ValueError(f"文件不存在: {file_path}")
             
@@ -298,51 +350,97 @@ class AITaskScheduler:
         task.progress = 0.1
         await self._save_task(task)
         
-        # 如果没有指定 parent_id，先创建一个 Novel 根节点
+        # 如果没有指定 parent_id，先确保存在一个 Novel 根节点
         if not parent_id:
             parent_id = f"novel_{session_id}"
-            novel_item = ContentItem(
-                metadata=ContentMetadata(
-                    id=parent_id,
-                    title=book_title or "未命名小说",
-                    type="novel",
-                    session_id=session_id,
-                    tags=["novel", f"project-{session_id}"]
-                ),
-                content=f"这是《{book_title}》的小说根节点，作为所有章节和角色的父级容器。"
-            )
-            await self.content_manager.create_content(novel_item)
+            existing_parent = await self.content_manager.get_content(parent_id)
+            if not existing_parent:
+                novel_title = book_title or "未命名小说"
+                novel_summary = f"这是《{novel_title}》的小说根节点，作为所有章节和角色的父级容器。"
+                novel_item = ContentItem(
+                    metadata=ContentMetadata(
+                        id=parent_id,
+                        title=novel_title,
+                        type="novel",
+                        session_id=session_id,
+                        tags=["novel", f"project-{session_id}", f"import-run-{import_run_id}"]
+                    ),
+                    content=novel_summary,
+                    extracted_data={
+                        "title": novel_title,
+                        "content": novel_summary,
+                        "source": "text_processing_import",
+                        "import_run_id": import_run_id,
+                        "source_file": source_file_name,
+                    },
+                )
+                await self.content_manager.create_content(novel_item)
 
         # 1. 解析文本 (在独立线程中运行，避免阻塞事件循环)
         config = TextProcessingConfig(**params.get("config", {}))
         result = await asyncio.to_thread(text_processing_service.process_file, file_path, config)
+        if not result.content or not result.content.strip():
+            raise ValueError("文本解析后为空，无法导入")
+        chapters_to_save = list(result.chapters)
+        if not chapters_to_save and result.content.strip():
+            chapters_to_save = [
+                Chapter(
+                    title=(book_title or result.metadata.title or "导入正文"),
+                    content=result.content,
+                    start_position=0,
+                    end_position=len(result.content),
+                    index=1,
+                )
+            ]
         
         # 2. 保存章节 (分阶段汇报进度)
-        task.message = f"解析完成，正在保存 {len(result.chapters)} 个章节..."
+        task.message = f"解析完成，正在保存 {len(chapters_to_save)} 个章节..."
         await self._save_task(task)
         
         chapters_data = []
-        for i, chapter in enumerate(result.chapters):
+        total_chapters = len(chapters_to_save)
+        analysis_status = "completed"
+        analysis_warning = None
+        source_fingerprint = None
+        if isinstance(result.content, str):
+            source_fingerprint = hashlib.sha256(result.content.encode("utf-8")).hexdigest()
+        for i, chapter in enumerate(chapters_to_save):
             # 每存一章，进度递增（0.1 -> 0.7 阶段）
-            task.progress = 0.1 + (i / len(result.chapters)) * 0.6
-            task.message = f"正在保存第 {i+1}/{len(result.chapters)} 章: {chapter.title}"
+            task.progress = 0.1 + (i / max(total_chapters, 1)) * 0.6
+            chapter_number = chapter.index or (i + 1)
+            chapter_title = chapter.title or f"第 {chapter_number} 章"
+            task.message = f"正在保存第 {i+1}/{total_chapters} 章: {chapter_title}"
             await self._save_task(task)
             
             # 创建内容项
-            item_id = f"chapter_{session_id}_{i}"
+            item_id = f"chapter_{session_id}_{uuid.uuid4().hex[:12]}"
+            chapter_payload = {
+                "title": chapter_title,
+                "chapter_title": chapter_title,
+                "content": chapter.content,
+                "chapter_index": chapter_number,
+                "start_position": chapter.start_position,
+                "end_position": chapter.end_position,
+                "book_title": book_title,
+                "source": "text_processing_import",
+                "source_file": source_file_name,
+                "source_fingerprint": source_fingerprint,
+                "import_run_id": import_run_id,
+            }
             item = ContentItem(
                 metadata=ContentMetadata(
                     id=item_id,
-                    title=chapter.title or f"第 {i+1} 章",
+                    title=chapter_title,
                     type="chapter",
                     session_id=session_id,
                     parent_id=parent_id,
-                    tags=["imported", f"project-{session_id}"]
+                    tags=["imported", f"project-{session_id}", f"import-run-{import_run_id}"]
                 ),
-                content=chapter.content
+                content=chapter.content,
+                extracted_data=chapter_payload,
             )
             await self.content_manager.create_content(item)
-            chapters_data.append({"id": item_id, "title": item.metadata.title})
+            chapters_data.append({"id": item_id, "title": item.metadata.title, "chapter_index": chapter_number})
             
         # 3. 深度分析 (0.7 -> 0.95 阶段)
         task.progress = 0.75
@@ -391,6 +489,8 @@ class AITaskScheduler:
                 "timeline_events": [],
                 "relationships": []
             }
+            analysis_status = "timed_out"
+            analysis_warning = "AI analysis timed out; chapters were imported but structured extraction was skipped."
             task.message = "AI 分析超时，已跳过深度分析"
             await self._save_task(task)
         except Exception as e:
@@ -401,6 +501,8 @@ class AITaskScheduler:
                 "timeline_events": [],
                 "relationships": []
             }
+            analysis_status = "failed"
+            analysis_warning = f"AI analysis failed after chapter import: {str(e)[:120]}"
             task.message = f"AI 分析失败: {str(e)[:50]}"
             await self._save_task(task)
         
@@ -422,10 +524,15 @@ class AITaskScheduler:
                         type="character",
                         session_id=session_id,
                         parent_id=parent_id,
-                        tags=["extracted", "high-quality", f"project-{session_id}"]
+                        tags=["extracted", "high-quality", f"project-{session_id}", f"import-run-{import_run_id}"]
                     ),
                     content=summary,
-                    extracted_data=raw_data # 这里的 raw_data 包含您要的所有高质量字段（台词、背景、因果等）
+                    extracted_data={
+                        **raw_data,
+                        "import_run_id": import_run_id,
+                        "source_file": source_file_name,
+                        "source_fingerprint": source_fingerprint,
+                    } # 这里的 raw_data 包含您要的所有高质量字段（台词、背景、因果等）
                 )
                 await self.content_manager.create_content(char_item)
                 characters_count += 1
@@ -447,10 +554,15 @@ class AITaskScheduler:
                         type="world",
                         session_id=session_id,
                         parent_id=parent_id,
-                        tags=["extracted", "world-core", f"project-{session_id}"]
+                        tags=["extracted", "world-core", f"project-{session_id}", f"import-run-{import_run_id}"]
                     ),
                     content=raw_world.get('history', '世界深度分析已完成'),
-                    extracted_data=raw_world
+                    extracted_data={
+                        **raw_world,
+                        "import_run_id": import_run_id,
+                        "source_file": source_file_name,
+                        "source_fingerprint": source_fingerprint,
+                    }
                 )
                 await self.content_manager.create_content(world_item)
                 world_count += 1
@@ -464,20 +576,36 @@ class AITaskScheduler:
             try:
                 # 关系不仅要在 Edge 中，还要作为 ContentItem 保存以便溯源
                 raw_rel = rel.model_dump() if hasattr(rel, 'model_dump') else rel
+                if not isinstance(raw_rel, dict):
+                    raw_rel = {}
+                rel_source = raw_rel.get("source") if isinstance(raw_rel, dict) else None
+                rel_target = raw_rel.get("target") if isinstance(raw_rel, dict) else None
+                rel_type = raw_rel.get("relationship_type") if isinstance(raw_rel, dict) else None
+                if not isinstance(rel_source, str) or not rel_source.strip():
+                    rel_source = "UnknownSource"
+                if not isinstance(rel_target, str) or not rel_target.strip():
+                    rel_target = "UnknownTarget"
+                if not isinstance(rel_type, str) or not rel_type.strip():
+                    rel_type = "other"
                 rel_id = f"rel_{session_id}_{uuid.uuid4().hex[:8]}"
                 
                 rel_item = ContentItem(
                     metadata=ContentMetadata(
                         id=rel_id,
-                        title=f"{rel.source} -> {rel.target} ({rel.relationship_type})",
+                        title=f"{rel_source} -> {rel_target} ({rel_type})",
                         type="relationship",
                         session_id=session_id,
-                        tags=["extracted", "interaction", f"project-{session_id}"]
+                        tags=["extracted", "interaction", f"project-{session_id}", f"import-run-{import_run_id}"]
                     ),
                     content=raw_rel.get('description', ''),
-                    extracted_data=raw_rel,
+                    extracted_data={
+                        **raw_rel,
+                        "import_run_id": import_run_id,
+                        "source_file": source_file_name,
+                        "source_fingerprint": source_fingerprint,
+                    },
                     # 记录关联实体，以便世界树精准绘图
-                    relations={"source": [rel.source], "target": [rel.target]}
+                    relations={"source": [rel_source], "target": [rel_target]}
                 )
                 await self.content_manager.create_content(rel_item)
                 rel_count += 1
@@ -489,27 +617,44 @@ class AITaskScheduler:
         timeline_count = 0
         for i, event in enumerate(timeline_events):
             try:
-                event_id = f"timeline_{session_id}_{i}"
+                raw_event = event.model_dump() if hasattr(event, 'model_dump') else event
+                event_title = raw_event.get("title") or f"事件 {i+1}"
+                event_description = raw_event.get("description") or "未描述"
+                absolute_time = raw_event.get("absolute_time") or raw_event.get("date") or ""
+                relative_time = raw_event.get("relative_time") or ""
+                characters = raw_event.get("characters") if isinstance(raw_event.get("characters"), list) else []
+                locations = raw_event.get("locations") if isinstance(raw_event.get("locations"), list) else []
+
+                event_id = f"timeline_{session_id}_{uuid.uuid4().hex[:10]}"
                 event_content = f"""
-【时间】{event.time if hasattr(event, 'time') else '未知'}
-【事件】{event.description if hasattr(event, 'description') else '未描述'}
-【涉及角色】{', '.join(event.characters) if hasattr(event, 'characters') and event.characters else '无'}
+【事件】{event_title}
+【描述】{event_description}
+【绝对时间】{absolute_time or '未知'}
+【相对时间】{relative_time or '未知'}
+【涉及角色】{', '.join(characters) if characters else '无'}
+【涉及地点】{', '.join(locations) if locations else '无'}
 """.strip()
-                
+
                 event_item = ContentItem(
                     metadata=ContentMetadata(
                         id=event_id,
-                        title=event.name if hasattr(event, 'name') else f"事件 {i+1}",
+                        title=event_title,
                         type="timeline",
                         session_id=session_id,
                         parent_id=parent_id,
-                        tags=["extracted", f"project-{session_id}"]
+                        tags=["extracted", f"project-{session_id}", f"import-run-{import_run_id}"]
                     ),
                     content=event_content,
                     extracted_data={
-                        "time": event.time if hasattr(event, 'time') else "",
-                        "importance": event.importance if hasattr(event, 'importance') else "medium"
-                    }
+                        **raw_event,
+                        "import_run_id": import_run_id,
+                        "source_file": source_file_name,
+                        "source_fingerprint": source_fingerprint,
+                    },
+                    relations={
+                        "characters": characters,
+                        "locations": locations,
+                    },
                 )
                 await self.content_manager.create_content(event_item)
                 timeline_count += 1
@@ -523,11 +668,26 @@ class AITaskScheduler:
             os.unlink(file_path)
             
         task.progress = 1.0
-        task.message = "处理完成！"
+        task.message = (
+            f"导入完成：已写入 {len(chapters_to_save)} 个章节"
+            + (f"，并完成 {characters_count} 个角色、{world_count} 个世界设定、{timeline_count} 个时间线、{rel_count} 个关系资产分析" if analysis_status == "completed" else "，但深度分析未完全完成")
+        )
         return {
             "book_title": book_title,
-            "chapters_count": len(result.chapters),
-            "session_id": session_id
+            "parent_id": parent_id,
+            "chapters_count": len(chapters_to_save),
+            "chapter_ids": [chapter["id"] for chapter in chapters_data],
+            "chapter_titles": [chapter["title"] for chapter in chapters_data],
+            "characters_count": characters_count,
+            "world_count": world_count,
+            "relationships_count": rel_count,
+            "timeline_count": timeline_count,
+            "session_id": session_id,
+            "source_file_name": source_file_name,
+            "source_fingerprint": source_fingerprint,
+            "import_run_id": import_run_id,
+            "analysis_status": analysis_status,
+            "analysis_warning": analysis_warning,
         }
     
     async def submit_task(self, task_type: str, parameters: Dict[str, Any], 
@@ -594,14 +754,16 @@ class AITaskScheduler:
         if task.status in [TaskStatus.RUNNING, TaskStatus.PENDING]:
             task.status = TaskStatus.CANCELLED
             task.completed_at = datetime.now()
+            task.message = "任务已取消"
             
             # 从队列中移除（如果在队列中）
             if task in self.queue:
                 self.queue.remove(task)
             
             # 从运行列表中移除（如果在运行中）
-            if task in self.running_tasks:
-                self.running_tasks.remove(task)
+            task_handle = self.running_handles.get(task_id)
+            if task_handle and not task_handle.done():
+                task_handle.cancel()
             
             # 保存任务状态
             await self._save_task(task)

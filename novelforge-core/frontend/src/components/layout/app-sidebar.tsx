@@ -1,128 +1,160 @@
 'use client';
 
 import * as React from 'react';
+import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { BookOpen, Users, Globe, Settings, Home, Sparkles, FileText, BarChart3 } from 'lucide-react';
+import {
+  BarChart3,
+  FileSearch,
+  FileText,
+  Globe,
+  Home,
+  Settings,
+  Sparkles,
+  Users,
+} from 'lucide-react';
 
 export interface NavigationItem {
   title: string;
   href: string;
   icon: React.ComponentType<{ className?: string }>;
   description?: string;
-  badge?: string;
 }
 
 const navigationItems: NavigationItem[] = [
   {
-    title: '首页',
+    title: '主页',
     href: '/',
     icon: Home,
-    description: '系统概览和快速导航'
+    description: '工作区首页与项目仪表盘。',
   },
   {
-    title: 'AI规划',
+    title: 'AI 规划',
     href: '/ai-planning',
     icon: Sparkles,
-    description: '使用AI生成故事架构、角色和世界观'
+    description: '生成大纲、角色和世界观资产。',
   },
   {
-    title: '角色管理',
+    title: '提取',
+    href: '/extract',
+    icon: FileSearch,
+    description: '导入文本并提取统一资产。',
+  },
+  {
+    title: '角色',
     href: '/characters',
     icon: Users,
-    description: '创建和管理小说角色档案'
+    description: '查看和管理角色资产。',
   },
   {
-    title: '世界设定',
+    title: '世界',
     href: '/world',
     icon: Globe,
-    description: '构建完整的世界观和设定'
+    description: '查看世界观与时间线资产。',
   },
   {
-    title: '小说编辑',
+    title: '编辑器',
     href: '/editor',
     icon: FileText,
-    description: '富文本编辑器和实时协作'
+    description: '打开并编辑章节资产。',
   },
   {
-    title: '数据分析',
+    title: '分析',
     href: '/analytics',
     icon: BarChart3,
-    description: '创作数据统计和分析'
+    description: '查看真实项目指标。',
   },
   {
-    title: '系统设置',
+    title: '设置',
     href: '/settings',
     icon: Settings,
-    description: '配置AI模型和集成设置'
-  }
+    description: '管理模型与项目偏好。',
+  },
 ];
 
 export interface AppSidebarProps {
   className?: string;
   isCollapsed?: boolean;
   onToggle?: () => void;
+  onNavigate?: () => void;
+  showBrand?: boolean;
 }
 
-export function AppSidebar({ 
-  className, 
-  isCollapsed = false, 
-  onToggle 
+export function AppSidebar({
+  className,
+  isCollapsed = false,
+  onToggle,
+  onNavigate,
+  showBrand = true,
 }: AppSidebarProps) {
   const pathname = usePathname();
 
+  const isActiveRoute = React.useCallback(
+    (href: string) => {
+      if (href === '/') {
+        return pathname === '/';
+      }
+      return pathname === href || pathname?.startsWith(`${href}/`);
+    },
+    [pathname]
+  );
+
   return (
-    <aside className={cn(
-      "flex flex-col h-full bg-white border-r border-gray-200",
-      isCollapsed ? "w-16" : "w-64",
-      "transition-all duration-300 ease-in-out",
-      className
-    )}>
-      <div className="flex items-center justify-between p-4 border-b border-gray-200">
-        <div className={cn(
-          "font-semibold text-lg transition-opacity duration-300",
-          isCollapsed ? "opacity-0" : "opacity-100"
-        )}>
-          NovelForge
+    <aside
+      className={cn(
+        'flex h-full flex-col border-r border-white/10 bg-[var(--bg-surface)] text-[var(--text-primary)]',
+        isCollapsed ? 'w-16' : 'w-64',
+        'transition-all duration-300 ease-in-out',
+        className
+      )}
+    >
+      {showBrand ? (
+        <div className="flex items-center justify-between border-b border-white/10 p-4">
+          <div className={cn('transition-opacity duration-300', isCollapsed ? 'opacity-0' : 'opacity-100')}>
+            <div className="text-[11px] uppercase tracking-[0.24em] text-zinc-500">NovelForge</div>
+            <div className="text-lg font-semibold text-white">工作区</div>
+          </div>
+          {!isCollapsed && onToggle ? (
+            <button
+              onClick={onToggle}
+              className="rounded-md p-1 text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200"
+            >
+              <span className="sr-only">切换导航栏</span>
+            </button>
+          ) : null}
         </div>
-        {!isCollapsed && (
-          <button
-            onClick={onToggle}
-            className="p-1 rounded-md hover:bg-gray-100"
-          >
-            <span className="sr-only">切换侧边栏</span>
-          </button>
-        )}
-      </div>
+      ) : null}
 
       <nav className="flex-1 overflow-y-auto py-4">
         <ul className="space-y-1 px-2">
           {navigationItems.map((item) => (
             <li key={item.href}>
-              <a
+              <Link
                 href={item.href}
+                onClick={onNavigate}
                 className={cn(
-                  "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
-                  pathname === item.href
-                    ? "bg-blue-50 text-blue-700"
-                    : "text-gray-700 hover:bg-gray-100"
+                  'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors',
+                  isActiveRoute(item.href)
+                    ? 'bg-violet-500/15 text-violet-100'
+                    : 'text-zinc-400 hover:bg-white/5 hover:text-white'
                 )}
               >
-                <item.icon className={cn(
-                  "h-5 w-5 flex-shrink-0",
-                  isCollapsed ? "mx-auto" : ""
-                )} />
-                <span className={cn(
-                  "transition-opacity duration-300",
-                  isCollapsed ? "opacity-0 hidden" : "opacity-100"
-                )}>
+                <item.icon className={cn('h-5 w-5 flex-shrink-0', isCollapsed ? 'mx-auto' : '')} />
+                <span className={cn('transition-opacity duration-300', isCollapsed ? 'hidden opacity-0' : 'opacity-100')}>
                   {item.title}
                 </span>
-              </a>
+              </Link>
             </li>
           ))}
         </ul>
       </nav>
+
+      {!isCollapsed ? (
+        <div className="border-t border-white/10 px-4 py-3 text-xs text-zinc-500">
+          共享导航、项目上下文和后台任务现在都集中在一个界面中。
+        </div>
+      ) : null}
     </aside>
   );
 }

@@ -2,59 +2,71 @@
 
 import * as React from 'react'
 import { AppHeader } from '@/components/layout/app-header'
-import { AppFooter } from '@/components/layout/app-footer'
-import { AppBreadcrumb } from '@/components/layout/app-breadcrumb'
-import { Container } from '@/components/layout/layout-utils'
-import { Toaster } from '@/components/ui/toast'
 import { MobileNav } from '@/components/layout/mobile-nav'
+import { Toaster } from '@/components/ui/toast'
 import { TaskCenter } from './TaskCenter'
 
 export interface MainLayoutProps {
   children: React.ReactNode
   sidebar: React.ReactNode
+  title?: string
+  description?: string
+  currentSessionTitle?: string | null
+  currentSessionId?: string | null
+  projects?: Array<{ id: string; title: string }>
+  onProjectChange?: (id: string) => void
+  onCreateProject?: () => void
+  actions?: React.ReactNode
+  contentOverflow?: 'auto' | 'hidden'
 }
 
-export function MainLayout({ children, sidebar }: MainLayoutProps) {
+export function MainLayout({
+  children,
+  sidebar,
+  title,
+  description,
+  currentSessionTitle,
+  currentSessionId,
+  projects,
+  onProjectChange,
+  onCreateProject,
+  actions,
+  contentOverflow = 'auto',
+}: MainLayoutProps) {
   const [isMobileNavOpen, setIsMobileNavOpen] = React.useState(false)
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
-      {/* Mobile Navigation */}
-      <MobileNav 
-        isOpen={isMobileNavOpen} 
-        onClose={() => setIsMobileNavOpen(false)} 
+    <div className="flex h-screen overflow-hidden bg-[var(--bg-base)] text-[var(--text-primary)]">
+      <MobileNav
+        isOpen={isMobileNavOpen}
+        onClose={() => setIsMobileNavOpen(false)}
       />
 
-      {/* Sidebar - Hidden on mobile, visible on desktop */}
-      <div className="hidden lg:flex lg:w-64 lg:flex-col lg:fixed lg:inset-y-0">
+      <div className="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-64 lg:flex-col">
         {sidebar}
       </div>
 
-      {/* Main content area */}
-      <div className="flex-1 flex flex-col lg:ml-64">
-        {/* Header */}
-        <AppHeader 
-          title="NovelForge"
-          showMenuButton={true}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden lg:ml-64">
+        <AppHeader
+          title={title}
+          description={description}
+          currentSessionTitle={currentSessionTitle}
+          currentSessionId={currentSessionId}
+          projects={projects}
+          onProjectChange={onProjectChange}
+          onCreateProject={onCreateProject}
+          actions={actions}
+          showMenuButton
           onMenuClick={() => setIsMobileNavOpen(true)}
         />
-
-        {/* Main Content */}
-        <main className="flex-1">
-          <Container className="py-6">
-            {/* Breadcrumb */}
-            <AppBreadcrumb className="mb-6" />
-            
-            {/* Page Content */}
-            {children}
-          </Container>
+        <main
+          className="flex-1 min-h-0"
+          style={{ overflowY: contentOverflow, overflowX: 'hidden' }}
+        >
+          {children}
         </main>
-
-        {/* Footer */}
-        <AppFooter />
       </div>
 
-      {/* Toast Notifications */}
       <Toaster />
       <TaskCenter />
     </div>

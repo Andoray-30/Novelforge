@@ -1,8 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { contentService } from '@/lib/api';
+import { useSessionTaskEvents } from '@/lib/hooks/use-session-task-events';
+import { useSessions } from '@/lib/hooks/use-sessions';
 import CharacterCard from '@/components/Character/CharacterCard';
 import CharacterRelationshipGraph from '@/components/Character/CharacterRelationshipGraph';
 import { Users, Database, Wand2, Filter, Network, LayoutGrid } from 'lucide-react';
@@ -63,10 +65,12 @@ function parseCharacter(item: ContentItem): Character | null {
 
 export default function CharactersPage() {
   const router = useRouter();
+  const { currentSession, currentSessionId } = useSessions();
   const [characters, setCharacters] = useState<Character[]>([]);
   const [relationships, setRelationships] = useState<NetworkEdge[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'network'>('grid');
@@ -79,6 +83,7 @@ export default function CharactersPage() {
         const result = await contentService.searchContent({
           query: '',
           content_type: 'character',
+          session_id: currentSessionId || undefined,
           limit: 100,
         });
 
@@ -112,7 +117,23 @@ export default function CharactersPage() {
     };
 
     loadCharacters();
-  }, []);
+  }, [currentSessionId, refreshTick]);
+
+  useSessionTaskEvents({
+    sessionId: currentSessionId,
+    onCompleted: (detail) => {
+      if (!['novel_import', 'extraction', 'character_generation'].includes(detail.taskType)) {
+        return;
+      }
+      setRefreshTick((current) => current + 1);
+    },
+    onFailed: (detail) => {
+      if (!['novel_import', 'extraction', 'character_generation'].includes(detail.taskType)) {
+        return;
+      }
+      setError(`后台任务失败，角色资产未完成更新：${detail.error || detail.message || 'unknown error'}`);
+    },
+  });
 
   const filteredChars = characters.filter((character) =>
     character.name.includes(searchTerm) ||
@@ -145,6 +166,9 @@ export default function CharactersPage() {
             </h1>
             <p className="text-slate-400 text-lg leading-relaxed">
               这里存放着被 AI 从原典文本中剥离出的所有生灵。你可以查阅他们的侧写大纲，或者跳转探索他们那错综复杂的羁绊网络。
+            </p>
+            <p className="mt-3 text-sm text-slate-500">
+              当前项目: {currentSession?.title || '未选择，默认显示全部角色资产'}
             </p>
           </div>
 
@@ -213,7 +237,7 @@ export default function CharactersPage() {
             <Database className="w-16 h-16 text-slate-700 mb-6" />
             <h3 className="text-2xl font-bold text-slate-300 mb-2">未发现命运的收束点</h3>
             <p className="text-slate-500 max-w-md">
-              当前档案馆中没有任何实体。你可以通过文本提取引擎上传文稿，或者直接呼叫 Agent 为你凭空构造。
+              当前项目下还没有任何角色资产。你可以通过文本提取、AI 规划，或在聊天中继续生成并保存角色。
             </p>
           </div>
         ) : viewMode === 'network' ? (

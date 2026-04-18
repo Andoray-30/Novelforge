@@ -1,16 +1,68 @@
 """
 文本处理API端点
 """
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, status
 from fastapi.responses import JSONResponse
 from typing import Optional
 import tempfile
 import os
+import uuid
 from pathlib import Path
+from importlib.util import find_spec
+import json
 
+from ..core.config import Config
+from ..content.manager import ContentManager
+from ..services.ai_scheduler import TaskPriority as SchedulerTaskPriority
+from ..services.ai_scheduler import get_ai_scheduler
+from ..services.ai_service import AIService
+from ..storage.storage_manager import StorageManager
 from ..services.text_processing_service import text_processing_service
 from ..types.text_processing import TextProcessingConfig
-from . import ai_scheduler, APITaskPriority
+
+
+def _use_content_database(storage_type: Optional[str]) -> bool:
+    normalized = (storage_type or "").strip().lower()
+    if normalized in {"database", "content_db"}:
+        return True
+    if normalized in {"file", "memory"}:
+        return False
+    return True
+
+
+def _get_shared_ai_scheduler():
+    config = Config.load()
+    ai_service = AIService(config)
+    storage_manager = StorageManager(
+        default_storage=config.storage_type if config.storage_type in {"file", "memory", "database", "content_db"} else "file",
+        file_storage_dir=config.file_storage_dir,
+        database_path=config.database_path,
+        content_db_path=config.content_database_path,
+    )
+    content_manager = ContentManager(
+        storage_manager,
+        use_database=config.use_content_database or _use_content_database(config.storage_type),
+    )
+    return get_ai_scheduler(ai_service, storage_manager, config, content_manager)
+
+
+def _validate_format_dependencies(file_extension: str) -> None:
+    """在任务提交前检查格式依赖，避免后台任务秒失败。"""
+    required_modules: dict[str, list[str]] = {
+        ".epub": ["ebooklib", "bs4"],
+        ".pdf": ["PyPDF2"],
+        ".docx": ["docx"],
+    }
+    missing = [
+        module
+        for module in required_modules.get(file_extension, [])
+        if find_spec(module) is None
+    ]
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{file_extension} 导入缺少依赖: {', '.join(missing)}",
+        )
 
 router = APIRouter(prefix="/text-processing", tags=["text-processing"])
 
@@ -31,6 +83,18 @@ async def upload_and_process(
     """
     异步上传并处理文本文件，支持用户隔离的 AI 配置
     """
+    if not file.filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="上传文件缺少文件名",
+        )
+
+    if not session_id.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="session_id 不能为空",
+        )
+
     # 验证文件类型
     allowed_extensions = {'.txt', '.epub', '.pdf', '.docx'}
     file_extension = Path(file.filename).suffix.lower()
@@ -40,11 +104,20 @@ async def upload_and_process(
             status_code=400,
             detail=f"不支持的文件格式: {file_extension}"
         )
+
+    _validate_format_dependencies(file_extension)
     
+    temp_file_path = None
+
     try:
         # 1. 保存临时文件
         with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
             content = await file.read()
+            if not content:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="上传文件为空",
+                )
             temp_file.write(content)
             temp_file_path = temp_file.name
         
@@ -62,12 +135,22 @@ async def upload_and_process(
         parsed_openai_config = None
         if openai_config:
             try:
-                import json
                 parsed_openai_config = json.loads(openai_config)
-            except:
-                pass
+                if parsed_openai_config is not None and not isinstance(parsed_openai_config, dict):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="openai_config 必须是 JSON 对象",
+                    )
+            except json.JSONDecodeError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="openai_config 不是合法 JSON",
+                )
         
         # 3. 提交异步任务，将用户指定的模型配置注入任务参数
+        ai_scheduler = _get_shared_ai_scheduler()
+        if not ai_scheduler.is_running:
+            await ai_scheduler.start()
         task_id = await ai_scheduler.submit_task(
             task_type="novel_import",
             parameters={
@@ -76,9 +159,11 @@ async def upload_and_process(
                 "session_id": session_id,
                 "parent_id": parent_id,
                 "config": process_config,
-                "openai_config": parsed_openai_config # 注入模型配置
+                "openai_config": parsed_openai_config, # 注入模型配置
+                "source_file_name": file.filename,
+                "import_run_id": f"import_{uuid.uuid4().hex[:12]}",
             },
-            priority=APITaskPriority.HIGH
+            priority=SchedulerTaskPriority.HIGH
         )
         
         return {
@@ -86,13 +171,20 @@ async def upload_and_process(
             "task_id": task_id,
             "message": "导入分析任务已提交"
         }
+    except HTTPException:
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.unlink(temp_file_path)
+            except OSError:
+                pass
+        raise
     except Exception as e:
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.unlink(temp_file_path)
+            except OSError:
+                pass
         raise HTTPException(status_code=500, detail=f"提交导入任务失败: {str(e)}")
-    
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"文件处理错误: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"服务器内部错误: {str(e)}")
 
 
 @router.post("/process-text")

@@ -1,50 +1,67 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { ChatSidebar } from '@/components/chat/ChatSidebar';
 import { MessageList, Message } from '@/components/chat/MessageBubble';
 import { ChatInput } from '@/components/chat/ChatInput';
 import { ArtifactPanel } from '@/components/chat/ArtifactPanel';
 import { OpenAIConfigPanel } from '@/components/chat/OpenAIConfigPanel';
-import { LandingPage } from '@/components/landing/LandingPage';
 import ImportTextModal from '../components/ImportTextModal';
 import { WorldTree } from '@/components/dashboard/WorldTree';
 import {
   Loader2, CheckCircle2, AlertCircle,
-  LayoutDashboard, MessageSquare, User, Globe, FileText, Download,
-  Plus, Edit3, GitBranch, SlidersHorizontal, RefreshCw
+  LayoutDashboard, MessageSquare, User, FileText, Download,
+  Plus, GitBranch, SlidersHorizontal, RefreshCw
 } from 'lucide-react';
 import { chatService, contentService } from '@/lib/api';
-import { parseAIResponse, parseMultipleAIArtifacts, extractCleanText, ParsedArtifact } from '@/lib/chat-parser';
+import { parseMultipleAIArtifacts, extractCleanText, ParsedArtifact, ToolCall, parseThinkingProcess } from '@/lib/chat-parser';
+import {
+  buildContentCreateRequestFromArtifact,
+  getArtifactPanelType,
+  getContentAssetPayload,
+  getContentAssetText,
+  getContentAssetTitle,
+} from '@/lib/content-contract';
+import {
+  loadOpenAIConfigState,
+  saveOpenAIConfigState,
+  type OpenAIConfigState,
+} from '@/lib/openai-config';
+import { loadProjectPreferences, PROJECT_PREFERENCES_CHANGED_EVENT, type ProjectPreferences } from '@/lib/project-preferences';
+import { upsertContentAsset } from '@/lib/content-upsert';
+import { useSessionTaskEvents } from '@/lib/hooks/use-session-task-events';
 import { useSessions } from '@/lib/hooks/use-sessions';
 import { useAppStore } from '@/lib/hooks/use-app-store';
-import { TaskCenter } from '@/components/layout/TaskCenter';
-import type { OpenAIConfig } from '@/types';
-
-const OPENAI_CONFIG_STORAGE_KEY = 'novelforge-openai-config';
+import type { ContentItem, ContentTopology, ImportanceLevel, OpenAIConfig } from '@/types';
 
 // 用于 Artifact 面板的数据格式
-interface ArtifactData {
-  type: 'character_card' | 'world_setting' | 'timeline' | 'relationship' | 'outline' | 'chapter';
+type ArtifactData = {
+  type: ParsedArtifact['type'];
   title: string;
   data: Record<string, unknown>;
   /** 工具调用原始信息，保存时使用 */
-  toolCall?: import('@/lib/chat-parser').ToolCall;
-}
+  toolCall?: ToolCall;
+};
+
+type ProjectAssets = {
+  characters: ContentItem[];
+  worlds: ContentItem[];
+  chapters: ContentItem[];
+  outlines: ContentItem[];
+};
+
+type WorldTreeNode = {
+  id: string;
+  label: string;
+  type: string;
+  importance: string;
+  metadata: Record<string, unknown>;
+};
 
 export default function ChatPage() {
   // 使用 null 作为初始值，表示正在检查登录状态
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
   
   // 在客户端挂载后从 localStorage 读取登录状态
-  useEffect(() => {
-    try {
-      const loggedIn = localStorage.getItem('novelforge-logged-in') === 'true';
-      setIsLoggedIn(loggedIn);
-    } catch {
-      setIsLoggedIn(false);
-    }
-  }, []);
 
   const {
     sessions, currentSessionId, isLoading: isSessionsLoading, error: sessionsError,
@@ -57,28 +74,33 @@ export default function ChatPage() {
   const [isGeneratingChapter, setIsGeneratingChapter] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isOpenAIConfigOpen, setIsOpenAIConfigOpen] = useState(false);
-  const [openAIConfig, setOpenAIConfig] = useState<OpenAIConfig>({});
+  const [openAIConfigState, setOpenAIConfigState] = useState<OpenAIConfigState>({ enabled: false, config: {} });
+  const [projectPreferences, setProjectPreferences] = useState<ProjectPreferences>(() => loadProjectPreferences(null));
+  const openAIConfig = useMemo<OpenAIConfig>(() => {
+    return openAIConfigState.enabled ? openAIConfigState.config : {};
+  }, [openAIConfigState]);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(OPENAI_CONFIG_STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      setOpenAIConfig(normalizeOpenAIConfig(parsed));
-    } catch {
-      setOpenAIConfig({});
-    }
+    setOpenAIConfigState(loadOpenAIConfigState());
   }, []);
+
+  useEffect(() => {
+    setProjectPreferences(loadProjectPreferences(currentSessionId));
+
+    const handlePreferencesChanged = () => {
+      setProjectPreferences(loadProjectPreferences(currentSessionId));
+    };
+
+    window.addEventListener(PROJECT_PREFERENCES_CHANGED_EVENT, handlePreferencesChanged as EventListener);
+    return () => {
+      window.removeEventListener(PROJECT_PREFERENCES_CHANGED_EVENT, handlePreferencesChanged as EventListener);
+    };
+  }, [currentSessionId]);
 
   const [viewMode, setViewMode] = useState<'chat' | 'dashboard'>('chat');
   const [dashboardType, setDashboardType] = useState<'list' | 'tree'>('list');
-  const [topologyData, setTopologyData] = useState<{ nodes: any[], edges: any[] }>({ nodes: [], edges: [] });
-  const [projectAssets, setProjectAssets] = useState<{
-    characters: any[];
-    worlds: any[];
-    chapters: any[];
-    outlines: any[];
-  }>({ characters: [], worlds: [], chapters: [], outlines: [] });
+  const [topologyData, setTopologyData] = useState<ContentTopology>({ nodes: [], edges: [] });
+  const [projectAssets, setProjectAssets] = useState<ProjectAssets>({ characters: [], worlds: [], chapters: [], outlines: [] });
   const [isRefreshingAssets, setIsRefreshingAssets] = useState(false);
 
   const [activeArtifacts, setActiveArtifacts] = useState<ArtifactData[]>([]);
@@ -87,7 +109,21 @@ export default function ChatPage() {
 
   const { addCharacter } = useAppStore();
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const worldTreeTopology = useMemo(() => ({
+    nodes: topologyData.nodes.map((node): WorldTreeNode => ({
+      id: node.id,
+      label: node.title,
+      type: String(node.type),
+      importance: 'medium',
+      metadata: {},
+    })),
+    edges: topologyData.edges.map((edge) => ({
+      source: edge.source,
+      target: edge.target,
+      type: edge.type,
+      label: edge.type,
+    })),
+  }), [topologyData]);
 
   const currentMessages = currentSessionId
     ? (messagesMap.get(currentSessionId) ?? [
@@ -99,6 +135,16 @@ export default function ChatPage() {
         }
       ])
     : [];
+
+  const currentSessionTitle = useMemo(
+    () => sessions.find((session) => session.id === currentSessionId)?.title ?? null,
+    [currentSessionId, sessions]
+  );
+
+  const projectSummary = useMemo(
+    () => buildProjectChatSummary(currentSessionTitle, projectAssets),
+    [currentSessionTitle, projectAssets]
+  );
 
   // 处理会话切换：重置所有局部状态防止抽搐
   const handleSelectSession = useCallback((id: string) => {
@@ -113,7 +159,7 @@ export default function ChatPage() {
   // ============================================================
   useEffect(() => {
     const fetchHistory = async () => {
-      if (!currentSessionId || !isLoggedIn) return;
+      if (!currentSessionId) return;
       const existing = messagesMap.get(currentSessionId);
       if (existing && existing.length > 1) return;
 
@@ -123,7 +169,7 @@ export default function ChatPage() {
         if (history && history.messages) {
           const formatted = history.messages.map(m => ({
             id: m.id || `hist-${Math.random()}`,
-            role: m.role as any,
+            role: toMessageRole(m.role),
             content: extractCleanText(m.content),
             timestamp: m.timestamp ? new Date(m.timestamp) : new Date(),
           }));
@@ -140,7 +186,7 @@ export default function ChatPage() {
       }
     };
     fetchHistory();
-  }, [currentSessionId, isLoggedIn]);
+  }, [currentSessionId, messagesMap]);
 
   // ============================================================
   // 仪表盘资产管理
@@ -153,10 +199,10 @@ export default function ChatPage() {
         .then(res => {
           if (res && res.items) {
             setProjectAssets({
-              characters: res.items.filter((i: any) => (i.metadata?.type || i.type) === 'character'),
-              worlds: res.items.filter((i: any) => (i.metadata?.type || i.type) === 'world'),
-              chapters: res.items.filter((i: any) => (i.metadata?.type || i.type) === 'chapter'),
-              outlines: res.items.filter((i: any) => (i.metadata?.type || i.type) === 'novel' || (i.metadata?.type || i.type) === 'outline'),
+              characters: res.items.filter((i) => i.metadata.type === 'character'),
+              worlds: res.items.filter((i) => i.metadata.type === 'world'),
+              chapters: res.items.filter((i) => i.metadata.type === 'chapter'),
+              outlines: res.items.filter((i) => i.metadata.type === 'novel' || i.metadata.type === 'outline'),
             });
           }
         })
@@ -178,6 +224,16 @@ export default function ChatPage() {
   }, [currentSessionId]);
 
   useEffect(() => {
+    if (!currentSessionId) {
+      setTopologyData({ nodes: [], edges: [] });
+      setProjectAssets({ characters: [], worlds: [], chapters: [], outlines: [] });
+      return;
+    }
+
+    refreshProjectAssets();
+  }, [currentSessionId, refreshProjectAssets]);
+
+  useEffect(() => {
     if (viewMode === 'dashboard') {
       refreshProjectAssets();
       const interval = setInterval(() => {
@@ -188,8 +244,53 @@ export default function ChatPage() {
   }, [viewMode, currentSessionId, refreshProjectAssets]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [currentMessages.length]);
+    const handleTaskCompleted = (event: Event) => {
+      const customEvent = event as CustomEvent<{
+        taskId?: string;
+        taskType?: string;
+        sessionId?: string | null;
+        result?: Record<string, unknown>;
+      }>;
+      const detail = customEvent.detail;
+      if (!detail) return;
+      if (detail.sessionId && currentSessionId && detail.sessionId !== currentSessionId) return;
+
+      refreshProjectAssets();
+
+      if (detail.taskType === 'novel_import') {
+        const result = detail.result as Record<string, unknown> | undefined;
+        const chaptersCount = typeof result?.chapters_count === 'number' ? result.chapters_count : null;
+        const warning = typeof result?.analysis_warning === 'string' ? result.analysis_warning : '';
+        const suffix = chaptersCount !== null ? `，新增 ${chaptersCount} 个章节资产` : '';
+        const baseMessage = `导入任务已完成${suffix}`;
+        setSaveNotification(warning ? `${baseMessage}。${warning}` : baseMessage);
+        setTimeout(() => setSaveNotification(null), 4000);
+      }
+    };
+
+    window.addEventListener('novelforge:task-completed', handleTaskCompleted as EventListener);
+    return () => {
+      window.removeEventListener('novelforge:task-completed', handleTaskCompleted as EventListener);
+    };
+  }, [currentSessionId, refreshProjectAssets]);
+
+  useSessionTaskEvents({
+    sessionId: currentSessionId,
+    onFailed: (detail) => {
+      if (detail.taskType !== 'novel_import') {
+        return;
+      }
+      setSaveNotification(`Import task failed: ${detail.error || detail.message || 'unknown error'}`);
+      setTimeout(() => setSaveNotification(null), 4000);
+    },
+    onCancelled: (detail) => {
+      if (detail.taskType !== 'novel_import') {
+        return;
+      }
+      setSaveNotification('Import task was cancelled before completion');
+      setTimeout(() => setSaveNotification(null), 3000);
+    },
+  });
 
   const handleExportProject = async () => {
     if (!currentSessionId) return;
@@ -205,11 +306,12 @@ export default function ChatPage() {
         alert('当前项目还没有任何已保存的资产可以导出。');
         return;
       }
-      const blob = await contentService.export(allAssetIds, 'json');
+      const exportFormat = projectPreferences.default_export_format;
+      const blob = await contentService.export(allAssetIds, exportFormat);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `NovelForge-Project-${currentSessionId}.json`;
+      a.download = `NovelForge-Project-${currentSessionId}.${exportFormat}`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -226,16 +328,31 @@ export default function ChatPage() {
   const handleGenerateChapter = () => {
     if (!currentSessionId) return;
     setIsGeneratingChapter(true);
-    const charNames = projectAssets.characters.map((c: any) => {
-      try { const d = JSON.parse(c.content || '{}'); return d.name || c.metadata.title; }
-      catch { return c.metadata.title; }
-    }).join('、');
-    const worldName = projectAssets.worlds[0]
-      ? (() => { try { const d = JSON.parse(projectAssets.worlds[0].content || '{}'); return d.name || projectAssets.worlds[0].metadata.title; } catch { return projectAssets.worlds[0].metadata.title; } })()
+    const charNames = projectAssets.characters
+      .map((character) => {
+        const payload = character.extracted_data;
+        if (payload && typeof payload === 'object' && typeof payload.name === 'string' && payload.name.trim().length > 0) {
+          return payload.name;
+        }
+        return character.metadata.title;
+      })
+      .join('、');
+    const firstWorld = projectAssets.worlds[0];
+    const worldName = firstWorld
+      ? (() => {
+          const payload = firstWorld.extracted_data;
+          if (payload && typeof payload === 'object' && typeof payload.name === 'string' && payload.name.trim().length > 0) {
+            return payload.name;
+          }
+          return firstWorld.metadata.title;
+        })()
       : '';
     const chapterNum = projectAssets.chapters.length + 1;
     const outlineHint = projectAssets.outlines[0]?.metadata?.title || '';
-    let prompt = `请根据当前项目设定，创作第 ${chapterNum} 章的正文内容（约1000-1500字）。`;
+    const targetWords = Math.max(200, projectPreferences.chapter_target_words || 1500);
+    const lowerBound = Math.max(200, targetWords - 200);
+    const upperBound = targetWords + 200;
+    let prompt = `请根据当前项目设定，创作第 ${chapterNum} 章的正文内容（约${lowerBound}-${upperBound}字，目标 ${targetWords} 字）。`;
     if (charNames) prompt += `主要角色：${charNames}。`;
     if (worldName) prompt += `故事背景：${worldName}。`;
     if (outlineHint) prompt += `参考大纲：${outlineHint}。`;
@@ -245,14 +362,6 @@ export default function ChatPage() {
       handleSendMessage(prompt);
       setIsGeneratingChapter(false);
     }, 100);
-  };
-
-  const handleLogin = () => {
-    setIsLoggedIn(true);
-    try {
-      localStorage.setItem('novelforge-logged-in', 'true');
-    } catch {}
-    window.scrollTo(0, 0);
   };
 
   const appendMessage = useCallback((sessionId: string, msg: Message) => {
@@ -267,45 +376,45 @@ export default function ChatPage() {
     });
   }, []);
 
-  const handleArtifactSave = useCallback(async (artifact: ParsedArtifact, updatedData?: Record<string, any>) => {
-    const finalData = updatedData || artifact.data;
-    const ACTION_TO_CONTENT_TYPE: Record<string, string> = {
-      record_character: 'character',
-      update_character: 'character',
-      record_world: 'world',
-      record_outline: 'novel',
-      record_timeline: 'timeline',
-      write_chapter: 'chapter',
-    };
-    const action = artifact.toolCall?.action || '';
-    const contentType = ACTION_TO_CONTENT_TYPE[action] || 'character';
+  const updateMessage = useCallback((sessionId: string, messageId: string, patch: Partial<Message>) => {
+    setMessagesMap(prev => {
+      const next = new Map(prev);
+      const existing = next.get(sessionId) ?? [];
+      next.set(
+        sessionId,
+        existing.map((msg) => (msg.id === messageId ? { ...msg, ...patch } : msg))
+      );
+      return next;
+    });
+  }, []);
 
-    if (contentType === 'character') {
+  const handleArtifactSave = useCallback(async (artifact: ParsedArtifact, updatedData?: Record<string, unknown>) => {
+    const finalData = updatedData ?? artifact.data;
+    const saveRequest = buildContentCreateRequestFromArtifact({
+      artifact,
+      data: finalData,
+      sessionId: currentSessionId || undefined,
+    });
+
+    if (saveRequest.metadata.type === 'character') {
       addCharacter({
-        id: String(finalData.name || artifact.title),
-        name: (finalData.name as string) || artifact.title,
-        role: (finalData.role as string) || 'supporting',
-        description: (finalData.description as string) || '',
-        background: (finalData.background as string) || '',
-        personality: (finalData.personality as string) || '',
-        importance: (finalData.importance as any) || 'medium',
-        abilities: (finalData.abilities as string[]) || [],
-        tags: (finalData.tags as string[]) || [],
-        relationships: (finalData.relationships as any[]) || [],
+        id: readString(finalData.name) ?? saveRequest.metadata.title,
+        name: readString(finalData.name) ?? saveRequest.metadata.title,
+        role: readString(finalData.role) ?? 'supporting',
+        description: readString(finalData.description) ?? '',
+        background: readString(finalData.background) ?? '',
+        personality: readString(finalData.personality) ?? '',
+        importance: normalizeImportanceLevel(finalData.importance),
+        abilities: readStringArray(finalData.abilities),
+        tags: readStringArray(finalData.tags),
+        relationships: parseCharacterRelationships(finalData.relationships),
         example_messages: [],
       });
     }
 
     try {
-      await contentService.create({
-        content_type: contentType,
-        title: (finalData.name as string) || (finalData.chapter_title as string) || (finalData.title as string) || artifact.title,
-        content: JSON.stringify(finalData, null, 2),
-        metadata: finalData,
-        tags: [contentType, 'ai-generated', `project-${currentSessionId}`],
-        session_id: currentSessionId || undefined,
-      });
-      setSaveNotification(`「${(finalData.name as string) || artifact.title}」已同步至项目档案`);
+      await upsertContentAsset(saveRequest);
+      setSaveNotification(`「${saveRequest.metadata.title}」已同步至项目档案`);
       setTimeout(() => setSaveNotification(null), 3000);
       refreshProjectAssets();
     } catch (err) {
@@ -313,31 +422,86 @@ export default function ChatPage() {
     }
   }, [addCharacter, currentSessionId, refreshProjectAssets]);
 
-  const handleApplyOpenAIConfig = useCallback((nextConfig: OpenAIConfig) => {
-    const normalized = normalizeOpenAIConfig(nextConfig);
-    setOpenAIConfig(normalized);
-    try {
-      if (Object.keys(normalized).length > 0) {
-        localStorage.setItem(OPENAI_CONFIG_STORAGE_KEY, JSON.stringify(normalized));
-      } else {
-        localStorage.removeItem(OPENAI_CONFIG_STORAGE_KEY);
-      }
-    } catch {}
+  const handleApplyOpenAIConfig = useCallback((state: OpenAIConfigState) => {
+    const savedState = saveOpenAIConfigState(state);
+    setOpenAIConfigState(savedState);
   }, []);
 
   const handleSendMessage = async (text: string) => {
     if (!currentSessionId) return;
+    const requestContext = {
+      session_id: currentSessionId,
+      project_title: currentSessionTitle ?? undefined,
+      project_summary: projectSummary,
+      system_prompt:
+        '如果当前项目已经存在角色、世界观、章节或大纲，请优先沿用它们的命名、设定和关系，不要无故重置或改写既有资产。',
+    };
     appendMessage(currentSessionId, { id: `msg-${Date.now()}`, role: 'user', content: text, timestamp: new Date() });
+    const assistantMessageId = `msg-agent-${Date.now()}`;
+    appendMessage(currentSessionId, {
+      id: assistantMessageId,
+      role: 'assistant',
+      content: '',
+      thinking: '',
+      isStreaming: true,
+      timestamp: new Date(),
+    });
     setIsGenerating(true);
     setArtifactPanelVisible(false);
     try {
-      const reply = await chatService.sendMessage(currentSessionId, text, undefined, openAIConfig);
-      const aiContent = reply.message?.content || '...';
-      const artifacts = parseMultipleAIArtifacts(aiContent);
-      const displayContent = artifacts.length > 0 ? (artifacts[0].cleanText || aiContent) : aiContent;
-      appendMessage(currentSessionId, {
-        id: reply.message?.id || `msg-agent-${Date.now()}`,
-        role: 'assistant', content: displayContent, timestamp: new Date(),
+      let finalContent = '';
+      let finalThinking = '';
+      let streamedSuccessfully = false;
+
+      try {
+        for await (const event of chatService.streamMessage(currentSessionId, text, requestContext, openAIConfig)) {
+          if (event.type === 'thinking_delta' && typeof event.delta === 'string') {
+            finalThinking += event.delta;
+            updateMessage(currentSessionId, assistantMessageId, { thinking: finalThinking });
+          }
+          if (event.type === 'content_delta' && typeof event.delta === 'string') {
+            finalContent += event.delta;
+            updateMessage(currentSessionId, assistantMessageId, { content: finalContent, thinking: finalThinking });
+          }
+          if (event.type === 'message_complete') {
+            if (typeof event.content === 'string') finalContent = event.content;
+            if (typeof event.thinking === 'string') finalThinking = event.thinking;
+            streamedSuccessfully = true;
+            updateMessage(currentSessionId, assistantMessageId, {
+              content: finalContent,
+              thinking: finalThinking,
+              isStreaming: false,
+            });
+          }
+          if (event.type === 'error') {
+            throw new Error(typeof event.error === 'string' ? event.error : '流式消息失败');
+          }
+        }
+      } catch (streamError) {
+        console.warn('Streaming failed, falling back to sync chat:', streamError);
+        const reply = await chatService.sendMessage(currentSessionId, text, requestContext, openAIConfig);
+        const aiContent = reply.message?.content || '...';
+        const parsed = parseThinkingProcess(aiContent);
+        finalContent = parsed.answer || aiContent;
+        finalThinking = parsed.thinking;
+        updateMessage(currentSessionId, assistantMessageId, {
+          content: finalContent,
+          thinking: finalThinking,
+          isStreaming: false,
+        });
+        streamedSuccessfully = true;
+      }
+
+      if (!streamedSuccessfully) {
+        updateMessage(currentSessionId, assistantMessageId, { isStreaming: false });
+      }
+
+      const artifacts = parseMultipleAIArtifacts(finalContent);
+      const displayContent = artifacts.length > 0 ? (artifacts[0].cleanText || finalContent) : finalContent;
+      updateMessage(currentSessionId, assistantMessageId, {
+        content: displayContent,
+        thinking: finalThinking,
+        isStreaming: false,
       });
       if (artifacts.length > 0) {
         setActiveArtifacts(artifacts.map((a: ParsedArtifact) => ({
@@ -351,28 +515,34 @@ export default function ChatPage() {
       updateSessionPreview(currentSessionId, displayContent, text.slice(0, 20));
     } catch (error) {
       console.error(error);
+      const message = error instanceof Error ? error.message : '发送消息失败';
+      updateMessage(currentSessionId, assistantMessageId, {
+        content: `请求失败：${message}`,
+        thinking: '',
+        isStreaming: false,
+      });
     } finally {
       setIsGenerating(false);
     }
   };
 
   // 全局加载判断
-  if (isLoggedIn === null) {
+  if (isSessionsLoading && sessions.length === 0) {
     return (
-      <div style={{ display: 'flex', height: '100vh', width: '100vw', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-base)', flexDirection: 'column', gap: 16 }}>
+      <div style={{ display: 'flex', minHeight: '60vh', width: '100%', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-base)', flexDirection: 'column', gap: 16 }}>
         <Loader2 className="animate-spin" size={32} color="var(--accent-primary)" />
-        <div style={{ color: 'var(--text-muted)', fontSize: 14 }}>正在初始化您的创作空间...</div>
+        <div style={{ color: 'var(--text-muted)', fontSize: 14 }}>正在初始化工作区...</div>
       </div>
     );
   }
 
   // 错误状态兜底
-  if (sessionsError) {
+  if (sessionsError && sessions.length === 0) {
     return (
-      <div style={{ display: 'flex', height: '100vh', width: '100vw', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-base)', flexDirection: 'column', gap: 20 }}>
+      <div style={{ display: 'flex', minHeight: '60vh', width: '100%', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-base)', flexDirection: 'column', gap: 20 }}>
         <AlertCircle size={48} color="#ef4444" />
         <div style={{ textAlign: 'center' }}>
-          <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>空间同步失败</h2>
+          <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>工作区同步失败</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>{sessionsError}</p>
         </div>
         <button onClick={() => loadSessions()} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 20px', borderRadius: 12, background: 'var(--accent-primary)', color: '#fff', border: 'none', cursor: 'pointer' }}>
@@ -382,17 +552,24 @@ export default function ChatPage() {
     );
   }
   
-  if (!isLoggedIn) return <LandingPage onLogin={handleLogin} />;
-
   return (
-    <div style={{ display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden', background: 'var(--bg-base)' }}>
-      <ChatSidebar
-        collapsed={sidebarCollapsed} onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-        currentSessionId={currentSessionId || ''} onSelectSession={handleSelectSession}
-        onNewSession={createNewSession} onDeleteSession={deleteSession} sessions={sessions}
-      />
+    <div
+      style={{
+        display: 'flex',
+        height: '100%',
+        minHeight: 0,
+        width: '100%',
+        overflow: 'hidden',
+        background: 'var(--bg-base)',
+      }}
+    >
+        <ChatSidebar
+          collapsed={sidebarCollapsed} onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+          currentSessionId={currentSessionId || ''} onSelectSession={handleSelectSession}
+          onNewSession={createNewSession} onDeleteSession={deleteSession} sessions={sessions}
+        />
 
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', minWidth: 0 }}>
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
         <header style={{
           height: 60, padding: '0 24px', borderBottom: '1px solid var(--border-subtle)',
           background: 'var(--bg-surface)', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -440,7 +617,7 @@ export default function ChatPage() {
             >
               <SlidersHorizontal size={16} />
               <span style={{ fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {openAIConfig.model || 'AI 配置'}
+                {openAIConfigState.enabled ? (openAIConfig.model || '自定义模型') : '后端默认模型'}
               </span>
             </button>
             <button
@@ -457,12 +634,11 @@ export default function ChatPage() {
           </div>
         </header>
 
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {viewMode === 'chat' ? (
             <>
-              <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                 <MessageList messages={currentMessages.filter(m => m.role !== 'system')} />
-                <div ref={messagesEndRef} />
                 {isGenerating && (
                   <div style={{ display: 'flex', alignItems: 'center', padding: '16px 40px', color: 'var(--text-muted)' }}>
                     <Loader2 size={18} className="animate-spin" style={{ marginRight: 10 }} />
@@ -527,7 +703,7 @@ export default function ChatPage() {
                     <WorldTree 
                       key={currentSessionId} // 关键修复：强制重置世界树实例
                       sessionId={currentSessionId || ''} 
-                      topology={topologyData} 
+                      topology={worldTreeTopology} 
                       onNodeDelete={async (nodeId) => {
                         try {
                           await contentService.deleteContentItem(nodeId);
@@ -536,16 +712,18 @@ export default function ChatPage() {
                           console.error('Failed to delete node:', err);
                         }
                       }}
-                      onNodeClick={async (node: any) => {
+                      onNodeClick={async (node: WorldTreeNode) => {
                         const detail = await contentService.getById(node.id);
                         if (detail) {
-                          let parsedData: any = {};
-                          try { parsedData = JSON.parse(detail.content || '{}'); } catch { parsedData = detail.extracted_data || {}; }
-                          setActiveArtifacts([{ 
-                            type: detail.metadata.type === 'novel' ? 'outline' : detail.metadata.type, 
-                            title: detail.metadata.title, 
-                            data: parsedData 
-                          } as any]);
+                          const payload = getContentAssetPayload(detail);
+                          const parsedData = Object.keys(payload).length > 0
+                            ? payload
+                            : { content: detail.content || '' };
+                          setActiveArtifacts([{
+                            type: getArtifactPanelType(detail.metadata.type),
+                            title: detail.metadata.title,
+                            data: parsedData,
+                          }]);
                           setArtifactPanelVisible(true);
                         }
                       }}
@@ -568,20 +746,20 @@ export default function ChatPage() {
                         </div>
                       ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                          {projectAssets.chapters.map((chap: any) => {
-                            let parsedChapData: any = {};
-                            try { parsedChapData = JSON.parse(chap.content || '{}'); } catch { parsedChapData = { content: chap.content || '' }; }
-                            const chapText = parsedChapData.content || chap.content || '';
+                          {projectAssets.chapters.map((chap) => {
+                            const parsedChapData = getContentAssetPayload(chap);
+                            const chapterTitle = getContentAssetTitle(chap, parsedChapData);
+                            const chapText = getContentAssetText(chap, parsedChapData);
                             return (
                               <div key={chap.metadata.id} style={{
                                 padding: 24, borderRadius: 16, background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
                                 boxShadow: 'var(--shadow-sm)', cursor: 'pointer'
                               }} onClick={() => {
-                                setActiveArtifacts([{ type: 'chapter', title: chap.metadata.title, data: { chapter_title: parsedChapData.chapter_title || chap.metadata.title, content: chapText } }]);
+                                setActiveArtifacts([{ type: 'chapter', title: chapterTitle, data: { ...parsedChapData, chapter_title: chapterTitle, content: chapText } }]);
                                 setArtifactPanelVisible(true);
                               }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12, alignItems: 'center' }}>
-                                  <h4 style={{ fontWeight: 700, fontSize: 15 }}>{chap.metadata.title}</h4>
+                                  <h4 style={{ fontWeight: 700, fontSize: 15 }}>{chapterTitle}</h4>
                                   <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                                     <span style={{ fontSize: 11, color: 'var(--text-disabled)', background: 'var(--bg-base)', padding: '2px 8px', borderRadius: 6 }}>{chapText.length} 字</span>
                                   </div>
@@ -604,9 +782,9 @@ export default function ChatPage() {
                         {projectAssets.characters.length === 0 ? (
                           <div style={{ padding: 20, border: '1px dashed var(--border-subtle)', borderRadius: 12, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>还没有角色</div>
                         ) : (
-                          projectAssets.characters.map((char: any) => {
-                            let charData: Record<string, any> = {};
-                            try { charData = JSON.parse(char.content || '{}'); } catch { charData = char.extracted_data || {}; }
+                          projectAssets.characters.map((char) => {
+                            const charData = getContentAssetPayload(char);
+                            const role = readString(charData.role) ?? '设定';
                             return (
                               <div key={char.metadata.id} onClick={() => {
                                 setActiveArtifacts([{ type: 'character_card', title: char.metadata.title, data: charData }]);
@@ -615,7 +793,7 @@ export default function ChatPage() {
                                 <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(59, 130, 246, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#60a5fa', fontSize: 16, fontWeight: 700, flexShrink: 0 }}>{char.metadata.title[0]}</div>
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                   <div style={{ fontWeight: 600, fontSize: 14 }}>{char.metadata.title}</div>
-                                  <div style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{charData.role || '设定'}</div>
+                                  <div style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{role}</div>
                                 </div>
                               </div>
                             );
@@ -642,11 +820,11 @@ export default function ChatPage() {
         onClose={() => setArtifactPanelVisible(false)}
         artifacts={activeArtifacts}
         onSaveToProject={(art, updatedData) => {
-          handleArtifactSave({ type: art.type, title: art.title, data: art.data, toolCall: art.toolCall, cleanText: '' } as any, updatedData);
+          handleArtifactSave(toParsedArtifact(art), updatedData);
         }}
         onSaveAll={async (payload) => {
           for (const item of payload) {
-            await handleArtifactSave({ type: item.artifact.type, title: item.artifact.title, data: item.artifact.data, toolCall: item.artifact.toolCall, cleanText: '' } as any, item.data);
+            await handleArtifactSave(toParsedArtifact(item.artifact), item.data);
           }
         }}
       />
@@ -656,31 +834,122 @@ export default function ChatPage() {
         onClose={() => setIsImportModalOpen(false)}
         currentSessionId={currentSessionId || ''}
         openAIConfig={openAIConfig}
-        onSuccess={(count) => {
-          setSaveNotification(`成功导入并拆分提取 ${count} 章节！`);
+        onSubmitted={({ fileName }) => {
+          setSaveNotification(`导入任务已提交：${fileName}，可在右下角任务中心查看进度`);
           setTimeout(() => setSaveNotification(null), 3000);
-          refreshProjectAssets();
         }}
       />
       <OpenAIConfigPanel
         open={isOpenAIConfigOpen}
-        value={openAIConfig}
+        value={openAIConfigState}
         onOpenChange={setIsOpenAIConfigOpen}
         onApply={handleApplyOpenAIConfig}
       />
-      <TaskCenter />
     </div>
   );
 }
 
-function normalizeOpenAIConfig(input: unknown): OpenAIConfig {
-  if (!input || typeof input !== 'object') return {};
-  const candidate = input as Record<string, unknown>;
-  const normalized: OpenAIConfig = {};
-  if (typeof candidate.api_key === 'string' && candidate.api_key.trim()) normalized.api_key = candidate.api_key.trim();
-  if (typeof candidate.base_url === 'string' && candidate.base_url.trim()) normalized.base_url = candidate.base_url.trim();
-  if (typeof candidate.model === 'string' && candidate.model.trim()) normalized.model = candidate.model.trim();
-  return normalized;
+function toMessageRole(role: string): Message['role'] {
+  if (role === 'user' || role === 'assistant' || role === 'system') {
+    return role;
+  }
+  return 'assistant';
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : [];
+}
+
+function normalizeImportanceLevel(value: unknown): ImportanceLevel {
+  return value === 'critical' || value === 'high' || value === 'medium' || value === 'low'
+    ? value
+    : 'medium';
+}
+
+function parseCharacterRelationships(value: unknown): Array<{ target_name: string; relationship: string; description: string }> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+    .map((item) => ({
+      target_name: readString(item.target_name) ?? '',
+      relationship: readString(item.relationship) ?? 'other',
+      description: readString(item.description) ?? '',
+    }))
+    .filter((item) => item.target_name.length > 0);
+}
+
+function summarizeAssetTitles(items: ContentItem[], limit: number): string {
+  const titles = items
+    .slice(0, limit)
+    .map((item) => getContentAssetTitle(item))
+    .filter((title) => typeof title === 'string' && title.trim().length > 0);
+
+  if (titles.length === 0) {
+    return '无';
+  }
+
+  const suffix = items.length > limit ? ` 等 ${items.length} 项` : '';
+  return `${titles.join('、')}${suffix}`;
+}
+
+function summarizeAssetTexts(items: ContentItem[], limit: number, maxLength = 220): string {
+  const snippets = items
+    .slice(0, limit)
+    .map((item) => {
+      const title = getContentAssetTitle(item);
+      const text = getContentAssetText(item, getContentAssetPayload(item)).replace(/\s+/g, ' ').trim();
+      if (!text) {
+        return undefined;
+      }
+
+      const clipped = text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+      return `${title}: ${clipped}`;
+    })
+    .filter((item): item is string => typeof item === 'string' && item.length > 0);
+
+  return snippets.join('\n');
+}
+
+function buildProjectChatSummary(sessionTitle: string | null, assets: ProjectAssets): string {
+  const lines = [
+    `项目名称：${sessionTitle ?? '未命名项目'}`,
+    `角色数量：${assets.characters.length}`,
+    `世界观资产数量：${assets.worlds.length}`,
+    `章节数量：${assets.chapters.length}`,
+    `大纲数量：${assets.outlines.length}`,
+    `角色列表：${summarizeAssetTitles(assets.characters, 8)}`,
+    `世界观列表：${summarizeAssetTitles(assets.worlds, 4)}`,
+    `章节列表：${summarizeAssetTitles(assets.chapters, 6)}`,
+    `大纲列表：${summarizeAssetTitles(assets.outlines, 4)}`,
+  ];
+
+  const outlineDetails = summarizeAssetTexts(assets.outlines, 1, 260);
+  if (outlineDetails) {
+    lines.push(`大纲摘要：\n${outlineDetails}`);
+  }
+
+  const worldDetails = summarizeAssetTexts(assets.worlds, 1, 260);
+  if (worldDetails) {
+    lines.push(`世界观摘要：\n${worldDetails}`);
+  }
+
+  return lines.join('\n');
+}
+
+function toParsedArtifact(artifact: ArtifactData): ParsedArtifact {
+  return {
+    ...artifact,
+    cleanText: '',
+  };
 }
 
 const toggleBtnStyle = (active: boolean): React.CSSProperties => ({

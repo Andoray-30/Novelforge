@@ -31,6 +31,7 @@ ENV/
 .idea/
 *.swp
 *.swo
+.claude/worktrees/
 
 # OS
 .DS_Store

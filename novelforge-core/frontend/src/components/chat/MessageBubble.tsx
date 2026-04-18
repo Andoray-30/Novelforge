@@ -9,6 +9,7 @@ export interface Message {
   content: string;
   timestamp: Date;
   isStreaming?: boolean;
+  thinking?: string;
   // 结构化数据：当 Agent 返回角色卡/世界书等产物时附带
   artifact?: {
     type: 'character_card' | 'world_setting' | 'timeline' | 'relationship' | 'outline';
@@ -120,6 +121,44 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         </div>
       )}
 
+      {/* 思考过程 */}
+      {!isUser && message.thinking ? (
+        <details
+          open={message.isStreaming}
+          style={{
+            maxWidth: '85%',
+            width: '100%',
+            borderRadius: 12,
+            border: '1px solid var(--border-subtle)',
+            background: 'rgba(148, 163, 184, 0.08)',
+            color: 'var(--text-muted)',
+            fontSize: 12,
+            overflow: 'hidden',
+          }}
+        >
+          <summary
+            style={{
+              cursor: 'pointer',
+              listStyle: 'none',
+              padding: '10px 14px',
+              fontWeight: 600,
+              userSelect: 'none',
+            }}
+          >
+            {message.isStreaming ? 'AI 思考中…' : '查看思考过程'}
+          </summary>
+          <div
+            style={{
+              padding: '0 14px 12px',
+              whiteSpace: 'pre-wrap',
+              lineHeight: 1.7,
+            }}
+          >
+            {message.thinking}
+          </div>
+        </details>
+      ) : null}
+
       {/* 气泡主体 */}
       <div
         style={{
@@ -210,26 +249,40 @@ interface MessageListProps {
 }
 
 export function MessageList({ messages }: MessageListProps) {
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const lastMessage = messages[messages.length - 1];
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior: lastMessage?.isStreaming ? 'auto' : 'smooth',
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [messages.length, lastMessage?.content, lastMessage?.thinking, lastMessage?.isStreaming]);
 
   return (
     <div
+      ref={containerRef}
       style={{
         flex: 1,
         overflowY: 'auto',
         padding: '24px clamp(16px, 5%, 80px)',
         display: 'flex',
         flexDirection: 'column',
+        minHeight: 0,
       }}
     >
       {messages.map(msg => (
         <MessageBubble key={msg.id} message={msg} />
       ))}
-      <div ref={bottomRef} />
     </div>
   );
 }

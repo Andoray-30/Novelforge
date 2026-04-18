@@ -13,14 +13,23 @@ from .content_database_storage import ContentDatabaseStorage
 class StorageManager:
     """存储管理器 - 统一管理不同存储策略"""
     
-    def __init__(self, default_storage: Literal["file", "memory", "database", "content_db"] = "file"):
+    def __init__(
+        self,
+        default_storage: Literal["file", "memory", "database", "content_db"] = "file",
+        file_storage_dir: Optional[str] = None,
+        database_path: Optional[str] = None,
+        content_db_path: Optional[str] = None,
+    ):
+        file_storage = FileStorage(file_storage_dir) if file_storage_dir else FileStorage()
+        database_storage = DatabaseStorage(database_path) if database_path else DatabaseStorage()
+        content_db_storage = ContentDatabaseStorage(content_db_path) if content_db_path else ContentDatabaseStorage()
         self._storages = {
-            "file": FileStorage(),
+            "file": file_storage,
             "memory": MemoryStorage(),
-            "database": DatabaseStorage(),
-            "content_db": ContentDatabaseStorage()
+            "database": database_storage,
+            "content_db": content_db_storage
         }
-        self._default_storage = default_storage
+        self._default_storage = default_storage if default_storage in self._storages else "file"
         
     def get_storage(self, storage_type: Optional[Literal["file", "memory", "database", "content_db"]] = None) -> BaseStorage:
         """获取指定类型的存储实例"""

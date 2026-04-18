@@ -30,10 +30,26 @@ if not _env_loaded:
 class Config:
     """配置类"""
     def __init__(self):
+        project_root = Path(__file__).resolve().parents[2]
+
+        def resolve_data_path(raw_value: str, default_relative: str) -> str:
+            if isinstance(raw_value, str) and raw_value.strip():
+                candidate = Path(raw_value.strip())
+            else:
+                candidate = project_root / default_relative
+            if not candidate.is_absolute():
+                candidate = project_root / candidate
+            return str(candidate.resolve())
         # API 配置
         self.api_key: Optional[str] = os.getenv("OPENAI_API_KEY")
         self.base_url: str = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
         self.model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        self.strict_model: bool = os.getenv("OPENAI_STRICT_MODEL", "false").lower() == "true"
+        self.fallback_models: list[str] = [
+            item.strip()
+            for item in os.getenv("OPENAI_FALLBACK_MODELS", "").split(",")
+            if item.strip()
+        ]
         
         # SillyTavern 配置
         self.sillytavern_url: Optional[str] = os.getenv("SILLYTAVERN_URL")
@@ -68,8 +84,22 @@ class Config:
         self.retry_max_delay: float = float(os.getenv("RETRY_MAX_DELAY", "120.0"))
         
         # 存储配置
-        self.storage_type: str = os.getenv("STORAGE_TYPE", "file")
-        self.database_path: str = os.getenv("DATABASE_PATH", "./data/novelforge_content.db")
+        # Keep all persistence paths stable across different working directories.
+        self.data_dir: str = resolve_data_path(os.getenv("NOVELFORGE_DATA_DIR", ""), "data")
+        self.storage_type: str = (os.getenv("STORAGE_TYPE", "file") or "file").strip().lower()
+        self.use_content_database: bool = os.getenv("USE_CONTENT_DATABASE", "false").lower() == "true"
+        self.file_storage_dir: str = resolve_data_path(
+            os.getenv("FILE_STORAGE_DIR", ""),
+            str(Path(self.data_dir) / "file_storage"),
+        )
+        self.database_path: str = resolve_data_path(
+            os.getenv("DATABASE_PATH", ""),
+            str(Path(self.data_dir) / "novelforge.db"),
+        )
+        self.content_database_path: str = resolve_data_path(
+            os.getenv("CONTENT_DATABASE_PATH", ""),
+            str(Path(self.data_dir) / "novelforge_content.db"),
+        )
 
     def clone(self) -> "Config":
         """Clone the current config without reloading environment variables."""
@@ -83,6 +113,7 @@ class Config:
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         model: Optional[str] = None,
+        strict_model: Optional[bool] = None,
     ) -> "Config":
         """Return a cloned config with runtime OpenAI overrides applied."""
         cloned = self.clone()
@@ -94,6 +125,12 @@ class Config:
         if model is not None:
             normalized_model = model.strip()
             cloned.model = normalized_model or cloned.model
+            if normalized_model:
+                # Runtime-selected model should be honored as-is unless explicitly configured otherwise.
+                cloned.strict_model = True
+                cloned.fallback_models = []
+        if strict_model is not None:
+            cloned.strict_model = strict_model
         return cloned
     
     @classmethod

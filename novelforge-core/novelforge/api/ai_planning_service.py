@@ -275,7 +275,4 @@ _ai_planning_service: Optional[AIPlanningService] = None
 
 def get_ai_planning_service(ai_service: AIService) -> AIPlanningService:
     """获取AI规划服务实例"""
-    global _ai_planning_service
-    if _ai_planning_service is None:
-        _ai_planning_service = AIPlanningService(ai_service)
-    return _ai_planning_service
+    return AIPlanningService(ai_service)

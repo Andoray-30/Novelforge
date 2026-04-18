@@ -36,6 +36,9 @@ export function ChatSidebar({
       style={{
         width: collapsed ? '60px' : '256px',
         minWidth: collapsed ? '60px' : '256px',
+        height: '100%',
+        maxHeight: '100%',
+        minHeight: 0,
         background: 'var(--bg-surface)',
         borderRight: '1px solid var(--border-subtle)',
         display: 'flex',
