@@ -96,6 +96,7 @@ Desktop.ini
 .opencode/
 .cursor/
 .copilot/
+.qwen/
 
 # -----------------------------------------------------------
 # Node.js（前端 node_modules 由 novelforge-core/.gitignore 处理，
