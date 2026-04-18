@@ -92,6 +92,10 @@ Desktop.ini
 # -----------------------------------------------------------
 .sisyphus/
 .git_backup/
+.claude/
+.opencode/
+.cursor/
+.copilot/
 
 # -----------------------------------------------------------
 # Node.js（前端 node_modules 由 novelforge-core/.gitignore 处理，
