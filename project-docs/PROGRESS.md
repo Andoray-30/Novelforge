@@ -4142,3 +4142,47 @@
   - 下一步建议继续拆两条线：
     - 清理主工作台与 ArtifactPanel 中残留乱码。
     - 将世界树从“全量拓扑堆叠”改为可筛选、可折叠的分层视图，否则节点多时仍不够好用。
+
+## 2026-05-24 导入章节结构第三十轮：章节 metadata 规范与长章节拆分命名
+- 本轮目标：
+  - 为新导入章节补充向后兼容的章节 metadata。
+  - 修正长章节自动拆分后的片段标题，让目录和编辑器更容易理解。
+  - 不做 UI 重构、不做数据库迁移、不改变现有 API 返回结构。
+- 后端实现：
+  - 新增导入章节 metadata 规范化 helper。
+  - 新导入章节 `extracted_data` 继续保留旧字段：
+    - `title`
+    - `chapter_title`
+    - `content`
+    - `chapter_index`
+    - `source`
+  - 同时新增向后兼容字段：
+    - `display_title`
+    - `original_title`
+    - `source_type`
+    - `chapter_role`
+    - `volume_index`
+    - `segment_index`
+    - `is_decorative`
+    - `word_count`
+    - `quality_flags`
+  - 普通导入章节默认 `source_type=imported`。
+  - 长章节拆分片段使用 `source_type=system_split`，并写入 `system_split` 元数据：
+    - `split_from_title`
+    - `split_from_chapter_index`
+    - `split_part`
+    - `split_total`
+    - `start_position`
+    - `end_position`
+- 长章节命名：
+  - 原先：`第一卷 第三章（1）`。
+  - 现在：`第一卷 第三章 · 片段 01`。
+  - 片段编号宽度随总片段数稳定补零，避免排序和显示混乱。
+- 测试：
+  - 更新导入章节内容保留测试，验证新 metadata 字段写入。
+  - 更新长章节拆分测试，验证稳定片段标题和 `system_split` 元数据。
+  - 新增 helper 测试，验证 system split 片段的 `display_title / original_title / source_type / chapter_role / volume_index / segment_index / quality_flags`。
+  - 相关测试：`22 passed`。
+- 当前判断：
+  - 这一步先把章节资产的结构底座补齐，旧章节仍能按原字段读取。
+  - 下一步可以在不绑定当前 UI 的前提下，让编辑器/目录优先展示 `display_title`，并把 `chapter_role / word_count / quality_flags` 作为后续章节结构诊断来源。

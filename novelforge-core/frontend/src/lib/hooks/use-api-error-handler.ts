@@ -17,7 +17,7 @@ export function useAPIErrorHandler(options: UseAPIErrorHandlerOptions = {}) {
     let category: ErrorCategory = ErrorCategory.SERVER
     let severity: ErrorSeverity = ErrorSeverity.HIGH
 
-    // 根据错误类型分类
+    // Classify errors by transport/status.
     if (error?.name === 'TypeError' && error.message.includes('fetch')) {
       category = ErrorCategory.NETWORK
       severity = ErrorSeverity.MEDIUM
@@ -41,7 +41,7 @@ export function useAPIErrorHandler(options: UseAPIErrorHandlerOptions = {}) {
     const appError = error instanceof ApplicationError
       ? error
       : new ApplicationError(
-          error?.message || 'API请求失败',
+          error?.message || 'API 请求失败',
           category,
           severity,
           {

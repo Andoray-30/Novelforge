@@ -1160,12 +1160,11 @@ class AITaskScheduler:
         if len(content) <= max_chars:
             return [chapter]
 
-        parts: List[Any] = []
+        chunks: List[Dict[str, Any]] = []
         start = 0
-        part_index = 1
         base_start = getattr(chapter, "start_position", 0) or 0
         title = getattr(chapter, "title", "章节") or "章节"
-        index = getattr(chapter, "index", 0) or 0
+        original_index = getattr(chapter, "index", 0) or 0
 
         while start < len(content):
             target_end = min(start + max_chars, len(content))
@@ -1184,18 +1183,37 @@ class AITaskScheduler:
 
             part_content = content[start:end].strip()
             if part_content:
-                parts.append(
-                    Chapter(
-                        title=f"{title}（{part_index}）",
-                        content=part_content,
-                        start_position=base_start + start,
-                        end_position=base_start + end,
-                        index=index + part_index - 1,
-                        metadata={**(getattr(chapter, "metadata", None) or {}), "split_from_title": title, "split_part": part_index},
-                    )
-                )
-                part_index += 1
+                chunks.append({
+                    "content": part_content,
+                    "start": start,
+                    "end": end,
+                })
             start = end
+
+        parts: List[Any] = []
+        split_total = len(chunks)
+        for part_index, chunk in enumerate(chunks, start=1):
+            segment_title = self._build_split_segment_title(title, part_index, split_total)
+            parts.append(
+                Chapter(
+                    title=segment_title,
+                    content=chunk["content"],
+                    start_position=base_start + chunk["start"],
+                    end_position=base_start + chunk["end"],
+                    index=original_index + part_index - 1,
+                    metadata={
+                        **(getattr(chapter, "metadata", None) or {}),
+                        "source_type": "system_split",
+                        "split_from_title": title,
+                        "split_from_chapter_index": original_index,
+                        "split_part": part_index,
+                        "split_total": split_total,
+                        "segment_index": part_index,
+                        "original_title": title,
+                        "display_title": segment_title,
+                    },
+                )
+            )
 
         return parts or [chapter]
 
@@ -1206,6 +1224,128 @@ class AITaskScheduler:
         for index, chapter in enumerate(expanded, start=1):
             chapter.index = index
         return expanded
+
+    @staticmethod
+    def _build_split_segment_title(title: str, part_index: int, split_total: int) -> str:
+        base_title = (title or "章节").strip() or "章节"
+        width = max(2, len(str(max(split_total, 1))))
+        return f"{base_title} · 片段 {part_index:0{width}d}"
+
+    @staticmethod
+    def _estimate_import_word_count(content: str) -> int:
+        text = content or ""
+        cjk_count = len(re.findall(r"[\u4e00-\u9fff]", text))
+        latin_words = len(re.findall(r"[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)?", text))
+        return cjk_count + latin_words
+
+    @classmethod
+    def _extract_volume_index(cls, title: str) -> int:
+        text = title or ""
+        match = re.search(r"第\s*([一二三四五六七八九十百千万\d]+)\s*[卷部册篇]", text)
+        if not match:
+            match = re.search(r"[卷部册篇]\s*([一二三四五六七八九十百千万\d]+)", text)
+        if not match:
+            return 1
+        token = match.group(1)
+        if token.isdigit():
+            return max(int(token), 1)
+        value = cls._parse_chinese_number(token)
+        return value or 1
+
+    @staticmethod
+    def _parse_chinese_number(token: str) -> int:
+        if not token:
+            return 0
+        if token.isdigit():
+            return int(token)
+        digits = {
+            "零": 0,
+            "〇": 0,
+            "一": 1,
+            "二": 2,
+            "两": 2,
+            "三": 3,
+            "四": 4,
+            "五": 5,
+            "六": 6,
+            "七": 7,
+            "八": 8,
+            "九": 9,
+        }
+        units = {"十": 10, "百": 100, "千": 1000, "万": 10000}
+        total = 0
+        section = 0
+        number = 0
+        for char in token:
+            if char in digits:
+                number = digits[char]
+            elif char in units:
+                unit = units[char]
+                if unit == 10000:
+                    section = (section + number) * unit
+                    total += section
+                    section = 0
+                else:
+                    section += (number or 1) * unit
+                number = 0
+        return total + section + number
+
+    @staticmethod
+    def _infer_chapter_role(title: str, content: str) -> str:
+        text = f"{title or ''}\n{content or ''}".lower()
+        compact_title = re.sub(r"\s+", "", title or "")
+        if any(keyword in compact_title for keyword in ("目录", "目次", "contents")):
+            return "目录"
+        if any(keyword in compact_title for keyword in ("插图", "彩图", "illustration", "image")):
+            return "插图"
+        if any(keyword in compact_title for keyword in ("序章", "楔子", "序幕", "前言", "prologue")):
+            return "序章"
+        if any(keyword in compact_title for keyword in ("终章", "尾声", "后记", "epilogue")):
+            return "终章"
+        if any(keyword in compact_title for keyword in ("番外", "外传", "side story")):
+            return "番外"
+        if any(keyword in compact_title for keyword in ("设定", "世界观", "人物介绍", "角色介绍")):
+            return "设定"
+        if len((content or "").strip()) < 80 and not re.search(r"[。！？.!?]", content or ""):
+            return "插图"
+        return "正文"
+
+    @classmethod
+    def _build_import_chapter_metadata(
+        cls,
+        *,
+        chapter: Any,
+        chapter_number: int,
+        chapter_title: str,
+        chapter_content: str,
+    ) -> Dict[str, Any]:
+        chapter_meta = getattr(chapter, "metadata", None) or {}
+        source_type = chapter_meta.get("source_type") or "imported"
+        original_title = chapter_meta.get("original_title") or chapter_meta.get("split_from_title") or chapter_title
+        display_title = chapter_meta.get("display_title") or chapter_title
+        chapter_role = chapter_meta.get("chapter_role") or cls._infer_chapter_role(original_title, chapter_content)
+        word_count = cls._estimate_import_word_count(chapter_content)
+        is_decorative = chapter_role in {"插图", "目录"} or word_count < 20
+        quality_flags: List[str] = []
+        if is_decorative:
+            quality_flags.append("decorative_or_non_narrative")
+        if word_count < 80:
+            quality_flags.append("short_chapter")
+        if source_type == "system_split":
+            quality_flags.append("system_split")
+
+        return {
+            "display_title": display_title,
+            "original_title": original_title,
+            "source_type": source_type,
+            "chapter_role": chapter_role,
+            "volume_index": chapter_meta.get("volume_index") or cls._extract_volume_index(original_title),
+            "chapter_index": chapter_number,
+            "segment_index": int(chapter_meta.get("segment_index") or chapter_meta.get("split_part") or 0),
+            "is_decorative": is_decorative,
+            "word_count": word_count,
+            "quality_flags": quality_flags,
+        }
 
     async def _update_import_conversation_title(
         self,
@@ -1527,15 +1667,22 @@ class AITaskScheduler:
             chapter_title = chapter.title or f"第 {chapter_number} 章"
             task.message = f"正在保存第 {i+1}/{total_chapters} 章: {chapter_title}"
             await self._save_task(task)
-            
+
             chapter_content = chapter.content or result.content[chapter.start_position:chapter.end_position].strip() or result.content
+            chapter_metadata = self._build_import_chapter_metadata(
+                chapter=chapter,
+                chapter_number=chapter_number,
+                chapter_title=chapter_title,
+                chapter_content=chapter_content,
+            )
+            chapter_extra_metadata = getattr(chapter, "metadata", None) or {}
             # 创建内容项
             item_id = f"chapter_{session_id}_{uuid.uuid4().hex[:12]}"
             chapter_payload = {
                 "title": chapter_title,
                 "chapter_title": chapter_title,
                 "content": chapter_content,
-                "chapter_index": chapter_number,
+                **chapter_metadata,
                 "start_position": chapter.start_position,
                 "end_position": chapter.end_position,
                 "book_title": book_title,
@@ -1545,10 +1692,19 @@ class AITaskScheduler:
                 "raw_upload_sha256": raw_upload_sha256,
                 "import_run_id": import_run_id,
             }
+            if chapter_extra_metadata.get("source_type") == "system_split":
+                chapter_payload["system_split"] = {
+                    "split_from_title": chapter_extra_metadata.get("split_from_title") or chapter_metadata["original_title"],
+                    "split_from_chapter_index": chapter_extra_metadata.get("split_from_chapter_index"),
+                    "split_part": chapter_extra_metadata.get("split_part") or chapter_metadata["segment_index"],
+                    "split_total": chapter_extra_metadata.get("split_total"),
+                    "start_position": chapter.start_position,
+                    "end_position": chapter.end_position,
+                }
             item = ContentItem(
                 metadata=ContentMetadata(
                     id=item_id,
-                    title=chapter_title,
+                    title=chapter_metadata["display_title"],
                     type="chapter",
                     session_id=session_id,
                     parent_id=parent_id,
@@ -1562,6 +1718,11 @@ class AITaskScheduler:
                 "id": item_id,
                 "title": item.metadata.title,
                 "chapter_index": chapter_number,
+                "display_title": chapter_metadata["display_title"],
+                "original_title": chapter_metadata["original_title"],
+                "source_type": chapter_metadata["source_type"],
+                "chapter_role": chapter_metadata["chapter_role"],
+                "segment_index": chapter_metadata["segment_index"],
                 "content": chapter_content,
             })
             

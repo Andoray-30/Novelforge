@@ -1,15 +1,15 @@
 /**
- * AI响应解析�? * 用于解析AI返回的各种格式的响应
+ * AI response parser.
  */
 
 import { Character, WorldSetting, Timeline, RelationshipNetwork, TimelineEvent, NetworkEdge } from '@/types';
 
 /**
- * 尝试解析JSON响应
+ * Try to parse JSON from a plain or fenced response.
  */
 export function tryParseJson<T>(text: string): T | null {
   try {
-    // 移除markdown代码块标�?    const cleaned = text
+    const cleaned = text
       .replace(/```json\s*/g, '')
       .replace(/```\s*$/g, '')
       .replace(/```/g, '')
@@ -21,14 +21,14 @@ export function tryParseJson<T>(text: string): T | null {
 }
 
 /**
- * 解析角色列表响应
+ * Parse character list responses.
  */
 export function parseCharacterResponse(text: string): Character[] {
   const data = tryParseJson<{ characters?: Character[] }>(text);
   if (data?.characters && Array.isArray(data.characters)) {
     return data.characters;
   }
-  // 尝试直接解析为数�?  const arrayData = tryParseJson<Character[]>(text);
+  const arrayData = tryParseJson<Character[]>(text);
   if (Array.isArray(arrayData)) {
     return arrayData;
   }
@@ -36,7 +36,7 @@ export function parseCharacterResponse(text: string): Character[] {
 }
 
 /**
- * 解析世界设定响应
+ * Parse world setting responses.
  */
 export function parseWorldResponse(text: string): Partial<WorldSetting> {
   const data = tryParseJson<Partial<WorldSetting>>(text);
@@ -44,7 +44,8 @@ export function parseWorldResponse(text: string): Partial<WorldSetting> {
 }
 
 /**
- * 解析时间线响�? */
+ * Parse timeline responses.
+ */
 export function parseTimelineResponse(text: string): TimelineEvent[] {
   const data = tryParseJson<{ events?: TimelineEvent[] }>(text);
   if (data?.events && Array.isArray(data.events)) {
@@ -58,7 +59,7 @@ export function parseTimelineResponse(text: string): TimelineEvent[] {
 }
 
 /**
- * 解析关系网络响应
+ * Parse relationship network responses.
  */
 export function parseRelationshipResponse(text: string): NetworkEdge[] {
   const data = tryParseJson<{ relationships?: NetworkEdge[] }>(text);
@@ -73,10 +74,9 @@ export function parseRelationshipResponse(text: string): NetworkEdge[] {
 }
 
 /**
- * 解析流式响应
+ * Parse streaming SSE chunks.
  */
 export function parseStreamingResponse(chunk: string): string {
-  // 处理SSE格式
   const lines = chunk.split('\n');
   let result = '';
 
@@ -92,7 +92,7 @@ export function parseStreamingResponse(chunk: string): string {
           result += parsed.content;
         }
       } catch {
-        // 如果不是JSON，直接追�?        result += data;
+        result += data;
       }
     }
   }
@@ -101,14 +101,14 @@ export function parseStreamingResponse(chunk: string): string {
 }
 
 /**
- * 提取JSON代码�? */
+ * Extract a JSON block from text.
+ */
 export function extractJsonBlock(text: string): string | null {
   const jsonMatch = text.match(/```json\s*([\s\S]*?)```/);
   if (jsonMatch) {
     return jsonMatch[1].trim();
   }
 
-  // 尝试查找方括号或花括号包裹的内容
   const bracketMatch = text.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
   if (bracketMatch) {
     return bracketMatch[1].trim();
@@ -118,7 +118,7 @@ export function extractJsonBlock(text: string): string | null {
 }
 
 /**
- * 安全解析JSON
+ * Safely parse JSON with a fallback value.
  */
 export function safeJsonParse<T>(text: string, defaultValue: T): T {
   try {
@@ -130,9 +130,9 @@ export function safeJsonParse<T>(text: string, defaultValue: T): T {
 }
 
 /**
- * 解析AI思考过�? */
+ * Split thinking and final answer content.
+ */
 export function parseThinkingProcess(text: string): { thinking: string; answer: string } {
-  // 尝试分离思考过程和答案
   const thinkMatch = text.match(/<think>([\s\S]*?)<\/think>([\s\S]*)/);
   if (thinkMatch) {
     return {
@@ -141,7 +141,6 @@ export function parseThinkingProcess(text: string): { thinking: string; answer: 
     };
   }
 
-  // 尝试查找"思考："�?答案�?格式
   const chineseMatch = text.match(/思考[:：]([\s\S]*?)答案[:：]([\s\S]*)/);
   if (chineseMatch) {
     return {
@@ -150,7 +149,6 @@ export function parseThinkingProcess(text: string): { thinking: string; answer: 
     };
   }
 
-  // 默认返回全部作为答案
   return {
     thinking: '',
     answer: text.trim(),
@@ -158,7 +156,7 @@ export function parseThinkingProcess(text: string): { thinking: string; answer: 
 }
 
 /**
- * 清理AI响应文本
+ * Remove control/directive blocks from AI text.
  */
 export function cleanAiResponse(text: string): string {
   return text
@@ -174,7 +172,8 @@ export function cleanAiResponse(text: string): string {
 }
 
 /**
- * 验证角色数据完整�? */
+ * Validate a character payload.
+ */
 export function validateCharacter(character: Partial<Character>): boolean {
   return !!(
     character.name &&
@@ -185,7 +184,8 @@ export function validateCharacter(character: Partial<Character>): boolean {
 }
 
 /**
- * 验证提取结果完整�? */
+ * Validate the extraction result shape.
+ */
 export function validateExtractionResult(result: {
   characters?: Character[];
   world?: Partial<WorldSetting>;
@@ -203,7 +203,7 @@ export function validateExtractionResult(result: {
   }
 
   if (!result.timeline?.events || result.timeline.events.length === 0) {
-    missing.push('时间�?);
+    missing.push('时间线');
   }
 
   if (!result.relationships?.edges || result.relationships.edges.length === 0) {
@@ -216,10 +216,10 @@ export function validateExtractionResult(result: {
   };
 }
 
-// ==================== 兼容旧代码的导出 ====================
+// ==================== Legacy exports ====================
 
 /**
- * 工具调用类型
+ * Tool call type.
  */
 export interface ToolCall {
   id: string;
@@ -232,7 +232,7 @@ export interface ToolCall {
 }
 
 /**
- * 解析的Artifact
+ * Parsed artifact payload.
  */
 export interface ParsedArtifact {
   type: 'character_card' | 'world_setting' | 'timeline' | 'relationship' | 'outline' | 'chapter';
@@ -326,30 +326,31 @@ export function parseSaveAssetRequests(text: string): SaveAssetRequest[] {
 }
 
 /**
- * 解析AI响应（兼容旧代码�? */
+ * Parse AI response text.
+ */
 export function parseAIResponse(text: string): { content: string; artifacts?: ParsedArtifact[] } {
   const cleaned = cleanAiResponse(text);
   return { content: cleaned };
 }
 
 /**
- * 提取干净文本（兼容旧代码�? */
+ * Extract clean response text.
+ */
 export function extractCleanText(text: string): string {
   return cleanAiResponse(text);
 }
 
 /**
- * 解析多个AI产物（兼容旧代码�? */
+ * Parse multiple AI artifacts.
+ */
 export function parseMultipleAIArtifacts(text: string): ParsedArtifact[] {
   const artifacts: ParsedArtifact[] = [];
 
-  // 尝试解析JSON
   const jsonData = tryParseJson<{ artifacts?: ParsedArtifact[] }>(text);
   if (jsonData?.artifacts) {
     return jsonData.artifacts;
   }
 
-  // 尝试提取角色
   const characters = parseCharacterResponse(text);
   if (characters.length > 0) {
     artifacts.push({
@@ -360,7 +361,6 @@ export function parseMultipleAIArtifacts(text: string): ParsedArtifact[] {
     });
   }
 
-  // 尝试提取世界设定
   const world = parseWorldResponse(text);
   if (world && Object.keys(world).length > 0) {
     artifacts.push({

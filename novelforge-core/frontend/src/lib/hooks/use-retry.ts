@@ -45,10 +45,10 @@ export function useRetry(options: UseRetryOptions = {}) {
     for (let attempt = 1; attempt <= strategy.maxRetries; attempt++) {
       try {
         if (attempt > 1) {
-          // 计算延迟时间
+          // Calculate retry delay.
           let delay = strategy.baseDelay * Math.pow(strategy.backoffMultiplier, attempt - 1)
 
-          // 添加抖动
+          // Add jitter.
           if (strategy.jitter) {
             delay = delay * (0.5 + Math.random() * 0.5)
           }

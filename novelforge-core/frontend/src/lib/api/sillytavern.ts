@@ -1,5 +1,5 @@
 /**
- * SillyTavern API 客户�? * 用于与SillyTavern后端通信
+ * SillyTavern API client.
  */
 
 export interface SillyTavernCharacter {
@@ -41,7 +41,7 @@ export class SillyTavernAPI {
   }
 
   /**
-   * 测试SillyTavern连接
+   * Test the SillyTavern connection.
    */
   async testConnection(): Promise<{ success: boolean; version?: string }> {
     try {
@@ -57,7 +57,8 @@ export class SillyTavernAPI {
   }
 
   /**
-   * 导入角色�?   */
+   * Import a character card.
+   */
   async importCharacter(character: SillyTavernCharacter): Promise<{ success: boolean; id?: string }> {
     try {
       const response = await fetch(`${this.baseURL}/api/characters/import`, {
@@ -79,7 +80,8 @@ export class SillyTavernAPI {
   }
 
   /**
-   * 批量导入角色�?   */
+   * Import character cards in a batch.
+   */
   async importCharacters(characters: SillyTavernCharacter[]): Promise<{ success: boolean; results: { id?: string; error?: string }[] }> {
     try {
       const response = await fetch(`${this.baseURL}/api/characters/import/batch`, {
@@ -107,7 +109,7 @@ export class SillyTavernAPI {
   }
 
   /**
-   * 导入世界信息
+   * Import world info entries.
    */
   async importWorldInfo(worldInfo: WorldInfoEntry[]): Promise<{ success: boolean; imported: number }> {
     try {
@@ -130,7 +132,7 @@ export class SillyTavernAPI {
   }
 
   /**
-   * 获取当前角色列表
+   * Get current characters.
    */
   async getCharacters(): Promise<{ success: boolean; characters?: any[] }> {
     try {
@@ -146,7 +148,7 @@ export class SillyTavernAPI {
   }
 
   /**
-   * 获取世界信息
+   * Get world info entries.
    */
   async getWorldInfo(): Promise<{ success: boolean; worldInfo?: WorldInfoEntry[] }> {
     try {
@@ -162,7 +164,7 @@ export class SillyTavernAPI {
   }
 
   /**
-   * 创建群组聊天
+   * Create a group chat.
    */
   async createGroupChat(characters: string[], name?: string): Promise<{ success: boolean; chatId?: string }> {
     try {
@@ -173,7 +175,7 @@ export class SillyTavernAPI {
         },
         body: JSON.stringify({
           characters,
-          name: name || 'NovelForge生成群聊',
+          name: name || 'NovelForge 生成群聊',
         }),
       });
 
@@ -188,7 +190,7 @@ export class SillyTavernAPI {
   }
 
   /**
-   * 获取CSRF Token
+   * Get CSRF token.
    */
   async getCsrfToken(): Promise<{ success: boolean; token?: string }> {
     try {

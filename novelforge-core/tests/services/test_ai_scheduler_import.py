@@ -368,6 +368,17 @@ def test_novel_import_preserves_chapter_content_when_detector_returns_empty_cont
     assert result["chapters_count"] == 1
     assert len(chapters) == 1
     assert chapters[0].content == "这是应该被保存的正文。" * 20
+    chapter_payload = chapters[0].extracted_data
+    assert chapter_payload["display_title"] == "序章"
+    assert chapter_payload["original_title"] == "序章"
+    assert chapter_payload["source_type"] == "imported"
+    assert chapter_payload["chapter_role"] == "序章"
+    assert chapter_payload["volume_index"] == 1
+    assert chapter_payload["chapter_index"] == 1
+    assert chapter_payload["segment_index"] == 0
+    assert chapter_payload["is_decorative"] is False
+    assert chapter_payload["word_count"] > 0
+    assert chapter_payload["quality_flags"] == []
 
 
 def test_novel_import_uses_chapter_index_analysis_and_returns_diagnostics(monkeypatch, tmp_path):
@@ -467,11 +478,47 @@ def test_import_expands_overlong_chapters_on_sentence_boundaries():
     assert len(parts) > 1
     assert all(part.content for part in parts)
     assert all(len(part.content) <= 5000 for part in parts)
-    assert parts[0].title == "第一卷 第三章（1）"
-    assert parts[1].title == "第一卷 第三章（2）"
+    assert parts[0].title == "第一卷 第三章 · 片段 01"
+    assert parts[1].title == "第一卷 第三章 · 片段 02"
     assert parts[0].index == 1
     assert parts[1].index == 2
+    assert parts[0].metadata["source_type"] == "system_split"
     assert parts[0].metadata["split_from_title"] == "第一卷 第三章"
+    assert parts[0].metadata["original_title"] == "第一卷 第三章"
+    assert parts[0].metadata["display_title"] == "第一卷 第三章 · 片段 01"
+    assert parts[0].metadata["split_total"] == len(parts)
+
+
+def test_import_chapter_metadata_marks_system_split_segments():
+    from novelforge.types.text_processing import Chapter
+
+    scheduler = build_scheduler()
+    chapter = Chapter(
+        title="第一卷 第三章",
+        content="他在雨里醒来。" * 900,
+        start_position=10,
+        end_position=10 + len("他在雨里醒来。" * 900),
+        index=3,
+    )
+
+    parts = scheduler._expand_long_import_chapters([chapter], max_chars=2000)
+    metadata = scheduler._build_import_chapter_metadata(
+        chapter=parts[0],
+        chapter_number=parts[0].index,
+        chapter_title=parts[0].title,
+        chapter_content=parts[0].content,
+    )
+
+    assert metadata["display_title"] == "第一卷 第三章 · 片段 01"
+    assert metadata["original_title"] == "第一卷 第三章"
+    assert metadata["source_type"] == "system_split"
+    assert metadata["chapter_role"] == "正文"
+    assert metadata["volume_index"] == 1
+    assert metadata["chapter_index"] == 1
+    assert metadata["segment_index"] == 1
+    assert metadata["is_decorative"] is False
+    assert metadata["word_count"] > 0
+    assert "system_split" in metadata["quality_flags"]
 
 
 def test_import_keeps_short_chapters_unchanged_when_expanding():

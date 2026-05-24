@@ -2,7 +2,7 @@ export { APIClient, APIError, isAPIError } from './client';
 export * from './novelforge-api';
 export { SillyTavernAPI } from './sillytavern';
 
-// 兼容老代码的导出
+// Legacy API aliases.
 import {
   aiService,
   workflowService,
