@@ -7,6 +7,7 @@ import { buildContentCreateRequest, getContentAssetPayload, getContentAssetText 
 import {
   buildManualChapterPayload,
   buildUpdatedChapterPayload,
+  findMostRecentlyUpdatedChapter,
   getNextManualChapterIndex,
   resolveChapterDirectoryMetadata,
   sortChaptersByDirectory,
@@ -108,6 +109,7 @@ export default function NovelEditorPage() {
       });
 
       const items = sortChaptersByDirectory(result.items);
+      const latestItem = findMostRecentlyUpdatedChapter(result.items);
       setChapters(items);
 
       setSelectedChapterId((currentSelected) => {
@@ -115,8 +117,8 @@ export default function NovelEditorPage() {
         const currentCandidate =
           preferredChapterId && items.some((item) => item.metadata.id === preferredChapterId)
             ? preferredChapterId
-            : options?.preferLatest && items[0]
-              ? items[0].metadata.id
+            : options?.preferLatest && latestItem
+              ? latestItem.metadata.id
               : currentSelected && items.some((item) => item.metadata.id === currentSelected)
                 ? currentSelected
                 : requestedChapterId && items.some((item) => item.metadata.id === requestedChapterId)

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildManualChapterPayload,
   buildUpdatedChapterPayload,
+  findMostRecentlyUpdatedChapter,
   getNextManualChapterIndex,
   resolveChapterDirectoryMetadata,
   sortChaptersByDirectory,
@@ -68,6 +69,24 @@ describe('chapter metadata helper', () => {
     ];
 
     expect(sortChaptersByDirectory(items).map((item) => item.metadata.id)).toEqual(['body-2', 'seg-1', 'seg-2', 'v2']);
+  });
+
+  it('keeps latest updated selection independent from directory sorting', () => {
+    const firstChapter = chapter({
+      id: 'first',
+      title: '第一章',
+      updatedAt: '2026-05-24T10:00:00.000Z',
+      data: { volume_index: 1, chapter_index: 1 },
+    });
+    const newestDraft = chapter({
+      id: 'newest',
+      title: '第九章',
+      updatedAt: '2026-05-24T12:00:00.000Z',
+      data: { volume_index: 1, chapter_index: 9 },
+    });
+
+    expect(sortChaptersByDirectory([newestDraft, firstChapter]).map((item) => item.metadata.id)).toEqual(['first', 'newest']);
+    expect(findMostRecentlyUpdatedChapter([firstChapter, newestDraft])?.metadata.id).toBe('newest');
   });
 
   it('infers old chapter assets without metadata', () => {

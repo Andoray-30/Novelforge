@@ -286,6 +286,24 @@ export function sortChaptersByDirectory(items: ContentItem[]): ContentItem[] {
     .map(({ item }) => item);
 }
 
+export function findMostRecentlyUpdatedChapter(items: ContentItem[]): ContentItem | null {
+  return items.reduce<ContentItem | null>((latest, item) => {
+    if (!latest) {
+      return item;
+    }
+
+    const currentTime = Date.parse(item.metadata.updated_at || item.metadata.created_at || '');
+    const latestTime = Date.parse(latest.metadata.updated_at || latest.metadata.created_at || '');
+    if (!Number.isFinite(currentTime)) {
+      return latest;
+    }
+    if (!Number.isFinite(latestTime) || currentTime > latestTime) {
+      return item;
+    }
+    return latest;
+  }, null);
+}
+
 export function getNextManualChapterIndex(items: ContentItem[]): number {
   return items.reduce((maxIndex, item, index) => {
     const metadata = resolveChapterDirectoryMetadata(item, index + 1);
