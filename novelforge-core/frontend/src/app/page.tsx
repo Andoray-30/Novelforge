@@ -1,51 +1,70 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { ChatSidebar } from '@/components/chat/ChatSidebar';
 import { MessageList, Message } from '@/components/chat/MessageBubble';
 import { ChatInput } from '@/components/chat/ChatInput';
 import { ArtifactPanel } from '@/components/chat/ArtifactPanel';
-import { OpenAIConfigPanel } from '@/components/chat/OpenAIConfigPanel';
 import ImportTextModal from '../components/ImportTextModal';
 import { WorldTree } from '@/components/dashboard/WorldTree';
 import {
   Loader2, CheckCircle2, AlertCircle,
   LayoutDashboard, MessageSquare, User, FileText, Download,
-  Plus, GitBranch, SlidersHorizontal, RefreshCw
+  Plus, GitBranch, RefreshCw, Sparkles
 } from 'lucide-react';
-import { chatService, contentService } from '@/lib/api';
-import { parseMultipleAIArtifacts, extractCleanText, ParsedArtifact, ToolCall, parseThinkingProcess } from '@/lib/chat-parser';
+import { chatService, contentService, isAPIError } from '@/lib/api';
+import { parseMultipleAIArtifacts, extractCleanText, ParsedArtifact, ToolCall, parseThinkingProcess, parseAssetRequest, parseSaveAssetRequests, type AssetRequestDirective, type SaveAssetRequest } from '@/lib/chat-parser';
 import {
   buildContentCreateRequestFromArtifact,
-  getArtifactPanelType,
   getContentAssetPayload,
   getContentAssetText,
   getContentAssetTitle,
 } from '@/lib/content-contract';
 import {
-  loadOpenAIConfigState,
-  saveOpenAIConfigState,
-  type OpenAIConfigState,
+  loadAIMode,
+  saveAIMode,
+  type AIMode,
 } from '@/lib/openai-config';
 import { loadProjectPreferences, PROJECT_PREFERENCES_CHANGED_EVENT, type ProjectPreferences } from '@/lib/project-preferences';
 import { upsertContentAsset } from '@/lib/content-upsert';
+import {
+  saveReopenedContentItem,
+  type ContentItemArtifactData,
+} from '@/lib/content-item-reopen';
+import { resolveHomepageContentItemReopen } from '@/lib/homepage-reopen';
+import {
+  bindContentItemToNovel,
+  isUnassignedNovelScopedContentItem,
+} from '@/lib/content-item-binding';
+import { saveAssetRequestToContent } from '@/lib/save-asset-requests';
+import {
+  resolveNovelImportCompletionAction,
+} from '@/lib/import-workflow';
+import { decodeAssetTitle } from '@/lib/asset-normalization';
 import { useSessionTaskEvents } from '@/lib/hooks/use-session-task-events';
 import { useSessions } from '@/lib/hooks/use-sessions';
 import { useAppStore } from '@/lib/hooks/use-app-store';
-import type { ContentItem, ContentTopology, ImportanceLevel, OpenAIConfig } from '@/types';
+import {
+  buildFocusedAssetFromArtifact,
+  clipFocusedAssetSummary,
+  type FocusedAsset,
+} from '@/lib/focused-assets';
+import type { ContentItem, ContentTopology, ContentType, ImportanceLevel, OpenAIConfig } from '@/types';
 
 // 用于 Artifact 面板的数据格式
-type ArtifactData = {
-  type: ParsedArtifact['type'];
-  title: string;
-  data: Record<string, unknown>;
+type ArtifactData = ContentItemArtifactData & {
   /** 工具调用原始信息，保存时使用 */
   toolCall?: ToolCall;
 };
 
+type MessageArtifactData = NonNullable<Message['artifact']>;
+
 type ProjectAssets = {
   characters: ContentItem[];
   worlds: ContentItem[];
+  timelines: ContentItem[];
+  relationships: ContentItem[];
   chapters: ContentItem[];
   outlines: ContentItem[];
 };
@@ -56,6 +75,19 @@ type WorldTreeNode = {
   type: string;
   importance: string;
   metadata: Record<string, unknown>;
+};
+
+type QuickReferenceGroup = {
+  key: string;
+  label: string;
+  items: ContentItem[];
+};
+
+type AssetRequestState = NonNullable<Message['assetRequest']>;
+type AssetRequestCandidate = AssetRequestState['candidates'][number];
+type ReconciledAssetRequestState = {
+  selectedKeys: string[];
+  status: NonNullable<AssetRequestState['status']>;
 };
 
 export default function ChatPage() {
@@ -73,15 +105,14 @@ export default function ChatPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isGeneratingChapter, setIsGeneratingChapter] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
-  const [isOpenAIConfigOpen, setIsOpenAIConfigOpen] = useState(false);
-  const [openAIConfigState, setOpenAIConfigState] = useState<OpenAIConfigState>({ enabled: false, config: {} });
+  const [aiMode, setAIMode] = useState<AIMode>(() => loadAIMode('fast'));
   const [projectPreferences, setProjectPreferences] = useState<ProjectPreferences>(() => loadProjectPreferences(null));
   const openAIConfig = useMemo<OpenAIConfig>(() => {
-    return openAIConfigState.enabled ? openAIConfigState.config : {};
-  }, [openAIConfigState]);
+    return { ai_mode: aiMode };
+  }, [aiMode]);
 
-  useEffect(() => {
-    setOpenAIConfigState(loadOpenAIConfigState());
+  const handleAIModeChange = useCallback((mode: AIMode) => {
+    setAIMode(saveAIMode(mode));
   }, []);
 
   useEffect(() => {
@@ -100,22 +131,46 @@ export default function ChatPage() {
   const [viewMode, setViewMode] = useState<'chat' | 'dashboard'>('chat');
   const [dashboardType, setDashboardType] = useState<'list' | 'tree'>('list');
   const [topologyData, setTopologyData] = useState<ContentTopology>({ nodes: [], edges: [] });
-  const [projectAssets, setProjectAssets] = useState<ProjectAssets>({ characters: [], worlds: [], chapters: [], outlines: [] });
+  const [projectAssets, setProjectAssets] = useState<ProjectAssets>({ characters: [], worlds: [], timelines: [], relationships: [], chapters: [], outlines: [] });
   const [isRefreshingAssets, setIsRefreshingAssets] = useState(false);
 
   const [activeArtifacts, setActiveArtifacts] = useState<ArtifactData[]>([]);
+  const [focusedAssets, setFocusedAssets] = useState<FocusedAsset[]>([]);
+  const [assetQuickSearch, setAssetQuickSearch] = useState('');
   const [saveNotification, setSaveNotification] = useState<string | null>(null);
   const [messagesMap, setMessagesMap] = useState<Map<string, Message[]>>(new Map());
+  const saveNotificationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previousSelectedNovelIdRef = useRef<string | null>(null);
 
-  const { addCharacter } = useAppStore();
+  const { addCharacter, selectedNovelId, setSelectedNovelId } = useAppStore();
+  const router = useRouter();
+
+  const showSaveNotification = useCallback((message: string, duration = 3000) => {
+    if (saveNotificationTimerRef.current) {
+      clearTimeout(saveNotificationTimerRef.current);
+    }
+    setSaveNotification(message);
+    saveNotificationTimerRef.current = setTimeout(() => {
+      setSaveNotification(null);
+      saveNotificationTimerRef.current = null;
+    }, duration);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (saveNotificationTimerRef.current) {
+        clearTimeout(saveNotificationTimerRef.current);
+      }
+    };
+  }, []);
 
   const worldTreeTopology = useMemo(() => ({
     nodes: topologyData.nodes.map((node): WorldTreeNode => ({
       id: node.id,
-      label: node.title,
+      label: decodeAssetTitle(node.title),
       type: String(node.type),
-      importance: 'medium',
-      metadata: {},
+      importance: String(node.metadata?.importance || 'medium'),
+      metadata: node.metadata || {},
     })),
     edges: topologyData.edges.map((edge) => ({
       source: edge.source,
@@ -124,6 +179,24 @@ export default function ChatPage() {
       label: edge.type,
     })),
   }), [topologyData]);
+
+  const projectAssetItems = useMemo(
+    () => [
+      ...projectAssets.characters,
+      ...projectAssets.worlds,
+      ...projectAssets.timelines,
+      ...projectAssets.relationships,
+      ...projectAssets.chapters,
+      ...projectAssets.outlines,
+    ],
+    [projectAssets],
+  );
+  const currentNovelParentId = useMemo(() => {
+    if (selectedNovelId) {
+      return selectedNovelId;
+    }
+    return projectAssets.outlines.find((item) => item.metadata.type === 'novel')?.metadata.id ?? null;
+  }, [projectAssets.outlines, selectedNovelId]);
 
   const currentMessages = currentSessionId
     ? (messagesMap.get(currentSessionId) ?? [
@@ -142,17 +215,59 @@ export default function ChatPage() {
   );
 
   const projectSummary = useMemo(
-    () => buildProjectChatSummary(currentSessionTitle, projectAssets),
-    [currentSessionTitle, projectAssets]
+    () => buildProjectChatSummary(currentSessionTitle, projectAssets, selectedNovelId),
+    [currentSessionTitle, projectAssets, selectedNovelId]
   );
+
+  const focusedAssetSummary = useMemo(
+    () => buildFocusedAssetSummary(focusedAssets),
+    [focusedAssets]
+  );
+
+  const quickReferenceGroups = useMemo<QuickReferenceGroup[]>(() => {
+    const query = assetQuickSearch.trim().toLowerCase();
+    const filterItems = (items: ContentItem[]) => {
+      if (!query) {
+        return items;
+      }
+
+      return items.filter((item) => {
+        const payload = getContentAssetPayload(item);
+        const title = getContentAssetTitle(item, payload).toLowerCase();
+        const text = getContentAssetText(item, payload).toLowerCase();
+        return title.includes(query) || text.includes(query);
+      });
+    };
+
+    return [
+      { key: 'characters', label: '角色', items: filterItems(projectAssets.characters).slice(0, 6) },
+      { key: 'worlds', label: '世界观', items: filterItems(projectAssets.worlds).slice(0, 4) },
+      { key: 'chapters', label: '章节', items: filterItems(projectAssets.chapters).slice(0, 5) },
+      { key: 'outlines', label: '大纲', items: filterItems(projectAssets.outlines).slice(0, 3) },
+    ].filter((group) => group.items.length > 0);
+  }, [assetQuickSearch, projectAssets]);
 
   // 处理会话切换：重置所有局部状态防止抽搐
   const handleSelectSession = useCallback((id: string) => {
     if (id === currentSessionId) return;
     setTopologyData({ nodes: [], edges: [] });
-    setProjectAssets({ characters: [], worlds: [], chapters: [], outlines: [] });
+    setProjectAssets({ characters: [], worlds: [], timelines: [], relationships: [], chapters: [], outlines: [] });
+    setFocusedAssets([]);
+    setActiveArtifacts([]);
+    setArtifactPanelVisible(false);
+    setAssetQuickSearch('');
+    setViewMode('chat');
     selectSession(id);
   }, [currentSessionId, selectSession]);
+
+  const handleCleanupEmptySessions = useCallback(async () => {
+    const result = await chatService.cleanupEmptyConversations();
+    await loadSessions();
+    showSaveNotification(
+      result.deleted > 0 ? `已清理 ${result.deleted} 个空项目` : '没有可清理的空项目',
+      3000,
+    );
+  }, [loadSessions, showSaveNotification]);
 
   // ============================================================
   // 历史消息拉取
@@ -167,12 +282,24 @@ export default function ChatPage() {
       try {
         const history = await chatService.getConversation(currentSessionId);
         if (history && history.messages) {
-          const formatted = history.messages.map(m => ({
-            id: m.id || `hist-${Math.random()}`,
-            role: toMessageRole(m.role),
-            content: extractCleanText(m.content),
-            timestamp: m.timestamp ? new Date(m.timestamp) : new Date(),
-          }));
+          const formatted = history.messages.map(m => {
+            const saveAssetRequests = parseSaveAssetRequests(m.content);
+            return {
+              id: m.id || `hist-${Math.random()}`,
+              role: toMessageRole(m.role),
+              content: extractCleanText(m.content),
+              timestamp: m.timestamp ? new Date(m.timestamp) : new Date(),
+              saveAssetRequests: saveAssetRequests.length > 0
+                ? saveAssetRequests.map((req) => ({
+                    type: req.type,
+                    title: req.title,
+                    data: req.data,
+                    id: req.id,
+                    status: 'pending' as const,
+                  }))
+                : undefined,
+            };
+          });
           setMessagesMap(prev => {
             const next = new Map(prev);
             if (formatted.length > 0) next.set(currentSessionId, formatted);
@@ -180,6 +307,15 @@ export default function ChatPage() {
           });
         }
       } catch (err) {
+        if (isAPIError(err, 404)) {
+          useAppStore.getState().deleteSession(currentSessionId);
+          setMessagesMap(prev => {
+            const next = new Map(prev);
+            next.delete(currentSessionId);
+            return next;
+          });
+          return;
+        }
         console.error('拉取历史失败:', err);
       } finally {
         setIsGenerating(false);
@@ -195,23 +331,35 @@ export default function ChatPage() {
     if (!currentSessionId) return;
     setIsRefreshingAssets(true);
     try {
-      const searchPromise = contentService.search({ tags: [`project-${currentSessionId}`], session_id: currentSessionId || undefined })
-        .then(res => {
-          if (res && res.items) {
-            setProjectAssets({
-              characters: res.items.filter((i) => i.metadata.type === 'character'),
-              worlds: res.items.filter((i) => i.metadata.type === 'world'),
-              chapters: res.items.filter((i) => i.metadata.type === 'chapter'),
-              outlines: res.items.filter((i) => i.metadata.type === 'novel' || i.metadata.type === 'outline'),
-            });
+      const selectedNovelId = useAppStore.getState().selectedNovelId || undefined;
+      const applyAssets = (items: ContentItem[]) => {
+        setProjectAssets({
+          characters: items.filter((i) => i.metadata.type === 'character'),
+          worlds: items.filter((i) => i.metadata.type === 'world'),
+          timelines: items.filter((i) => i.metadata.type === 'timeline'),
+          relationships: items.filter((i) => i.metadata.type === 'relationship'),
+          chapters: items.filter((i) => i.metadata.type === 'chapter'),
+          outlines: items.filter((i) => i.metadata.type === 'novel' || i.metadata.type === 'outline'),
+        });
+      };
+      const searchPromise = contentService.search({ tags: [`project-${currentSessionId}`], session_id: currentSessionId || undefined, parent_id: selectedNovelId, include_content: false })
+        .then(async res => {
+          let items = res?.items ?? [];
+          const usableAssetCount = items.filter((item) =>
+            ['character', 'world', 'timeline', 'relationship', 'chapter', 'novel', 'outline'].includes(item.metadata.type)
+          ).length;
+          if (usableAssetCount === 0 && !selectedNovelId) {
+            const fallback = await contentService.search({ include_content: false });
+            items = fallback?.items ?? [];
           }
+          applyAssets(items);
         })
-        .catch(err => console.error('搜索资产失败:', err));
+        .catch(err => console.warn('搜索资产失败:', err));
 
-      const topologyPromise = contentService.getTopology(currentSessionId)
+      const topologyPromise = contentService.getTopology(currentSessionId, selectedNovelId)
         .then(setTopologyData)
         .catch(err => {
-          console.error('获取拓扑结构失败:', err);
+          console.warn('获取拓扑结构失败:', err);
           setTopologyData({ nodes: [], edges: [] });
         });
 
@@ -226,12 +374,39 @@ export default function ChatPage() {
   useEffect(() => {
     if (!currentSessionId) {
       setTopologyData({ nodes: [], edges: [] });
-      setProjectAssets({ characters: [], worlds: [], chapters: [], outlines: [] });
+      setFocusedAssets([]);
+      setAssetQuickSearch('');
+      previousSelectedNovelIdRef.current = null;
+      contentService.search({ include_content: false })
+        .then((res) => {
+          const items = res?.items ?? [];
+          setProjectAssets({
+            characters: items.filter((i) => i.metadata.type === 'character'),
+            worlds: items.filter((i) => i.metadata.type === 'world'),
+            timelines: items.filter((i) => i.metadata.type === 'timeline'),
+            relationships: items.filter((i) => i.metadata.type === 'relationship'),
+            chapters: items.filter((i) => i.metadata.type === 'chapter'),
+            outlines: items.filter((i) => i.metadata.type === 'novel' || i.metadata.type === 'outline'),
+          });
+        })
+        .catch(err => {
+          console.warn('加载全库资产失败:', err);
+          setProjectAssets({ characters: [], worlds: [], timelines: [], relationships: [], chapters: [], outlines: [] });
+        });
       return;
     }
 
+    const previousSelectedNovelId = previousSelectedNovelIdRef.current;
+    const novelChanged = previousSelectedNovelId !== selectedNovelId;
+    previousSelectedNovelIdRef.current = selectedNovelId;
+
+    if (novelChanged) {
+      setFocusedAssets([]);
+      setAssetQuickSearch('');
+    }
+
     refreshProjectAssets();
-  }, [currentSessionId, refreshProjectAssets]);
+  }, [currentSessionId, refreshProjectAssets, selectedNovelId, showSaveNotification]);
 
   useEffect(() => {
     if (viewMode === 'dashboard') {
@@ -244,35 +419,35 @@ export default function ChatPage() {
   }, [viewMode, currentSessionId, refreshProjectAssets]);
 
   useEffect(() => {
-    const handleTaskCompleted = (event: Event) => {
-      const customEvent = event as CustomEvent<{
-        taskId?: string;
-        taskType?: string;
-        sessionId?: string | null;
-        result?: Record<string, unknown>;
-      }>;
+    const handleTaskCompleted = async (event: Event) => {
+      const customEvent = event as CustomEvent<any>;
       const detail = customEvent.detail;
       if (!detail) return;
-      if (detail.sessionId && currentSessionId && detail.sessionId !== currentSessionId) return;
 
-      refreshProjectAssets();
-
-      if (detail.taskType === 'novel_import') {
-        const result = detail.result as Record<string, unknown> | undefined;
-        const chaptersCount = typeof result?.chapters_count === 'number' ? result.chapters_count : null;
-        const warning = typeof result?.analysis_warning === 'string' ? result.analysis_warning : '';
-        const suffix = chaptersCount !== null ? `，新增 ${chaptersCount} 个章节资产` : '';
-        const baseMessage = `导入任务已完成${suffix}`;
-        setSaveNotification(warning ? `${baseMessage}。${warning}` : baseMessage);
-        setTimeout(() => setSaveNotification(null), 4000);
+      const importAction = resolveNovelImportCompletionAction(detail, currentSessionId);
+      if (importAction) {
+        if (importAction.shouldSwitchSession && importAction.targetSessionId) {
+          await loadSessions();
+          selectSession(importAction.targetSessionId);
+        }
+        if (importAction.focusedNovelId) {
+          setSelectedNovelId(importAction.focusedNovelId);
+          setFocusedAssets([]);
+        }
+        refreshProjectAssets();
+        showSaveNotification(importAction.notification, 4000);
+        return;
       }
+
+      if (detail.sessionId && currentSessionId && detail.sessionId !== currentSessionId) return;
+      refreshProjectAssets();
     };
 
     window.addEventListener('novelforge:task-completed', handleTaskCompleted as EventListener);
     return () => {
       window.removeEventListener('novelforge:task-completed', handleTaskCompleted as EventListener);
     };
-  }, [currentSessionId, refreshProjectAssets]);
+  }, [currentSessionId, loadSessions, refreshProjectAssets, selectSession, setSelectedNovelId, showSaveNotification]);
 
   useSessionTaskEvents({
     sessionId: currentSessionId,
@@ -280,15 +455,13 @@ export default function ChatPage() {
       if (detail.taskType !== 'novel_import') {
         return;
       }
-      setSaveNotification(`Import task failed: ${detail.error || detail.message || 'unknown error'}`);
-      setTimeout(() => setSaveNotification(null), 4000);
+      showSaveNotification(`导入任务失败：${detail.error || detail.message || '未知错误'}`, 4000);
     },
     onCancelled: (detail) => {
       if (detail.taskType !== 'novel_import') {
         return;
       }
-      setSaveNotification('Import task was cancelled before completion');
-      setTimeout(() => setSaveNotification(null), 3000);
+      showSaveNotification('导入任务已在完成前取消', 3000);
     },
   });
 
@@ -315,8 +488,7 @@ export default function ChatPage() {
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
-      setSaveNotification('项目数据已成功打包导出');
-      setTimeout(() => setSaveNotification(null), 3000);
+      showSaveNotification('项目数据已成功打包导出', 3000);
     } catch (err) {
       console.error('导出失败:', err);
       alert('导出项目时遇到错误，请重试');
@@ -325,43 +497,69 @@ export default function ChatPage() {
     }
   };
 
-  const handleGenerateChapter = () => {
-    if (!currentSessionId) return;
+  const ensureWritableSession = async () => {
+    if (currentSessionId) return currentSessionId;
+    const session = await createNewSession();
+    return session.id;
+  };
+
+  const handleGenerateChapter = async () => {
     setIsGeneratingChapter(true);
-    const charNames = projectAssets.characters
-      .map((character) => {
-        const payload = character.extracted_data;
-        if (payload && typeof payload === 'object' && typeof payload.name === 'string' && payload.name.trim().length > 0) {
-          return payload.name;
-        }
-        return character.metadata.title;
-      })
-      .join('、');
-    const firstWorld = projectAssets.worlds[0];
-    const worldName = firstWorld
-      ? (() => {
-          const payload = firstWorld.extracted_data;
+    try {
+      const targetSessionId = await ensureWritableSession();
+      const charNames = projectAssets.characters
+        .map((character) => {
+          const payload = character.extracted_data;
           if (payload && typeof payload === 'object' && typeof payload.name === 'string' && payload.name.trim().length > 0) {
             return payload.name;
           }
-          return firstWorld.metadata.title;
-        })()
-      : '';
-    const chapterNum = projectAssets.chapters.length + 1;
-    const outlineHint = projectAssets.outlines[0]?.metadata?.title || '';
-    const targetWords = Math.max(200, projectPreferences.chapter_target_words || 1500);
-    const lowerBound = Math.max(200, targetWords - 200);
-    const upperBound = targetWords + 200;
-    let prompt = `请根据当前项目设定，创作第 ${chapterNum} 章的正文内容（约${lowerBound}-${upperBound}字，目标 ${targetWords} 字）。`;
-    if (charNames) prompt += `主要角色：${charNames}。`;
-    if (worldName) prompt += `故事背景：${worldName}。`;
-    if (outlineHint) prompt += `参考大纲：${outlineHint}。`;
-    prompt += `请直接写出精彩的正文，不需要任何前置说明。写完后请用 write_chapter 工具调用保存。`;
-    setViewMode('chat');
-    setTimeout(() => {
-      handleSendMessage(prompt);
+          return character.metadata.title;
+        })
+        .join('、');
+      const firstWorld = projectAssets.worlds[0];
+      const worldName = firstWorld
+        ? (() => {
+            const payload = firstWorld.extracted_data;
+            if (payload && typeof payload === 'object' && typeof payload.name === 'string' && payload.name.trim().length > 0) {
+              return payload.name;
+            }
+            return firstWorld.metadata.title;
+          })()
+        : '';
+      const chapterNum = projectAssets.chapters.length + 1;
+      const outlineHint = projectAssets.outlines[0]?.metadata?.title || '';
+      const targetWords = Math.max(200, projectPreferences.chapter_target_words || 1500);
+      const lowerBound = Math.max(200, targetWords - 200);
+      const upperBound = targetWords + 200;
+      let prompt = `请根据当前项目设定，创作第 ${chapterNum} 章的正文内容（约${lowerBound}-${upperBound}字，目标 ${targetWords} 字）。`;
+      if (charNames) prompt += `主要角色：${charNames}。`;
+      if (worldName) prompt += `故事背景：${worldName}。`;
+      if (outlineHint) prompt += `参考大纲：${outlineHint}。`;
+      prompt += `请直接写出精彩的正文，不需要任何前置说明。写完后请在末尾附加 <save_asset>{"type":"chapter","title":"第 ${chapterNum} 章","data":{"content":"章节全文"}}</save_asset>，等待我确认写回内容库。`;
+      setViewMode('chat');
+      await handleSendMessage(prompt, targetSessionId, 'pro');
+    } finally {
       setIsGeneratingChapter(false);
-    }, 100);
+    }
+  };
+
+  const handleGeneratePrologue = async () => {
+    setIsGeneratingChapter(true);
+    try {
+      const targetSessionId = await ensureWritableSession();
+      const targetWords = Math.max(800, Math.min(projectPreferences.chapter_target_words || 1500, 2200));
+      const prompt = [
+        `请基于当前项目已经提取出的角色、关系、时间线、世界观和章节资产，创作一版小说《序章》。`,
+        `目标是写出动人、优美、有情绪张力的开篇，而不是泛泛介绍设定。`,
+        `请优先使用主角的欲望/伤痕、核心关系张力、世界观规则、关键意象和伏笔；如果资产里缺失某些信息，请从现有资产中合理补全，不要写成说明文。`,
+        `篇幅约 ${targetWords} 字。正文之后，请简短列出：情绪钩子、使用到的资产、埋下的伏笔。`,
+        `最后请附加 <save_asset>{"type":"chapter","title":"序章","data":{"content":"序章全文"}}</save_asset>，等待我确认写回内容库。`,
+      ].join('\n');
+      setViewMode('chat');
+      await handleSendMessage(prompt, targetSessionId, 'pro');
+    } finally {
+      setIsGeneratingChapter(false);
+    }
   };
 
   const appendMessage = useCallback((sessionId: string, msg: Message) => {
@@ -388,12 +586,267 @@ export default function ChatPage() {
     });
   }, []);
 
+  const addFocusedAsset = useCallback((asset: FocusedAsset) => {
+    setFocusedAssets((previous) => {
+      const deduped = previous.filter((item) => item.key !== asset.key);
+      return [asset, ...deduped].slice(0, 6);
+    });
+  }, []);
+
+  const pushFocusedAssetToChat = useCallback((
+    asset: FocusedAsset,
+    mode: 'select' | 'pin' | 'reference' = 'select',
+  ) => {
+    const alreadyFocused = focusedAssets.some((item) => item.key === asset.key);
+    addFocusedAsset(asset);
+
+    if (mode === 'pin') {
+      showSaveNotification(
+        alreadyFocused
+          ? `已更新「${asset.title}」在当前聊天上下文中的草稿版本`
+          : `已将「${asset.title}」固定到当前聊天上下文`,
+        2500,
+      );
+      return;
+    }
+
+    showSaveNotification(
+      alreadyFocused
+        ? `已更新「${asset.title}」在当前聊天上下文中的优先级`
+        : `已将「${asset.title}」加入当前聊天上下文`,
+      2500,
+    );
+  }, [focusedAssets, addFocusedAsset, showSaveNotification]);
+
+  const removeFocusedAsset = useCallback((assetKey: string) => {
+    setFocusedAssets((previous) => previous.filter((item) => item.key !== assetKey));
+  }, []);
+
+  const clearFocusedAssets = useCallback(() => {
+    setFocusedAssets([]);
+  }, []);
+
+  useEffect(() => {
+    if (!currentSessionId) {
+      return;
+    }
+
+    const focusedKeys = new Set(focusedAssets.map((asset) => asset.key));
+    setMessagesMap((previous) => {
+      const sessionMessages = previous.get(currentSessionId);
+      if (!sessionMessages || sessionMessages.length === 0) {
+        return previous;
+      }
+
+      let hasChanges = false;
+      const nextSessionMessages = sessionMessages.map((message) => {
+        const requestState = message.assetRequest;
+        if (!requestState) {
+          return message;
+        }
+
+        const nextRequestState = reconcileAssetRequestWithFocusedAssets(
+          requestState,
+          currentSessionId,
+          focusedKeys,
+        );
+
+        const selectedChanged =
+          (requestState.selectedKeys ?? []).join('|') !== nextRequestState.selectedKeys.join('|');
+        const statusChanged = requestState.status !== nextRequestState.status;
+
+        if (!selectedChanged && !statusChanged) {
+          return message;
+        }
+
+        hasChanges = true;
+        return {
+          ...message,
+          assetRequest: {
+            ...requestState,
+            selectedKeys: nextRequestState.selectedKeys,
+            status: nextRequestState.status,
+          },
+        };
+      });
+
+      if (!hasChanges) {
+        return previous;
+      }
+
+      const next = new Map(previous);
+      next.set(currentSessionId, nextSessionMessages);
+      return next;
+    });
+  }, [currentSessionId, focusedAssets]);
+
+  const handleSelectAssetCandidate = useCallback((
+    messageId: string,
+    candidate: AssetRequestCandidate,
+  ) => {
+    if (!currentSessionId) {
+      return;
+    }
+
+    const sessionMessages = messagesMap.get(currentSessionId) ?? [];
+    const targetMessage = sessionMessages.find((message) => message.id === messageId);
+    const requestState = targetMessage?.assetRequest;
+    if (!requestState) {
+      return;
+    }
+
+    const requestSessionId = requestState.sessionId ?? currentSessionId;
+    if (requestSessionId !== currentSessionId) {
+      updateMessage(requestSessionId, messageId, {
+        assetRequest: {
+          ...requestState,
+          status: 'stale',
+        },
+      });
+      showSaveNotification('这个资产请求属于其他项目，请在当前项目重新请求。', 2800);
+      return;
+    }
+
+    if (requestState.selectedKeys?.includes(candidate.key)) {
+      showSaveNotification(`「${candidate.title}」已经在当前聊天上下文中了。`, 2200);
+      return;
+    }
+
+    const nextSelectedKeys = Array.from(
+      new Set([...(requestState.selectedKeys ?? []), candidate.key]),
+    );
+
+    updateMessage(currentSessionId, messageId, {
+      assetRequest: {
+        ...requestState,
+        selectedKeys: nextSelectedKeys,
+        status: nextSelectedKeys.length > 0 ? 'resolved' : 'pending',
+      },
+    });
+
+    pushFocusedAssetToChat(candidate, 'select');
+  }, [currentSessionId, messagesMap, pushFocusedAssetToChat, showSaveNotification, updateMessage]);
+
+  const openContentItem = useCallback((item: ContentItem) => {
+    const result = resolveHomepageContentItemReopen(item, selectedNovelId);
+
+    if (result.kind === 'error') {
+      showSaveNotification(result.message, 3200);
+      return;
+    }
+
+    pushFocusedAssetToChat(buildFocusedAssetFromContentItem(item), 'reference');
+
+    if (result.kind === 'route') {
+      router.push(result.href);
+      return;
+    }
+
+    setActiveArtifacts([result.artifact]);
+    setArtifactPanelVisible(true);
+    showSaveNotification(result.message, 2500);
+  }, [pushFocusedAssetToChat, router, selectedNovelId, showSaveNotification]);
+
+  const openTopologyNode = useCallback(async (node: WorldTreeNode) => {
+    const isVirtualWorldFact = node.id.includes('::world_fact::') || node.type.startsWith('world_');
+
+    if (isVirtualWorldFact) {
+      setActiveArtifacts([{
+        type: 'world_setting',
+        title: node.label,
+        data: {
+          title: node.label,
+          node_type: node.type,
+          world_fact_type: node.metadata?.world_fact_type,
+          parent_id: node.metadata?.parent_id,
+          description: '这是从世界观资产中拆出的派生事实节点，不是独立内容库资产。',
+        },
+      }]);
+      setArtifactPanelVisible(true);
+      showSaveNotification('已打开世界观派生节点详情。', 2200);
+      return;
+    }
+
+    try {
+      const detail = await contentService.getById(node.id);
+      if (detail) {
+        openContentItem(detail);
+      }
+    } catch (error) {
+      if (isAPIError(error, 404)) {
+        setActiveArtifacts([{
+          type: 'world_setting',
+          title: node.label,
+          data: {
+            title: node.label,
+            node_type: node.type,
+            ...node.metadata,
+            description: '这个拓扑节点没有对应的独立内容资产，已按只读节点打开。',
+          },
+        }]);
+        setArtifactPanelVisible(true);
+        showSaveNotification('该拓扑节点没有独立资产，已打开只读详情。', 2600);
+        return;
+      }
+      console.error('打开拓扑节点失败:', error);
+      showSaveNotification('打开拓扑节点失败，请稍后重试。', 3200);
+    }
+  }, [openContentItem, showSaveNotification]);
+
+  const bindContentItemToSelectedNovel = useCallback(async (item: ContentItem) => {
+    if (!selectedNovelId || !isUnassignedNovelScopedContentItem(item)) {
+      return;
+    }
+
+    try {
+      await bindContentItemToNovel(item, selectedNovelId);
+      showSaveNotification(`「${getContentAssetTitle(item)}」已绑定到当前小说`, 3000);
+      refreshProjectAssets();
+    } catch (err) {
+      console.error('绑定资产到当前小说失败:', err);
+      showSaveNotification('绑定资产到当前小说失败，请稍后重试', 3200);
+    }
+  }, [refreshProjectAssets, selectedNovelId, showSaveNotification]);
+
+  const handleOpenMessageArtifact = useCallback((artifact: MessageArtifactData) => {
+    pushFocusedAssetToChat(buildFocusedAssetFromArtifact({
+      type: artifact.type,
+      title: artifact.title,
+      data: artifact.data,
+    }), 'reference');
+    setActiveArtifacts([{ type: artifact.type, title: artifact.title, data: artifact.data }]);
+    setArtifactPanelVisible(true);
+  }, [pushFocusedAssetToChat]);
+
   const handleArtifactSave = useCallback(async (artifact: ParsedArtifact, updatedData?: Record<string, unknown>) => {
     const finalData = updatedData ?? artifact.data;
+    try {
+      const reopenedResult = await saveReopenedContentItem({
+        items: projectAssetItems,
+        artifact,
+        updatedData: finalData,
+      });
+
+      if (reopenedResult.ok) {
+        addFocusedAsset(buildFocusedAssetFromArtifact({
+          type: artifact.type,
+          title: reopenedResult.title,
+          data: finalData,
+          contentItemId: reopenedResult.contentItemId,
+        }));
+        showSaveNotification(`「${reopenedResult.title}」已同步至项目档案`, 3000);
+        refreshProjectAssets();
+        return;
+      }
+    } catch (err) {
+      console.error('保存已打开资产失败:', err);
+    }
+
     const saveRequest = buildContentCreateRequestFromArtifact({
       artifact,
       data: finalData,
       sessionId: currentSessionId || undefined,
+      parentId: currentNovelParentId || undefined,
     });
 
     if (saveRequest.metadata.type === 'character') {
@@ -414,31 +867,184 @@ export default function ChatPage() {
 
     try {
       await upsertContentAsset(saveRequest);
-      setSaveNotification(`「${saveRequest.metadata.title}」已同步至项目档案`);
-      setTimeout(() => setSaveNotification(null), 3000);
+      addFocusedAsset(buildFocusedAssetFromArtifact({
+        type: saveRequest.metadata.type,
+        title: saveRequest.metadata.title,
+        data: finalData,
+      }));
+      showSaveNotification(`「${saveRequest.metadata.title}」已同步至项目档案`, 3000);
       refreshProjectAssets();
     } catch (err) {
       console.error('保存失败:', err);
     }
-  }, [addCharacter, currentSessionId, refreshProjectAssets]);
+  }, [addCharacter, addFocusedAsset, currentNovelParentId, currentSessionId, projectAssetItems, refreshProjectAssets, showSaveNotification]);
 
-  const handleApplyOpenAIConfig = useCallback((state: OpenAIConfigState) => {
-    const savedState = saveOpenAIConfigState(state);
-    setOpenAIConfigState(savedState);
-  }, []);
+  const handleConfirmSaveAsset = useCallback(async (messageId: string, requestIndex: number) => {
+    let targetSessionId = currentSessionId || '';
+    let messages = targetSessionId ? (messagesMap.get(targetSessionId) ?? []) : [];
+    if (!messages.some((m) => m.id === messageId)) {
+      Array.from(messagesMap.entries()).some(([sessionId, sessionMessages]) => {
+        if (sessionMessages.some((m: Message) => m.id === messageId)) {
+          targetSessionId = sessionId;
+          messages = sessionMessages;
+          return true;
+        }
+        return false;
+      });
+    }
+    if (!targetSessionId) {
+      showSaveNotification('保存失败：当前没有可写入的创作会话', 3200);
+      return;
+    }
+    const msg = messages.find((m) => m.id === messageId);
+    const request = msg?.saveAssetRequests?.[requestIndex];
+    if (!request || request.status !== 'pending') {
+      showSaveNotification('保存失败：没有找到可保存的 AI 建议', 3200);
+      return;
+    }
 
-  const handleSendMessage = async (text: string) => {
+    try {
+      const saveResult = await saveAssetRequestToContent({
+        request,
+        sessionId: targetSessionId,
+        parentId: currentNovelParentId || undefined,
+      });
+
+      updateMessage(targetSessionId, messageId, {
+        saveAssetRequests: msg!.saveAssetRequests!.map((r, i) =>
+          i === requestIndex ? { ...r, id: saveResult.contentId ?? r.id, status: 'saved' as const } : r,
+        ),
+      });
+      addFocusedAsset(buildFocusedAssetFromArtifact({
+        type: request.type,
+        title: request.title,
+        data: request.data,
+        contentItemId: saveResult.contentId,
+      }));
+      showSaveNotification(
+        saveResult.updatedExisting
+          ? `已更新「${request.title}」`
+          : `已保存「${request.title}」到项目内容库`,
+        3000,
+      );
+      refreshProjectAssets();
+    } catch (err) {
+      console.error('保存 AI 建议资产失败:', err);
+      showSaveNotification('保存失败，请稍后重试', 3200);
+    }
+  }, [addFocusedAsset, currentNovelParentId, currentSessionId, messagesMap, refreshProjectAssets, showSaveNotification, updateMessage]);
+
+  useEffect(() => {
+    const handleConfirmSaveAssetEvent = (event: Event) => {
+      const detail = (event as CustomEvent<{ messageId?: string; requestIndex?: number }>).detail;
+      if (!detail?.messageId || typeof detail.requestIndex !== 'number') {
+        return;
+      }
+      handleConfirmSaveAsset(detail.messageId, detail.requestIndex);
+    };
+
+    window.addEventListener('novelforge:confirm-save-asset', handleConfirmSaveAssetEvent);
+    return () => {
+      window.removeEventListener('novelforge:confirm-save-asset', handleConfirmSaveAssetEvent);
+    };
+  }, [handleConfirmSaveAsset]);
+
+  const handleRejectSaveAsset = useCallback((messageId: string, requestIndex: number) => {
     if (!currentSessionId) return;
+    const messages = messagesMap.get(currentSessionId) ?? [];
+    const msg = messages.find((m) => m.id === messageId);
+    if (!msg?.saveAssetRequests?.[requestIndex]) return;
+
+    updateMessage(currentSessionId, messageId, {
+      saveAssetRequests: msg.saveAssetRequests.map((r, i) =>
+        i === requestIndex ? { ...r, status: 'rejected' as const } : r,
+      ),
+    });
+  }, [currentSessionId, messagesMap, updateMessage]);
+
+  const resolveAssetRequestCandidatesFromProject = useCallback(async (
+    request: AssetRequestDirective,
+  ): Promise<FocusedAsset[]> => {
+    const fallbackCandidates = resolveRankedAssetRequestCandidates(request, projectAssets, focusedAssets);
+    if (!currentSessionId) {
+      return fallbackCandidates;
+    }
+
+    const requestedTypes = request.types
+      .map(normalizeAssetRequestType)
+      .filter((value): value is ContentType => value !== null);
+    const queryVariants = Array.from(
+      new Set([
+        request.query?.trim() ?? '',
+        ...tokenizeLookupText(request.query ?? '').filter((token) => token.length >= 2).slice(0, 4),
+        ...(request.query?.trim()
+          ? []
+          : tokenizeLookupText(request.reason ?? '').filter((token) => token.length >= 2).slice(0, 3)),
+      ].filter((value) => value.length > 0)),
+    );
+    const candidatePool = new Map<string, ContentItem>();
+    const candidateLimit = Math.max(request.limit ?? 4, 4) * 6;
+
+    try {
+      const queries = queryVariants.length > 0 ? queryVariants : [''];
+      for (const query of queries) {
+        const searchResult = await contentService.search({
+          query: query || undefined,
+          content_types: requestedTypes.length > 0 ? requestedTypes : undefined,
+          session_id: currentSessionId,
+          parent_id: useAppStore.getState().selectedNovelId || undefined,
+          limit: candidateLimit,
+          offset: 0,
+        });
+
+        for (const item of searchResult.items) {
+          if (item.metadata.session_id && item.metadata.session_id !== currentSessionId) {
+            continue;
+          }
+          candidatePool.set(item.metadata.id, item);
+        }
+
+        if (candidatePool.size >= candidateLimit) {
+          break;
+        }
+      }
+
+      if (candidatePool.size === 0) {
+        return fallbackCandidates;
+      }
+
+      return rankAssetRequestCandidateItems(request, Array.from(candidatePool.values()), focusedAssets);
+    } catch (error) {
+      console.warn('项目资产检索回退到本地候选解析:', error);
+      return fallbackCandidates;
+    }
+  }, [currentSessionId, focusedAssets, projectAssets]);
+
+  const handleSendMessage = async (text: string, sessionIdOverride?: string, aiModeOverride?: AIMode) => {
+    const targetSessionId = sessionIdOverride || currentSessionId;
+    if (!targetSessionId) return;
+    const requestOpenAIConfig: OpenAIConfig = {
+      ...openAIConfig,
+      ai_mode: aiModeOverride ?? aiMode,
+    };
     const requestContext = {
-      session_id: currentSessionId,
+      session_id: targetSessionId,
       project_title: currentSessionTitle ?? undefined,
       project_summary: projectSummary,
+      focused_assets: focusedAssets.map((asset) => ({
+        id: asset.id,
+        type: asset.type,
+        title: asset.title,
+        summary: asset.summary,
+        source: asset.source,
+      })),
+      focused_assets_summary: focusedAssetSummary || undefined,
       system_prompt:
         '如果当前项目已经存在角色、世界观、章节或大纲，请优先沿用它们的命名、设定和关系，不要无故重置或改写既有资产。',
     };
-    appendMessage(currentSessionId, { id: `msg-${Date.now()}`, role: 'user', content: text, timestamp: new Date() });
+    appendMessage(targetSessionId, { id: `msg-${Date.now()}`, role: 'user', content: text, timestamp: new Date() });
     const assistantMessageId = `msg-agent-${Date.now()}`;
-    appendMessage(currentSessionId, {
+    appendMessage(targetSessionId, {
       id: assistantMessageId,
       role: 'assistant',
       content: '',
@@ -452,22 +1058,24 @@ export default function ChatPage() {
       let finalContent = '';
       let finalThinking = '';
       let streamedSuccessfully = false;
+      let streamAccepted = false;
 
       try {
-        for await (const event of chatService.streamMessage(currentSessionId, text, requestContext, openAIConfig)) {
+        for await (const event of chatService.streamMessage(targetSessionId, text, requestContext, requestOpenAIConfig)) {
+          streamAccepted = true;
           if (event.type === 'thinking_delta' && typeof event.delta === 'string') {
             finalThinking += event.delta;
-            updateMessage(currentSessionId, assistantMessageId, { thinking: finalThinking });
+            updateMessage(targetSessionId, assistantMessageId, { thinking: finalThinking });
           }
           if (event.type === 'content_delta' && typeof event.delta === 'string') {
             finalContent += event.delta;
-            updateMessage(currentSessionId, assistantMessageId, { content: finalContent, thinking: finalThinking });
+            updateMessage(targetSessionId, assistantMessageId, { content: finalContent, thinking: finalThinking });
           }
           if (event.type === 'message_complete') {
             if (typeof event.content === 'string') finalContent = event.content;
             if (typeof event.thinking === 'string') finalThinking = event.thinking;
             streamedSuccessfully = true;
-            updateMessage(currentSessionId, assistantMessageId, {
+            updateMessage(targetSessionId, assistantMessageId, {
               content: finalContent,
               thinking: finalThinking,
               isStreaming: false,
@@ -478,13 +1086,16 @@ export default function ChatPage() {
           }
         }
       } catch (streamError) {
-        console.warn('Streaming failed, falling back to sync chat:', streamError);
-        const reply = await chatService.sendMessage(currentSessionId, text, requestContext, openAIConfig);
+        if (streamAccepted) {
+          throw streamError;
+        }
+        console.warn('Streaming request failed before response, falling back to sync chat:', streamError);
+        const reply = await chatService.sendMessage(targetSessionId, text, requestContext, requestOpenAIConfig);
         const aiContent = reply.message?.content || '...';
         const parsed = parseThinkingProcess(aiContent);
         finalContent = parsed.answer || aiContent;
         finalThinking = parsed.thinking;
-        updateMessage(currentSessionId, assistantMessageId, {
+        updateMessage(targetSessionId, assistantMessageId, {
           content: finalContent,
           thinking: finalThinking,
           isStreaming: false,
@@ -493,16 +1104,50 @@ export default function ChatPage() {
       }
 
       if (!streamedSuccessfully) {
-        updateMessage(currentSessionId, assistantMessageId, { isStreaming: false });
+        updateMessage(targetSessionId, assistantMessageId, { isStreaming: false });
       }
 
-      const artifacts = parseMultipleAIArtifacts(finalContent);
-      const displayContent = artifacts.length > 0 ? (artifacts[0].cleanText || finalContent) : finalContent;
-      updateMessage(currentSessionId, assistantMessageId, {
-        content: displayContent,
-        thinking: finalThinking,
-        isStreaming: false,
-      });
+        const artifacts = parseMultipleAIArtifacts(finalContent);
+        const assetRequest = parseAssetRequest(finalContent);
+        const saveAssetRequests = parseSaveAssetRequests(finalContent);
+        const assetRequestCandidates = assetRequest
+          ? await resolveAssetRequestCandidatesFromProject(assetRequest)
+          : [];
+      const cleanedContent = extractCleanText(finalContent);
+      const displayContent = artifacts.length > 0
+        ? (artifacts[0].cleanText || cleanedContent)
+        : cleanedContent;
+        updateMessage(targetSessionId, assistantMessageId, {
+          content: displayContent,
+          thinking: finalThinking,
+          isStreaming: false,
+          artifact: artifacts.length > 0
+            ? {
+                type: artifacts[0].type,
+                title: artifacts[0].title,
+                data: artifacts[0].data,
+              }
+            : undefined,
+          assetRequest: assetRequest
+            ? {
+                query: assetRequest.query,
+                reason: assetRequest.reason,
+                sessionId: targetSessionId,
+                status: assetRequestCandidates.length > 0 ? 'pending' : 'empty',
+                selectedKeys: [],
+                candidates: assetRequestCandidates,
+              }
+            : undefined,
+          saveAssetRequests: saveAssetRequests.length > 0
+            ? saveAssetRequests.map((req) => ({
+                type: req.type,
+                title: req.title,
+                data: req.data,
+                id: req.id,
+                status: 'pending' as const,
+              }))
+            : undefined,
+        });
       if (artifacts.length > 0) {
         setActiveArtifacts(artifacts.map((a: ParsedArtifact) => ({
           type: a.type,
@@ -512,11 +1157,11 @@ export default function ChatPage() {
         })));
         setArtifactPanelVisible(true);
       }
-      updateSessionPreview(currentSessionId, displayContent, text.slice(0, 20));
+      updateSessionPreview(targetSessionId, displayContent, text.slice(0, 20));
     } catch (error) {
       console.error(error);
       const message = error instanceof Error ? error.message : '发送消息失败';
-      updateMessage(currentSessionId, assistantMessageId, {
+      updateMessage(targetSessionId, assistantMessageId, {
         content: `请求失败：${message}`,
         thinking: '',
         isStreaming: false,
@@ -566,7 +1211,8 @@ export default function ChatPage() {
         <ChatSidebar
           collapsed={sidebarCollapsed} onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
           currentSessionId={currentSessionId || ''} onSelectSession={handleSelectSession}
-          onNewSession={createNewSession} onDeleteSession={deleteSession} sessions={sessions}
+          onNewSession={createNewSession} onDeleteSession={deleteSession}
+          onCleanupEmptySessions={handleCleanupEmptySessions} sessions={sessions}
         />
 
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
@@ -606,20 +1252,34 @@ export default function ChatPage() {
           )}
 
           <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              onClick={() => setIsOpenAIConfigOpen(true)}
-              title="配置 OpenAI API 与模型"
+            <div
+              role="group"
+              aria-label="创作模式"
               style={{
-                height: 36, padding: '0 12px', borderRadius: 8, background: 'rgba(255,255,255,0.03)',
-                border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)',
-                display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', maxWidth: 220,
+                display: 'flex', alignItems: 'center', padding: 3, borderRadius: 999,
+                background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-subtle)'
               }}
             >
-              <SlidersHorizontal size={16} />
-              <span style={{ fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {openAIConfigState.enabled ? (openAIConfig.model || '自定义模型') : '后端默认模型'}
-              </span>
-            </button>
+              {(['fast', 'pro'] as AIMode[]).map((mode) => {
+                const active = aiMode === mode;
+                return (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => handleAIModeChange(mode)}
+                    title={mode === 'fast' ? '快速模式：适合灵感、聊天和轻量改写' : 'Pro 模式：适合深度创作、序章和复杂分析'}
+                    style={{
+                      border: 'none', borderRadius: 999, padding: '7px 11px',
+                      background: active ? 'rgba(139, 92, 246, 0.24)' : 'transparent',
+                      color: active ? 'var(--text-primary)' : 'var(--text-muted)',
+                      fontSize: 12, fontWeight: active ? 800 : 600, cursor: 'pointer'
+                    }}
+                  >
+                    {mode === 'fast' ? '快速' : 'Pro'}
+                  </button>
+                );
+              })}
+            </div>
             <button
               onClick={handleExportProject}
               title="导出项目数据包"
@@ -637,8 +1297,215 @@ export default function ChatPage() {
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {viewMode === 'chat' ? (
             <>
-              <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-                <MessageList messages={currentMessages.filter(m => m.role !== 'system')} />
+              {focusedAssets.length > 0 && (
+                <div
+                  style={{
+                    padding: '14px 20px 10px',
+                    borderBottom: '1px solid var(--border-subtle)',
+                    background: 'rgba(99, 102, 241, 0.06)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 10,
+                    flexShrink: 0,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent-primary)' }}>当前聚焦资产</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                        本轮聊天会优先参考这些项目资产，强化连续性、关联性和逻辑一致性。
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={clearFocusedAssets}
+                      style={{
+                        border: '1px solid var(--border-subtle)',
+                        background: 'var(--bg-surface)',
+                        color: 'var(--text-secondary)',
+                        borderRadius: 10,
+                        padding: '8px 12px',
+                        cursor: 'pointer',
+                        fontSize: 12,
+                        fontWeight: 600,
+                      }}
+                    >
+                      清空聚焦
+                    </button>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {focusedAssets.map((asset) => (
+                      <div
+                        key={asset.key}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          borderRadius: 999,
+                          padding: '8px 12px',
+                          background: 'var(--bg-surface)',
+                          border: '1px solid var(--border-subtle)',
+                          maxWidth: 360,
+                        }}
+                      >
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>
+                            {formatContentTypeLabel(asset.type)} · {asset.title}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 11,
+                              color: 'var(--text-muted)',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              maxWidth: 260,
+                            }}
+                          >
+                            {asset.summary}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeFocusedAsset(asset.key)}
+                          style={{
+                            border: 'none',
+                            background: 'transparent',
+                            color: 'var(--text-muted)',
+                            cursor: 'pointer',
+                            fontSize: 16,
+                            lineHeight: 1,
+                          }}
+                          aria-label={`移除 ${asset.title}`}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {(quickReferenceGroups.length > 0 || assetQuickSearch.trim().length > 0) && (
+                <div
+                  style={{
+                    padding: '12px 20px',
+                    borderBottom: '1px solid var(--border-subtle)',
+                    background: 'var(--bg-surface)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 10,
+                    flexShrink: 0,
+                    maxHeight: currentMessages.length > 0 ? 180 : 260,
+                    overflowY: 'auto',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>
+                      项目资产快捷引用
+                    </div>
+                    <input
+                      type="text"
+                      value={assetQuickSearch}
+                      onChange={(event) => setAssetQuickSearch(event.target.value)}
+                      placeholder="搜索角色、章节、世界观..."
+                      style={{
+                        width: 260,
+                        maxWidth: '50%',
+                        borderRadius: 10,
+                        border: '1px solid var(--border-subtle)',
+                        background: 'var(--bg-base)',
+                        color: 'var(--text-primary)',
+                        padding: '8px 12px',
+                        fontSize: 12,
+                        outline: 'none',
+                      }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {quickReferenceGroups.length === 0 ? (
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '4px 0' }}>
+                        当前搜索没有命中项目资产。
+                      </div>
+                    ) : (
+                      quickReferenceGroups.map((group) => (
+                        <div
+                          key={group.key}
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: '72px 1fr',
+                            gap: 10,
+                            alignItems: 'start',
+                          }}
+                        >
+                          <div style={{ fontSize: 12, color: 'var(--text-muted)', paddingTop: 8 }}>
+                            {group.label}
+                          </div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                            {group.items.map((item) => {
+                              const asset = buildFocusedAssetFromContentItem(item);
+                              const isFocused = focusedAssets.some((focused) => focused.key === asset.key);
+                              return (
+                                <button
+                                  key={asset.key}
+                                  type="button"
+                                  onClick={() => pushFocusedAssetToChat(asset, 'reference')}
+                                  style={{
+                                    borderRadius: 999,
+                                    border: isFocused ? '1px solid rgba(99,102,241,0.45)' : '1px solid var(--border-subtle)',
+                                    background: isFocused ? 'rgba(99,102,241,0.12)' : 'var(--bg-base)',
+                                    color: isFocused ? '#c4b5fd' : 'var(--text-secondary)',
+                                    padding: '8px 12px',
+                                    cursor: 'pointer',
+                                    maxWidth: 220,
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    alignItems: 'flex-start',
+                                    gap: 2,
+                                  }}
+                                  title={asset.summary}
+                                >
+                                  <span
+                                    style={{
+                                      fontSize: 12,
+                                      fontWeight: 700,
+                                      maxWidth: '100%',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap',
+                                    }}
+                                  >
+                                    {asset.title}
+                                  </span>
+                                  <span
+                                    style={{
+                                      fontSize: 11,
+                                      color: 'var(--text-muted)',
+                                      maxWidth: '100%',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap',
+                                    }}
+                                  >
+                                    {isFocused ? '已加入当前上下文' : asset.summary}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+                <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                  <MessageList
+                    messages={currentMessages.filter(m => m.role !== 'system')}
+                    onSelectAssetCandidate={handleSelectAssetCandidate}
+                    onOpenArtifact={handleOpenMessageArtifact}
+                    onConfirmSaveAsset={handleConfirmSaveAsset}
+                    onRejectSaveAsset={handleRejectSaveAsset}
+                  />
                 {isGenerating && (
                   <div style={{ display: 'flex', alignItems: 'center', padding: '16px 40px', color: 'var(--text-muted)' }}>
                     <Loader2 size={18} className="animate-spin" style={{ marginRight: 10 }} />
@@ -651,6 +1518,8 @@ export default function ChatPage() {
                   onSend={handleSendMessage}
                   sessionId={currentSessionId || undefined}
                   openAIConfig={openAIConfig}
+                  aiMode={aiMode}
+                  onAIModeChange={handleAIModeChange}
                 />
               </div>
             </>
@@ -669,6 +1538,19 @@ export default function ChatPage() {
                     </p>
                   </div>
                   <div style={{ display: 'flex', gap: 12 }}>
+                    <button
+                      onClick={handleGeneratePrologue}
+                      disabled={isGeneratingChapter || projectAssets.characters.length === 0}
+                      style={{
+                        background: '#a7f3d0', color: '#064e3b', padding: '10px 20px', borderRadius: 12,
+                        fontWeight: 800, fontSize: 14, cursor: projectAssets.characters.length === 0 ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 8,
+                        border: 'none', boxShadow: '0 8px 16px rgba(0,0,0,0.2)', opacity: isGeneratingChapter || projectAssets.characters.length === 0 ? 0.6 : 1
+                      }}
+                      title={projectAssets.characters.length === 0 ? '请先导入并提取小说资产' : '基于当前资产生成并保存序章建议'}
+                    >
+                      {isGeneratingChapter ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
+                      生成序章
+                    </button>
                     <button
                       onClick={handleGenerateChapter}
                       disabled={isGeneratingChapter}
@@ -698,12 +1580,12 @@ export default function ChatPage() {
                   <div style={{ marginBottom: 40 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
                       <GitBranch size={20} color="var(--accent-primary)" />
-                      <h3 style={{ fontSize: 18, fontWeight: 600 }}>世界树拓扑 (Visualization Core)</h3>
+                      <h3 style={{ fontSize: 18, fontWeight: 600 }}>世界树拓扑</h3>
                     </div>
                     <WorldTree 
                       key={currentSessionId} // 关键修复：强制重置世界树实例
-                      sessionId={currentSessionId || ''} 
-                      topology={worldTreeTopology} 
+                      sessionId={currentSessionId || ''}
+                      topology={worldTreeTopology}
                       onNodeDelete={async (nodeId) => {
                         try {
                           await contentService.deleteContentItem(nodeId);
@@ -712,20 +1594,8 @@ export default function ChatPage() {
                           console.error('Failed to delete node:', err);
                         }
                       }}
-                      onNodeClick={async (node: WorldTreeNode) => {
-                        const detail = await contentService.getById(node.id);
-                        if (detail) {
-                          const payload = getContentAssetPayload(detail);
-                          const parsedData = Object.keys(payload).length > 0
-                            ? payload
-                            : { content: detail.content || '' };
-                          setActiveArtifacts([{
-                            type: getArtifactPanelType(detail.metadata.type),
-                            title: detail.metadata.title,
-                            data: parsedData,
-                          }]);
-                          setArtifactPanelVisible(true);
-                        }
+                      onNodeClick={(node: WorldTreeNode) => {
+                        void openTopologyNode(node);
                       }}
                     />
                   </div>
@@ -750,17 +1620,27 @@ export default function ChatPage() {
                             const parsedChapData = getContentAssetPayload(chap);
                             const chapterTitle = getContentAssetTitle(chap, parsedChapData);
                             const chapText = getContentAssetText(chap, parsedChapData);
+                            const canBindToCurrentNovel = Boolean(selectedNovelId && isUnassignedNovelScopedContentItem(chap));
                             return (
                               <div key={chap.metadata.id} style={{
                                 padding: 24, borderRadius: 16, background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
                                 boxShadow: 'var(--shadow-sm)', cursor: 'pointer'
-                              }} onClick={() => {
-                                setActiveArtifacts([{ type: 'chapter', title: chapterTitle, data: { ...parsedChapData, chapter_title: chapterTitle, content: chapText } }]);
-                                setArtifactPanelVisible(true);
-                              }}>
+                              }} onClick={() => openContentItem(chap)}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12, alignItems: 'center' }}>
                                   <h4 style={{ fontWeight: 700, fontSize: 15 }}>{chapterTitle}</h4>
                                   <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                                    {canBindToCurrentNovel && (
+                                      <button
+                                        type="button"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          bindContentItemToSelectedNovel(chap);
+                                        }}
+                                        style={{ border: '1px solid rgba(99,102,241,0.35)', background: 'rgba(99,102,241,0.12)', color: '#c4b5fd', borderRadius: 6, padding: '2px 8px', fontSize: 11, cursor: 'pointer' }}
+                                      >
+                                        绑定到当前小说
+                                      </button>
+                                    )}
                                     <span style={{ fontSize: 11, color: 'var(--text-disabled)', background: 'var(--bg-base)', padding: '2px 8px', borderRadius: 6 }}>{chapText.length} 字</span>
                                   </div>
                                 </div>
@@ -778,22 +1658,89 @@ export default function ChatPage() {
                         <User size={20} color="#3b82f6" />
                         <h3 style={{ fontSize: 18, fontWeight: 600 }}>角色设定</h3>
                       </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 40 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
                         {projectAssets.characters.length === 0 ? (
                           <div style={{ padding: 20, border: '1px dashed var(--border-subtle)', borderRadius: 12, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>还没有角色</div>
                         ) : (
                           projectAssets.characters.map((char) => {
                             const charData = getContentAssetPayload(char);
                             const role = readString(charData.role) ?? '设定';
+                            const canBindToCurrentNovel = Boolean(selectedNovelId && isUnassignedNovelScopedContentItem(char));
                             return (
-                              <div key={char.metadata.id} onClick={() => {
-                                setActiveArtifacts([{ type: 'character_card', title: char.metadata.title, data: charData }]);
-                                setArtifactPanelVisible(true);
-                              }} style={assetMiniCardStyle}>
+                              <div key={char.metadata.id} onClick={() => openContentItem(char)} style={assetMiniCardStyle}>
                                 <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(59, 130, 246, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#60a5fa', fontSize: 16, fontWeight: 700, flexShrink: 0 }}>{char.metadata.title[0]}</div>
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                   <div style={{ fontWeight: 600, fontSize: 14 }}>{char.metadata.title}</div>
                                   <div style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{role}</div>
+                                  {canBindToCurrentNovel && (
+                                    <button
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        bindContentItemToSelectedNovel(char);
+                                      }}
+                                      style={{ marginTop: 6, border: '1px solid rgba(99,102,241,0.35)', background: 'rgba(99,102,241,0.12)', color: '#c4b5fd', borderRadius: 6, padding: '2px 8px', fontSize: 11, cursor: 'pointer' }}
+                                    >
+                                      绑定到当前小说
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+                        <LayoutDashboard size={20} color="#10b981" />
+                        <h3 style={{ fontSize: 18, fontWeight: 600 }}>世界观 / 时间线 / 关系</h3>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        {[
+                          ...projectAssets.worlds,
+                          ...projectAssets.timelines,
+                          ...projectAssets.relationships,
+                        ].length === 0 ? (
+                          <div style={{ padding: 20, border: '1px dashed var(--border-subtle)', borderRadius: 12, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>还没有世界观、时间线或关系资产</div>
+                        ) : (
+                          [
+                            ...projectAssets.worlds,
+                            ...projectAssets.timelines,
+                            ...projectAssets.relationships,
+                          ].slice(0, 12).map((item) => {
+                            const payload = getContentAssetPayload(item);
+                            const subtitle = item.metadata.type === 'world'
+                              ? readString(payload.description) ?? '世界观资产'
+                              : item.metadata.type === 'timeline'
+                                ? readString(payload.description) ?? readString(payload.date) ?? '时间线资产'
+                                : readString(payload.description) ?? `${readString(payload.source) ?? '未知'} → ${readString(payload.target) ?? readString(payload.target_name) ?? '未知'}`;
+                            const canBindToCurrentNovel = Boolean(selectedNovelId && isUnassignedNovelScopedContentItem(item));
+                            return (
+                              <div
+                                key={item.metadata.id}
+                                onClick={() => openContentItem(item)}
+                                style={assetMiniCardStyle}
+                              >
+                                <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(16, 185, 129, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#34d399', fontSize: 14, fontWeight: 700, flexShrink: 0 }}>
+                                  {item.metadata.type === 'world' ? '世' : item.metadata.type === 'timeline' ? '时' : '关'}
+                                </div>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontWeight: 600, fontSize: 14 }}>{getContentAssetTitle(item, payload)}</div>
+                                  <div style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {formatContentTypeLabel(item.metadata.type)} · {subtitle}
+                                  </div>
+                                  {canBindToCurrentNovel && (
+                                    <button
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        bindContentItemToSelectedNovel(item);
+                                      }}
+                                      style={{ marginTop: 6, border: '1px solid rgba(99,102,241,0.35)', background: 'rgba(99,102,241,0.12)', color: '#c4b5fd', borderRadius: 6, padding: '2px 8px', fontSize: 11, cursor: 'pointer' }}
+                                    >
+                                      绑定到当前小说
+                                    </button>
+                                  )}
                                 </div>
                               </div>
                             );
@@ -822,6 +1769,14 @@ export default function ChatPage() {
         onSaveToProject={(art, updatedData) => {
           handleArtifactSave(toParsedArtifact(art), updatedData);
         }}
+        onPinToContext={(art, updatedData) => {
+          pushFocusedAssetToChat(buildFocusedAssetFromArtifact({
+            type: art.type,
+            title: art.title,
+            data: updatedData,
+          }), 'pin');
+          setViewMode('chat');
+        }}
         onSaveAll={async (payload) => {
           for (const item of payload) {
             await handleArtifactSave(toParsedArtifact(item.artifact), item.data);
@@ -833,17 +1788,10 @@ export default function ChatPage() {
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
         currentSessionId={currentSessionId || ''}
-        openAIConfig={openAIConfig}
+        openAIConfig={{ ...openAIConfig, ai_mode: 'pro' }}
         onSubmitted={({ fileName }) => {
-          setSaveNotification(`导入任务已提交：${fileName}，可在右下角任务中心查看进度`);
-          setTimeout(() => setSaveNotification(null), 3000);
+          showSaveNotification(`导入任务已提交：${fileName}，可在右下角任务中心查看进度`, 3000);
         }}
-      />
-      <OpenAIConfigPanel
-        open={isOpenAIConfigOpen}
-        value={openAIConfigState}
-        onOpenChange={setIsOpenAIConfigOpen}
-        onApply={handleApplyOpenAIConfig}
       />
     </div>
   );
@@ -887,6 +1835,368 @@ function parseCharacterRelationships(value: unknown): Array<{ target_name: strin
     .filter((item) => item.target_name.length > 0);
 }
 
+function formatContentTypeLabel(type: ContentType | string): string {
+  switch (type) {
+    case 'character':
+    case 'character_card':
+      return '角色';
+    case 'world':
+    case 'world_setting':
+      return '世界观';
+    case 'chapter':
+      return '章节';
+    case 'outline':
+      return '大纲';
+    case 'timeline':
+      return '时间线';
+    case 'relationship':
+      return '关系网';
+    case 'novel':
+      return '小说';
+    default:
+      return String(type);
+  }
+}
+
+function buildFocusedAssetFromContentItem(item: ContentItem): FocusedAsset {
+  const payload = getContentAssetPayload(item);
+  const title = getContentAssetTitle(item, payload);
+  const text = getContentAssetText(item, payload);
+  const summarySeed = text || JSON.stringify(payload);
+
+  return {
+    key: item.metadata.id,
+    id: item.metadata.id,
+    type: item.metadata.type,
+    title,
+    summary: clipFocusedAssetSummary(summarySeed),
+    source: 'project_asset',
+  };
+}
+
+function buildFocusedAssetSummary(items: FocusedAsset[]): string {
+  if (items.length === 0) {
+    return '';
+  }
+
+  return items
+    .map((item, index) => `${index + 1}. [${formatContentTypeLabel(item.type)}] ${item.title}\n${item.summary}`)
+    .join('\n\n');
+}
+
+function reconcileAssetRequestWithFocusedAssets(
+  request: AssetRequestState,
+  currentSessionId: string,
+  focusedKeys: Set<string>,
+): ReconciledAssetRequestState {
+  const selectedKeys = request.candidates
+    .map((candidate) => candidate.key)
+    .filter((key) => focusedKeys.has(key));
+
+  if ((request.sessionId ?? currentSessionId) !== currentSessionId) {
+    return {
+      selectedKeys,
+      status: 'stale',
+    };
+  }
+
+  if (request.candidates.length === 0) {
+    return {
+      selectedKeys: [],
+      status: 'empty',
+    };
+  }
+
+  return {
+    selectedKeys,
+    status: selectedKeys.length > 0 ? 'resolved' : 'pending',
+  };
+}
+
+function normalizeAssetRequestType(type: string): ContentType | null {
+  switch (type.trim().toLowerCase()) {
+    case 'character':
+    case 'character_card':
+      return 'character';
+    case 'world':
+    case 'world_setting':
+      return 'world';
+    case 'chapter':
+      return 'chapter';
+    case 'outline':
+      return 'outline';
+    case 'novel':
+      return 'novel';
+    default:
+      return null;
+  }
+}
+
+function getCandidateRecencyScore(updatedAt?: string): number {
+  if (!updatedAt) {
+    return 0;
+  }
+
+  const timestamp = Date.parse(updatedAt);
+  if (Number.isNaN(timestamp)) {
+    return 0;
+  }
+
+  const ageHours = Math.max(0, (Date.now() - timestamp) / (1000 * 60 * 60));
+  if (ageHours <= 6) {
+    return 10;
+  }
+  if (ageHours <= 24) {
+    return 7;
+  }
+  if (ageHours <= 24 * 7) {
+    return 4;
+  }
+  return 1;
+}
+
+function normalizeLookupText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fff\s]+/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function tokenizeLookupText(value: string): string[] {
+  const normalized = normalizeLookupText(value);
+  if (!normalized) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      normalized
+        .split(/\s+/)
+        .map((token) => token.trim())
+        .filter((token) => token.length > 0),
+    ),
+  );
+}
+
+function collectAssetLookupTerms(item: ContentItem, payload: Record<string, unknown>): string[] {
+  const directKeys = [
+    'name',
+    'title',
+    'chapter_title',
+    'summary',
+    'description',
+    'role',
+    'world_name',
+    'world',
+    'setting_name',
+    'source',
+    'target',
+    'target_name',
+    'relationship',
+    'relationship_type',
+  ];
+  const arrayKeys = [
+    'aliases',
+    'aka',
+    'nickname',
+    'nicknames',
+    'tags',
+    'characters',
+    'locations',
+    'related_characters',
+  ];
+  const nestedArrayKeys: Array<{ key: string; valueKeys: string[] }> = [
+    { key: 'relationships', valueKeys: ['target_name', 'target', 'name', 'character'] },
+    { key: 'characterRoles', valueKeys: ['name'] },
+    { key: 'character_mentions', valueKeys: ['name', 'character', 'target_name'] },
+    { key: 'location_mentions', valueKeys: ['name', 'location', 'target_name'] },
+    { key: 'characters', valueKeys: ['name', 'target_name'] },
+    { key: 'locations', valueKeys: ['name', 'location'] },
+  ];
+
+  const values: string[] = [item.metadata.title, getContentAssetTitle(item, payload)];
+
+  for (const key of directKeys) {
+    const value = payload[key];
+    if (typeof value === 'string' && value.trim()) {
+      values.push(value.trim());
+    }
+  }
+
+  for (const key of arrayKeys) {
+    const value = payload[key];
+    if (!Array.isArray(value)) {
+      continue;
+    }
+
+    for (const entry of value) {
+      if (typeof entry === 'string' && entry.trim()) {
+        values.push(entry.trim());
+      }
+    }
+  }
+
+  for (const { key, valueKeys } of nestedArrayKeys) {
+    const value = payload[key];
+    if (!Array.isArray(value)) {
+      continue;
+    }
+
+    for (const entry of value) {
+      if (!entry || typeof entry !== 'object') {
+        continue;
+      }
+
+      const record = entry as Record<string, unknown>;
+      for (const valueKey of valueKeys) {
+        const nestedValue = record[valueKey];
+        if (typeof nestedValue === 'string' && nestedValue.trim()) {
+          values.push(nestedValue.trim());
+        }
+      }
+    }
+  }
+
+  for (const tag of item.metadata.tags ?? []) {
+    if (typeof tag === 'string' && tag.trim()) {
+      values.push(tag.trim());
+    }
+  }
+
+  return Array.from(new Set(values.map((value) => value.trim()).filter((value) => value.length > 0)));
+}
+
+function rankAssetRequestCandidateItems(
+  request: AssetRequestDirective,
+  items: ContentItem[],
+  currentFocusedAssets: FocusedAsset[] = []
+): FocusedAsset[] {
+  const requestedTypes = request.types
+    .map(normalizeAssetRequestType)
+    .filter((value): value is ContentType => value !== null);
+
+  const normalizedQuery = normalizeLookupText(request.query ?? '');
+  const requestedTokens = normalizedQuery
+    .split(/[\s,，、]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0);
+
+  const reasonTokens = tokenizeLookupText(request.reason ?? '').slice(0, 8);
+  const limit = request.limit ?? 4;
+
+  return items
+    .filter((item) => requestedTypes.length === 0 || requestedTypes.includes(item.metadata.type))
+    .map((item) => {
+      const payload = getContentAssetPayload(item);
+      const title = getContentAssetTitle(item, payload);
+      const text = getContentAssetText(item, payload);
+      const relationText = JSON.stringify(item.relations ?? {});
+      const lookupTerms = collectAssetLookupTerms(item, payload);
+      const normalizedLookupTerms = lookupTerms
+        .map((term) => normalizeLookupText(term))
+        .filter((term) => term.length > 0);
+      const haystack = normalizeLookupText([title, text, JSON.stringify(payload), relationText, ...lookupTerms].join(' '));
+      const normalizedTitle = normalizeLookupText(title);
+
+      let score = 0;
+      let matchedTokens = 0;
+
+      if (!normalizedQuery) {
+        score += 20;
+      } else {
+        if (normalizedLookupTerms.some((term) => term === normalizedQuery)) {
+          score += 132;
+        } else if (normalizedLookupTerms.some((term) => term.includes(normalizedQuery))) {
+          score += 92;
+        } else if (haystack.includes(normalizedQuery)) {
+          score += 44;
+        }
+
+        for (const token of requestedTokens) {
+          if (normalizedLookupTerms.some((term) => term === token)) {
+            matchedTokens += 1;
+            score += 28;
+            continue;
+          }
+
+          if (normalizedLookupTerms.some((term) => term.includes(token))) {
+            matchedTokens += 1;
+            score += 18;
+            continue;
+          }
+
+          if (haystack.includes(token)) {
+            matchedTokens += 1;
+            score += 8;
+          }
+        }
+
+        if (requestedTokens.length > 0 && matchedTokens === 0 && !haystack.includes(normalizedQuery)) {
+          return null;
+        }
+
+        if (requestedTokens.length > 0 && matchedTokens === requestedTokens.length) {
+          score += 16;
+        }
+      }
+
+      for (const token of reasonTokens) {
+        if (normalizedLookupTerms.some((term) => term === token)) {
+          score += 8;
+        } else if (normalizedLookupTerms.some((term) => term.includes(token))) {
+          score += 4;
+        } else if (haystack.includes(token)) {
+          score += 2;
+        }
+      }
+
+      const focusKey = `${item.metadata.type}:${item.metadata.id}`;
+      if (currentFocusedAssets.some((focused) => focused.id === item.metadata.id || focused.key === focusKey)) {
+        score += 18;
+      }
+
+      if (currentFocusedAssets.some((focused) => normalizeLookupText(focused.title) === normalizedTitle)) {
+        score += 8;
+      }
+
+      const normalizedFocusedTitles = currentFocusedAssets
+        .map((focused) => normalizeLookupText(focused.title))
+        .filter((focusedTitle) => focusedTitle.length > 0 && focusedTitle !== normalizedTitle);
+      if (normalizedFocusedTitles.some((focusedTitle) => haystack.includes(focusedTitle))) {
+        score += 12;
+      }
+
+      score += getCandidateRecencyScore(item.metadata.updated_at);
+
+      return { item, score };
+    })
+    .filter((entry): entry is { item: ContentItem; score: number } => entry !== null)
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+      return Date.parse(right.item.metadata.updated_at || '') - Date.parse(left.item.metadata.updated_at || '');
+    })
+    .map((entry) => buildFocusedAssetFromContentItem(entry.item))
+    .slice(0, limit);
+}
+
+function resolveRankedAssetRequestCandidates(
+  request: AssetRequestDirective,
+  assets: ProjectAssets,
+  currentFocusedAssets: FocusedAsset[] = []
+): FocusedAsset[] {
+  const allItems: ContentItem[] = [
+    ...assets.characters,
+    ...assets.worlds,
+    ...assets.chapters,
+    ...assets.outlines,
+  ];
+
+  return rankAssetRequestCandidateItems(request, allItems, currentFocusedAssets);
+}
+
 function summarizeAssetTitles(items: ContentItem[], limit: number): string {
   const titles = items
     .slice(0, limit)
@@ -919,9 +2229,14 @@ function summarizeAssetTexts(items: ContentItem[], limit: number, maxLength = 22
   return snippets.join('\n');
 }
 
-function buildProjectChatSummary(sessionTitle: string | null, assets: ProjectAssets): string {
+function buildProjectChatSummary(sessionTitle: string | null, assets: ProjectAssets, selectedNovelId: string | null): string {
+  const activeOutline = assets.outlines.find((item) => item.metadata.id === selectedNovelId);
+  const activeNovelTitle = selectedNovelId
+    ? activeOutline?.metadata.title ?? activeOutline?.metadata.id ?? selectedNovelId
+    : null;
   const lines = [
     `项目名称：${sessionTitle ?? '未命名项目'}`,
+    activeNovelTitle ? `当前小说容器：${activeNovelTitle}` : '当前小说容器：全部小说',
     `角色数量：${assets.characters.length}`,
     `世界观资产数量：${assets.worlds.length}`,
     `章节数量：${assets.chapters.length}`,

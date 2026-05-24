@@ -44,6 +44,12 @@ class Config:
         self.api_key: Optional[str] = os.getenv("OPENAI_API_KEY")
         self.base_url: str = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
         self.model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        self.openai_proxy: str = os.getenv("NOVELFORGE_OPENAI_PROXY", "").strip()
+        self.fast_model: str = os.getenv("NOVELFORGE_FAST_MODEL", "").strip()
+        self.pro_model: str = os.getenv("NOVELFORGE_PRO_MODEL", "").strip()
+        self.default_ai_mode: str = os.getenv("NOVELFORGE_DEFAULT_AI_MODE", "fast").strip().lower()
+        if self.default_ai_mode not in {"fast", "pro"}:
+            self.default_ai_mode = "fast"
         self.strict_model: bool = os.getenv("OPENAI_STRICT_MODEL", "false").lower() == "true"
         self.fallback_models: list[str] = [
             item.strip()
@@ -101,6 +107,22 @@ class Config:
             str(Path(self.data_dir) / "novelforge_content.db"),
         )
 
+        # Deployment/auth configuration. Local development stays open unless a password
+        # or explicit public deployment flag is configured.
+        self.public_deployment: bool = os.getenv("NOVELFORGE_PUBLIC_DEPLOYMENT", "false").lower() == "true"
+        self.admin_password: Optional[str] = os.getenv("NOVELFORGE_ADMIN_PASSWORD")
+        self.session_secret: Optional[str] = os.getenv("NOVELFORGE_SESSION_SECRET")
+        self.auth_required: bool = (
+            os.getenv("NOVELFORGE_AUTH_REQUIRED", "false").lower() == "true"
+            or self.public_deployment
+            or bool(self.admin_password)
+        )
+        self.frontend_origin: str = os.getenv("FRONTEND_ORIGIN", "http://localhost:3000").strip()
+        self.allow_runtime_openai_overrides: bool = (
+            os.getenv("NOVELFORGE_ALLOW_RUNTIME_OPENAI_OVERRIDES", "true").lower() == "true"
+            and not self.public_deployment
+        )
+
     def clone(self) -> "Config":
         """Clone the current config without reloading environment variables."""
         cloned = Config.__new__(Config)
@@ -113,10 +135,18 @@ class Config:
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         model: Optional[str] = None,
+        ai_mode: Optional[str] = None,
         strict_model: Optional[bool] = None,
     ) -> "Config":
         """Return a cloned config with runtime OpenAI overrides applied."""
         cloned = self.clone()
+        if ai_mode is not None:
+            normalized_mode = ai_mode.strip().lower()
+            mode_model = cloned.get_model_for_ai_mode(normalized_mode)
+            if mode_model:
+                cloned.model = mode_model
+                cloned.strict_model = True
+                cloned.fallback_models = []
         if api_key is not None:
             cloned.api_key = api_key.strip() or None
         if base_url is not None:
@@ -132,6 +162,15 @@ class Config:
         if strict_model is not None:
             cloned.strict_model = strict_model
         return cloned
+
+    def get_model_for_ai_mode(self, ai_mode: Optional[str]) -> Optional[str]:
+        """Resolve a user-facing AI mode into a configured backend model."""
+        normalized_mode = (ai_mode or self.default_ai_mode or "fast").strip().lower()
+        if normalized_mode == "pro":
+            return self.pro_model or self.model
+        if normalized_mode == "fast":
+            return self.fast_model or self.model
+        return None
     
     @classmethod
     def load(cls, config_path: Optional[str] = None) -> "Config":

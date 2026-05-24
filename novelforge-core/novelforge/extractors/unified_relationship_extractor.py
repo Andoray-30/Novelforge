@@ -2,7 +2,7 @@
 统一关系网络提取器 - 批量提取，充分利用大模型长上下文
 """
 import asyncio
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 from dataclasses import dataclass
 from novelforge.services.ai_service import AIService
 from novelforge.extractors.base_extractor import (
@@ -34,6 +34,10 @@ class UnifiedRelationshipExtractor(RelationshipExtractorInterface):
 
     async def extract_relationships(self, text: str) -> List[NetworkEdge]:
         """从文本中提取角色关系"""
+        return await self.extract_relationships_guided(text)
+
+    async def extract_relationships_guided(self, text: str, characters: Optional[List[Any]] = None) -> List[NetworkEdge]:
+        """从文本中提取角色关系，可选使用角色候选池约束端点。"""
         if not self.ai_service:
             raise ValueError("AI service is required for relationship extraction")
 
@@ -41,29 +45,62 @@ class UnifiedRelationshipExtractor(RelationshipExtractorInterface):
         if not chunks:
             return []
 
+        character_context = self._build_character_context(characters or [])
         all_relationships = []
         for i in range(0, len(chunks), self.MAX_CHUNKS_PER_BATCH):
             batch_chunks = chunks[i:i + self.MAX_CHUNKS_PER_BATCH]
-            relationships = await self._batch_extract_from_chunks(batch_chunks)
+            relationships = await self._batch_extract_from_chunks(batch_chunks, character_context=character_context)
             all_relationships.extend(relationships)
 
         return await self._smart_merge_relationships(all_relationships)
 
-    async def _batch_extract_from_chunks(self, chunks: List[Chunk]) -> List[NetworkEdge]:
+    def _build_character_context(self, characters: List[Any]) -> str:
+        if not characters:
+            return ""
+
+        lines = []
+        for character in characters:
+            name = str(getattr(character, "name", "") or "").strip()
+            if not name:
+                continue
+            aliases = [str(alias).strip() for alias in (getattr(character, "tags", []) or []) if str(alias).strip()]
+            role = str(getattr(getattr(character, "role", None), "value", getattr(character, "role", "")) or "")
+            alias_text = f"；别名：{', '.join(aliases)}" if aliases else ""
+            role_text = f"；定位：{role}" if role else ""
+            lines.append(f"- 标准名：{name}{alias_text}{role_text}")
+        if not lines:
+            return ""
+        return "\n".join(lines)
+
+    async def _batch_extract_from_chunks(self, chunks: List[Chunk], character_context: str = "") -> List[NetworkEdge]:
         """批量从多个片段中提取关系"""
         combined_content = "\n\n=== 文本片段分隔 ===\n\n".join([
             f"[片段 {j+1}]\n{chunk.content}"
             for j, chunk in enumerate(chunks)
         ])
 
-        return await self._extract_relationships(combined_content)
+        return await self._extract_relationships(combined_content, character_context=character_context)
 
-    async def _extract_relationships(self, combined_text: str) -> List[NetworkEdge]:
+    async def _extract_relationships(self, combined_text: str, character_context: str = "") -> List[NetworkEdge]:
         """提取关系网络"""
+        guidance = ""
+        if character_context:
+            guidance = f"""
+
+## 已识别角色候选池
+以下是前置角色提取阶段识别出的标准角色名和别名。关系端点应优先使用这些标准名：
+{character_context}
+
+## 候选池使用规则
+1. 如果文本中的称呼能对应候选池别名，请输出候选池中的标准名。
+2. 优先提取候选池角色之间的互动、冲突、亲属、同伴、敌对、合作、依赖、利用等关系。
+3. 如果发现候选池外的新有名角色，可以输出原文姓名，但 evidence 必须能证明该角色真实出现。
+4. 不要把组织、地点、事件或抽象概念当作人物关系端点，除非文本明确把它拟人化为角色。
+"""
         prompt = f"""你是一个专业的小说关系分析师。请仔细分析以下文本，提取所有角色之间的关系。
 
 文本内容：
-{combined_text}
+{combined_text}{guidance}
 
 ## 任务
 识别文本中角色之间的关系，深入挖掘以下维度：
@@ -140,6 +177,18 @@ class UnifiedRelationshipExtractor(RelationshipExtractorInterface):
         elif not isinstance(evidence, list):
             evidence = []
 
+        evolution = rel_data.get("evolution", [])
+        if isinstance(evolution, str):
+            evolution = [evolution] if evolution else []
+        elif not isinstance(evolution, list):
+            evolution = []
+
+        chapter_references = rel_data.get("chapter_references", [])
+        if isinstance(chapter_references, str):
+            chapter_references = [chapter_references] if chapter_references else []
+        elif not isinstance(chapter_references, list):
+            chapter_references = []
+
         return NetworkEdge(
             source=str(rel_data.get("source", "Unknown")),
             target=str(rel_data.get("target", "Unknown")),
@@ -150,8 +199,8 @@ class UnifiedRelationshipExtractor(RelationshipExtractorInterface):
             evidence=evidence,
             start_event=str(rel_data.get("start_event", "")) if rel_data.get("start_event") else None,
             end_event=str(rel_data.get("end_event", "")) if rel_data.get("end_event") else None,
-            evolution=rel_data.get("evolution", []),
-            chapter_references=rel_data.get("chapter_references", [])
+            evolution=evolution,
+            chapter_references=chapter_references
         )
 
     def _map_relationship_type(self, type_str: str) -> RelationshipType:

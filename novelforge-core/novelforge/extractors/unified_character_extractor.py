@@ -44,6 +44,8 @@ class UnifiedCharacterExtractor(CharacterExtractorInterface):
     MAX_CONTEXT_TOKENS = 100000  # 假设100k上下文
     MAX_CHARS_PER_BATCH = 30     # 每批最多处理30个角色去重
     MAX_CHUNKS_PER_EXTRACTION = 5  # 每次提取最多合并5个片段
+    MIN_DETAILED_PROFILE_SCORE = 3
+    MAX_TARGETED_PROFILE_CANDIDATES = 12
 
     def __init__(self, config: ExtractionConfig, ai_service: Optional[AIService] = None):
         self.config = config
@@ -52,6 +54,58 @@ class UnifiedCharacterExtractor(CharacterExtractorInterface):
             chunk_size=config.chunk_size,
             chunk_overlap=config.chunk_overlap
         )
+
+    def _normalize_name(self, name: str) -> str:
+        cleaned = re.sub(r"[\s·・•（）()《》<>『』「」\[\]]+", "", (name or "").strip())
+        return cleaned or (name or "").strip()
+
+    def _are_potential_aliases(self, left: str, right: str) -> bool:
+        left_name = self._normalize_name(left)
+        right_name = self._normalize_name(right)
+        if not left_name or not right_name or left_name == right_name:
+            return left_name == right_name
+        longer, shorter = (left_name, right_name) if len(left_name) >= len(right_name) else (right_name, left_name)
+        if not longer.endswith(shorter) and not longer.startswith(shorter):
+            return False
+        return len(shorter) >= 1 and len(longer) <= 6
+
+    def _character_name_variants(self, character: Character) -> List[str]:
+        variants = [character.name] + list(character.tags or [])
+        normalized: List[str] = []
+        for variant in variants:
+            name = self._normalize_name(variant)
+            if name and name not in normalized:
+                normalized.append(name)
+        return normalized
+
+    def _are_same_character_candidate(self, left: Character, right: Character) -> bool:
+        return any(
+            self._are_potential_aliases(left_name, right_name)
+            for left_name in self._character_name_variants(left)
+            for right_name in self._character_name_variants(right)
+        )
+
+    def _merge_alias_groups(self, characters: List[Character]) -> List[Character]:
+        merged: List[Character] = []
+        for character in characters:
+            character.name = self._normalize_name(character.name)
+            if not character.name:
+                continue
+
+            match = next((existing for existing in merged if self._are_same_character_candidate(existing, character)), None)
+            if not match:
+                merged.append(character)
+                continue
+
+            if len(character.name) > len(match.name):
+                previous_name = match.name
+                match.name = character.name
+                if previous_name not in match.tags:
+                    match.tags.append(previous_name)
+            elif character.name != match.name and character.name not in match.tags:
+                match.tags.append(character.name)
+            self._merge_character_data(match, character)
+        return merged
 
     async def extract_characters(self, text: str) -> List[Character]:
         """
@@ -71,16 +125,304 @@ class UnifiedCharacterExtractor(CharacterExtractorInterface):
         if not chunks:
             return []
 
-        # 2. 批量提取 - 合并多个片段一次性提取
-        all_characters = await self._batch_extract_from_chunks(chunks)
+        # 2. 先全书普查召回候选，再做详细建档，避免长档案 prompt 主动省略低频配角
+        census_characters = await self._run_character_census(chunks)
+        detailed_characters = await self._batch_extract_from_chunks(chunks)
+        candidate_pool = self._merge_census_candidates(detailed_characters, census_characters)
+        targeted_characters = await self._build_targeted_character_profiles(text, candidate_pool)
 
+        all_characters = self._merge_census_candidates(detailed_characters + targeted_characters, census_characters)
         if len(all_characters) <= 1:
             return all_characters
 
         # 3. 智能去重
         merged_characters = await self._smart_merge_characters(all_characters)
+        ranked_characters = self._rank_characters(merged_characters)
 
-        return merged_characters
+        return self._annotate_character_quality(ranked_characters)
+
+    def _annotate_character_quality(self, characters: List[Character]) -> List[Character]:
+        for character in characters:
+            evidence_count = len(character.source_contexts) + len(character.example_dialogues) + len(character.behavior_examples)
+            profile_score = self._character_profile_score(character)
+            aliases = self._character_name_variants(character)[1:]
+            setattr(character, "extraction_quality", {
+                "evidence_count": evidence_count,
+                "profile_score": profile_score,
+                "aliases": aliases,
+                "confidence": "high" if profile_score >= 4 and evidence_count >= 2 else "medium" if evidence_count else "low",
+            })
+        return characters
+
+    def _merge_census_candidates(self, detailed: List[Character], census: List[Character]) -> List[Character]:
+        candidates: List[Character] = []
+        for character in detailed + census:
+            character.name = self._normalize_name(character.name)
+            if not character.name:
+                continue
+            character.tags = [self._normalize_name(tag) for tag in character.tags if self._normalize_name(tag)]
+            evidence_count = len(character.source_contexts) + len(character.example_dialogues) + len(character.behavior_examples)
+            character.mentions = max(character.mentions or 0, evidence_count)
+            candidates.append(character)
+
+        merged = self._merge_by_exact_name(candidates)
+        merged = self._merge_alias_groups(merged)
+        return [character for character in merged if self._is_valid_character_candidate(character)]
+
+    def _is_valid_character_candidate(self, character: Character) -> bool:
+        name = self._normalize_name(character.name)
+        if not name or len(name) < 2 or len(name) > 12:
+            return False
+        if re.search(r"[。！？；：，、\s]", name):
+            return False
+        if len(name) >= 8 and not any(
+            name in context or any(alias and alias in context for alias in character.tags)
+            for context in character.source_contexts
+        ):
+            return False
+        if character.role != CharacterRole.MINOR:
+            return True
+        return bool(character.source_contexts or character.description or character.background or character.tags)
+
+    def _rank_characters(self, characters: List[Character]) -> List[Character]:
+        role_priority = {
+            CharacterRole.PROTAGONIST: 4,
+            CharacterRole.ANTAGONIST: 3,
+            CharacterRole.SUPPORTING: 2,
+            CharacterRole.MINOR: 1,
+        }
+
+        def score(character: Character) -> Tuple[int, int, int, str]:
+            evidence_count = len(character.source_contexts) + len(character.example_dialogues) + len(character.behavior_examples)
+            detail_count = sum(bool(value) for value in [character.description, character.background, character.appearance, character.occupation])
+            return (
+                role_priority.get(character.role, 0),
+                max(character.mentions or 0, evidence_count),
+                detail_count,
+                character.name,
+            )
+
+        return sorted(characters, key=score, reverse=True)
+
+    def _character_profile_score(self, character: Character) -> int:
+        return sum(bool(value) for value in [
+            character.description,
+            character.background,
+            character.appearance,
+            character.occupation,
+            character.personality,
+            character.example_dialogues,
+            character.behavior_examples,
+        ])
+
+    def _needs_targeted_profile(self, character: Character) -> bool:
+        evidence_count = len(character.source_contexts) + len(character.example_dialogues) + len(character.behavior_examples)
+        if character.role in {CharacterRole.PROTAGONIST, CharacterRole.ANTAGONIST, CharacterRole.SUPPORTING}:
+            return self._character_profile_score(character) < self.MIN_DETAILED_PROFILE_SCORE
+        return evidence_count >= 2 and self._character_profile_score(character) < 2
+
+    def _select_targeted_profile_candidates(self, candidates: List[Character]) -> List[Character]:
+        selected = [character for character in self._rank_characters(candidates) if self._needs_targeted_profile(character)]
+        return selected[:self.MAX_TARGETED_PROFILE_CANDIDATES]
+
+    def _collect_context_for_character(self, text: str, character: Character, max_contexts: int = 6, window: int = 700) -> List[str]:
+        names = self._character_name_variants(character)
+        contexts: List[str] = []
+        for name in names:
+            if not name:
+                continue
+            for match in re.finditer(re.escape(name), text):
+                start = max(0, match.start() - window)
+                end = min(len(text), match.end() + window)
+                snippet = text[start:end].strip()
+                if snippet and snippet not in contexts:
+                    contexts.append(snippet)
+                if len(contexts) >= max_contexts:
+                    return contexts
+        return contexts
+
+    async def _build_targeted_character_profiles(self, text: str, candidates: List[Character]) -> List[Character]:
+        targets = self._select_targeted_profile_candidates(candidates)
+        tasks = []
+        for character in targets:
+            contexts = self._collect_context_for_character(text, character)
+            if contexts:
+                tasks.append(self._extract_targeted_character_profile(character, contexts))
+
+        if not tasks:
+            return []
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        profiles: List[Character] = []
+        for result in results:
+            if isinstance(result, Exception):
+                continue
+            if result:
+                profiles.append(result)
+        return profiles
+
+    async def _extract_targeted_character_profile(self, candidate: Character, contexts: List[str]) -> Optional[Character]:
+        names = ", ".join(self._character_name_variants(candidate))
+        evidence = "\n\n---\n\n".join(contexts)
+        prompt = f"""你是一个小说角色建档助手。请只根据给定证据，为指定角色补全角色档案。
+
+目标角色：{candidate.name}
+已知称呼：{names}
+角色证据：
+{evidence}
+
+## 输出格式
+{{
+    "name": "角色姓名",
+    "description": "100-300字角色描述",
+    "personality": ["性格关键词"],
+    "background": "100-400字背景，仅写证据支持的信息，不确定写未知",
+    "appearance": "外貌或气质，不确定写未知",
+    "age": "年龄或未知",
+    "gender": "男/女/未知",
+    "occupation": "职业或身份",
+    "abilities": ["能力或特长"],
+    "role": "protagonist/supporting/antagonist/minor",
+    "aliases": ["别名"],
+    "contexts": ["关键原文证据"],
+    "dialogues": ["典型对话"],
+    "behaviors": ["具体行为"]
+}}
+
+## 要求
+1. 只输出JSON，不要输出markdown。
+2. 不要虚构证据之外的具体设定。
+3. 如果证据不足，保留为minor但仍输出已有可确认信息。"""
+
+        for attempt in range(self.config.max_retries):
+            try:
+                response = await self.ai_service.chat(
+                    prompt,
+                    max_tokens=3000,
+                    timeout=self.config.timeout,
+                )
+                characters = self._parse_character_response(response)
+                if not characters:
+                    return None
+                profile = characters[0]
+                if candidate.name != profile.name and candidate.name not in profile.tags:
+                    profile.tags.append(candidate.name)
+                profile.tags = self._merge_lists(profile.tags, candidate.tags)
+                profile.source_contexts = self._merge_lists(profile.source_contexts, candidate.source_contexts)
+                profile.mentions = max(profile.mentions or 0, candidate.mentions or 0, len(profile.source_contexts))
+                return profile
+            except Exception:
+                if attempt < self.config.max_retries - 1:
+                    await asyncio.sleep(self.config.retry_delay)
+                else:
+                    return None
+        return None
+
+    async def _run_character_census(self, chunks: List[Chunk]) -> List[Character]:
+        """轻量角色普查：只召回角色名字、别名和出场证据，不生成完整档案。
+
+        普查策略：每批最多 2 个 chunk，覆盖全书所有片段，最大限度召回。
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        tasks = []
+        census_batch_size = 2
+        for i in range(0, len(chunks), census_batch_size):
+            batch_chunks = chunks[i:i + census_batch_size]
+            combined_content = "\n\n=== 文本片段分隔 ===\n\n".join([
+                f"[片段 {j+1}]\n{chunk.content}"
+                for j, chunk in enumerate(batch_chunks)
+            ])
+            tasks.append(self._extract_character_census(combined_content))
+
+        logger.info("Character census: %d batches over %d chunks", len(tasks), len(chunks))
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        all_census: List[Character] = []
+        for idx, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.warning("Character census batch %d failed: %s", idx, result)
+                continue
+            all_census.extend(result)
+        logger.info("Character census: collected %d candidates", len(all_census))
+        return all_census
+
+    async def _extract_character_census(self, combined_text: str) -> List[Character]:
+        """从文本中进行轻量角色普查"""
+        prompt = f"""你是一个小说文本分析师。请从以下文本中识别所有出场的角色。
+
+文本内容：
+{combined_text}
+
+## 任务
+列出文本中所有有名字的角色，包括：
+- 主角和主要配角
+- 出场次数少但有名字的配角
+- 仅在对话或回忆中被提及的有名角色
+- 组织/群体中的有名个体（如"队长XX"）
+
+宁多勿少，每个有名字的角色都要列出。
+
+## 输出格式
+{{
+    "characters": [
+        {{
+            "name": "角色姓名",
+            "aliases": ["别名1", "别名2"],
+            "role_hint": "protagonist/supporting/antagonist/minor",
+            "evidence": ["包含该角色名的原文片段，30字以内"]
+        }}
+    ]
+}}
+
+## 要求
+1. 必须输出JSON
+2. 列出尽可能多的角色，宁多勿少
+3. aliases 是角色在文本中的其他称呼（称号、昵称、全名等）
+4. 只输出JSON，不要添加其他文字"""
+
+        for attempt in range(self.config.max_retries):
+            try:
+                response = await self.ai_service.chat(
+                    prompt,
+                    max_tokens=3000,
+                    timeout=self.config.timeout,
+                )
+                return self._parse_census_response(response)
+            except Exception:
+                if attempt < self.config.max_retries - 1:
+                    await asyncio.sleep(self.config.retry_delay)
+                else:
+                    return []
+        return []
+
+    def _parse_census_response(self, response: str) -> List[Character]:
+        """解析轻量角色普查响应"""
+        try:
+            data = self.ai_service._parse_json(response, dict)
+            char_list = data.get("characters", []) if isinstance(data, dict) else data
+            characters: List[Character] = []
+            for char_data in char_list:
+                if not isinstance(char_data, dict):
+                    continue
+                name = str(char_data.get("name", "")).strip()
+                if not name or len(name) < 2:
+                    continue
+                aliases = self._ensure_list(char_data.get("aliases", []))
+                role = self._map_character_role(char_data.get("role_hint", "minor"))
+                evidence = self._ensure_list(char_data.get("evidence", []))
+                characters.append(
+                    Character(
+                        name=name,
+                        role=role,
+                        tags=aliases,
+                        source_contexts=evidence,
+                        mentions=max(1, len(evidence)),
+                    )
+                )
+            return characters
+        except Exception:
+            return []
 
     async def _batch_extract_from_chunks(self, chunks: List[Chunk]) -> List[Character]:
         """
@@ -102,10 +444,12 @@ class UnifiedCharacterExtractor(CharacterExtractorInterface):
             batch_chunks = chunks[i:i + self.MAX_CHUNKS_PER_EXTRACTION]
             tasks.append(worker(batch_chunks))
 
-        # 并行执行并汇总结果
-        results = await asyncio.gather(*tasks)
-        for characters in results:
-            all_characters.extend(characters)
+        # 并行执行并汇总结果，失败批次不应拖垮整个角色阶段
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for result in results:
+            if isinstance(result, Exception):
+                continue
+            all_characters.extend(result)
 
         return all_characters
 
@@ -321,6 +665,7 @@ class UnifiedCharacterExtractor(CharacterExtractorInterface):
         """
         # 阶段1: 程序化预合并 - 合并完全同名的角色
         pre_merged = self._merge_by_exact_name(all_characters)
+        pre_merged = self._merge_alias_groups(pre_merged)
 
         if len(pre_merged) <= 1:
             return pre_merged
@@ -353,15 +698,15 @@ class UnifiedCharacterExtractor(CharacterExtractorInterface):
     def _merge_character_data(self, target: Character, source: Character):
         """合并两个角色的数据，保留所有信息"""
         # 合并描述（取最长的）
-        if len(source.description) > len(target.description):
+        if len(source.description or "") > len(target.description or ""):
             target.description = source.description
 
         # 合并背景（取最长的）
-        if len(source.background) > len(target.background):
+        if len(source.background or "") > len(target.background or ""):
             target.background = source.background
 
         # 合并外貌（取最长的）
-        if len(source.appearance) > len(target.appearance):
+        if len(source.appearance or "") > len(target.appearance or ""):
             target.appearance = source.appearance
 
         # 合并性格（去重）
@@ -375,7 +720,7 @@ class UnifiedCharacterExtractor(CharacterExtractorInterface):
             target.age = source.age
 
         # 合并职业（取最长的）
-        if len(source.occupation) > len(target.occupation):
+        if len(source.occupation or "") > len(target.occupation or ""):
             target.occupation = source.occupation
 
         # 合并角色定位（取最重要的）
@@ -389,15 +734,21 @@ class UnifiedCharacterExtractor(CharacterExtractorInterface):
             target.role = source.role
 
         # 合并标签（去重）
-        target.tags = list(set(target.tags + source.tags))
+        target.tags = self._merge_lists(list(target.tags or []), list(source.tags or []))
 
-        # 合并能力（去重）
-        target.abilities = list(set(target.abilities + source.abilities))
+        target_abilities = list(getattr(target, "abilities", []) or [])
+        source_abilities = list(getattr(source, "abilities", []) or [])
+        if target_abilities or source_abilities:
+            setattr(target, "abilities", self._merge_lists(target_abilities, source_abilities))
 
         # 合并上下文（去重保留）
         target.source_contexts = self._merge_lists(target.source_contexts, source.source_contexts)
         target.example_dialogues = self._merge_lists(target.example_dialogues, source.example_dialogues)
         target.behavior_examples = self._merge_lists(target.behavior_examples, source.behavior_examples)
+        target.mentions = max(
+            target.mentions or 0,
+            len(target.source_contexts) + len(target.example_dialogues) + len(target.behavior_examples),
+        )
 
     def _merge_lists(self, list1: List[str], list2: List[str]) -> List[str]:
         """合并两个列表，去重并保持顺序"""
@@ -534,7 +885,10 @@ class UnifiedCharacterExtractor(CharacterExtractorInterface):
                 self._merge_character_data(base_char, other_char)
 
             # 更新为标准名称
+            previous_name = base_char.name
             base_char.name = group.canonical_name
+            if previous_name != base_char.name and previous_name not in base_char.tags:
+                base_char.tags.append(previous_name)
 
             merged.append(base_char)
 

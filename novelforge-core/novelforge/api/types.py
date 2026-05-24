@@ -50,7 +50,7 @@ class StoryOutlineParams(BaseModel):
 
 class CharacterDesignRequest(BaseModel):
     context: str = Field(..., min_length=1, max_length=2000, description="故事背景信息")
-    roles: List[str] = Field(..., min_items=1, max_items=10, description="角色职责列表")
+    roles: List[str] = Field(..., min_length=1, max_length=10, description="角色职责列表")
 
     openai_config: Optional[dict] = Field(default=None, description="Runtime OpenAI config")
 
@@ -70,7 +70,7 @@ class CharacterRole(BaseModel):
     role: str = Field(..., description="角色类型 (protagonist, antagonist, supporting, mentor, love_interest)")
     name: str = Field(..., min_length=1, max_length=50)
     description: str = Field(..., min_length=1, max_length=500)
-    keyTraits: List[str] = Field(default_factory=list, max_items=10)
+    keyTraits: List[str] = Field(default_factory=list, max_length=10)
     background: str = Field(default="", max_length=1000)
     relationships: List[str] = Field(default_factory=list)
 
@@ -99,7 +99,7 @@ class CharacterDesign(BaseModel):
     description: str = Field(..., min_length=1, max_length=500)
     personality: str = Field(default="", max_length=500)
     background: str = Field(default="", max_length=1000)
-    keyTraits: List[str] = Field(default_factory=list, max_items=10)
+    keyTraits: List[str] = Field(default_factory=list, max_length=10)
     relationships: dict = Field(default_factory=dict)
     arc: CharacterArc = Field(default_factory=CharacterArc)
 
@@ -152,6 +152,7 @@ class OpenAIProviderConfig(BaseModel):
     api_key: Optional[str] = Field(default=None, description="API Key")
     base_url: Optional[str] = Field(default=None, description="API Base URL")
     model: Optional[str] = Field(default=None, description="Selected model")
+    ai_mode: Optional[Literal["fast", "pro"]] = Field(default=None, description="User-facing AI mode")
     strict_model: Optional[bool] = Field(default=None, description="Whether to disable model fallback")
 
 
@@ -196,6 +197,13 @@ class Conversation(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
     metadata: dict = Field(default_factory=dict, description="元数据")
+
+
+class StartConversationRequest(BaseModel):
+    """Create a project conversation."""
+
+    title: Optional[str] = Field(default=None, max_length=120, description="Initial project title")
+    metadata: Optional[dict] = Field(default=None, description="Initial project metadata")
 
 
 class ChatRequest(BaseModel):

@@ -140,6 +140,16 @@ export interface Character {
   occupation?: string;
   abilities: string[];
   tags: string[];
+  aliases?: string[];
+  goals?: string[];
+  desires?: string[];
+  fears?: string[];
+  wounds?: string[];
+  conflicts?: string[];
+  personality_tension?: string;
+  character_arc?: string;
+  relationship_hooks?: string[];
+  entity_type?: string;
   relationships: Relationship[];
   example_messages?: string[];
   example_dialogues?: string[];
@@ -180,6 +190,25 @@ export interface NetworkEdge {
     | 'other';
   description: string;
   strength: number;
+  label?: string;
+  relationship_types?: string[];
+  source_name?: string;
+  target_name?: string;
+  relationship_tension?: string;
+  evolution?: string[];
+  confidence?: 'high' | 'medium' | 'low' | string;
+  relationship_details?: Array<{
+    asset_id: string;
+    title: string;
+    source: string;
+    target: string;
+    relationship_type: string;
+    description: string;
+    relationship_tension?: string;
+    evolution?: string[];
+    evidence?: string[];
+    confidence?: string;
+  }>;
   status?: 'active' | 'inactive' | 'unknown';
   evidence?: string[];
 }
@@ -231,6 +260,7 @@ export interface OpenAIConfig {
   api_key?: string;
   base_url?: string;
   model?: string;
+  ai_mode?: 'fast' | 'pro';
 }
 
 export interface OpenAIModelInfo {
@@ -252,6 +282,8 @@ export interface Session {
   title: string;
   preview: string;
   time: string;
+  metadata?: Record<string, unknown>;
+  messageCount?: number;
 }
 
 export type ContentType =
@@ -318,8 +350,10 @@ export interface ContentSearchRequest {
   tags?: string[];
   status?: ContentStatus;
   session_id?: string;
+  parent_id?: string;
   limit?: number;
   offset?: number;
+  include_content?: boolean;
 }
 
 export interface ContentSearchResult {
@@ -333,6 +367,7 @@ export interface ContentTopologyNode {
   id: string;
   type: ContentType | string;
   title: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ContentTopologyEdge {
@@ -348,8 +383,62 @@ export interface ContentTopology {
   total_edges?: number;
 }
 
+export interface Novel {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  stats: Record<string, number>;
+}
+
+export interface NovelListResponse {
+  novels: Novel[];
+  total: number;
+}
+
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type TaskPriority = 'low' | 'medium' | 'high' | 'critical';
+export type NovelImportAnalysisStatus = 'completed' | 'partial' | 'low_quality' | 'timed_out' | 'failed';
+export type NovelImportAnalysisStageKey = 'chapter_index' | 'characters' | 'world_setting' | 'timeline_events' | 'relationships';
+export type NovelImportAnalysisStageStatus = 'completed' | 'timed_out' | 'failed';
+
+export interface ImportAnalysisDiagnostics {
+  candidate_counts?: Record<string, number>;
+  dropped_candidates?: Array<Record<string, unknown>>;
+  low_confidence_characters?: Array<Record<string, unknown>>;
+  relationship_unresolved_endpoints?: Array<string | Record<string, unknown>>;
+  timeline_mismatch_events?: Array<Record<string, unknown>>;
+  failed_chapters?: Array<Record<string, unknown>>;
+  suspected_merged_characters?: Array<Record<string, unknown>>;
+  organization_as_character?: Array<Record<string, unknown>>;
+  unresolved_relationship_edges?: Array<string | Record<string, unknown>>;
+  decorative_chapters?: Array<Record<string, unknown>>;
+  weak_relationships?: Array<Record<string, unknown>>;
+  suspected_mojibake_assets?: Array<Record<string, unknown>>;
+  weak_world_facts?: Array<Record<string, unknown>>;
+}
+
+export interface NovelImportTaskResult {
+  session_id?: string;
+  parent_id?: string;
+  book_title?: string;
+  chapters_count?: number;
+  chapter_ids?: string[];
+  chapter_titles?: string[];
+  characters_count?: number;
+  world_count?: number;
+  relationships_count?: number;
+  timeline_count?: number;
+  analysis_status?: NovelImportAnalysisStatus;
+  analysis_warning?: string | null;
+  analysis_stage_results?: Partial<Record<NovelImportAnalysisStageKey, NovelImportAnalysisStageStatus>>;
+  analysis_quality_issues?: string[];
+  analysis_diagnostics?: ImportAnalysisDiagnostics;
+  candidate_counts?: Record<string, number>;
+  failed_chapters?: Array<Record<string, unknown>>;
+  relationship_unresolved_endpoints?: Array<string | Record<string, unknown>>;
+  timeline_mismatch_events?: Array<Record<string, unknown>>;
+}
 
 export interface AITask {
   id: string;

@@ -13,7 +13,7 @@ interface ImportTextModalProps {
   openAIConfig?: OpenAIConfig;
 }
 
-const SUPPORTED_EXTENSIONS = ['.txt', '.epub', '.pdf', '.docx'];
+const SUPPORTED_EXTENSIONS = ['.txt', '.md', '.text', '.epub', '.pdf', '.docx'];
 const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024;
 
 function getFileBaseName(fileName: string): string {
@@ -27,7 +27,7 @@ function validateImportFile(selectedFile: File): string | null {
     return `不支持的文件格式。仅支持 ${SUPPORTED_EXTENSIONS.join(', ')}`;
   }
   if (selectedFile.size > MAX_FILE_SIZE_BYTES) {
-    return `文件过大（>${(MAX_FILE_SIZE_BYTES / 1024 / 1024).toFixed(0)}MB），请先分卷后导入`;
+    return `文件过大（${(MAX_FILE_SIZE_BYTES / 1024 / 1024).toFixed(0)}MB），请先分卷后导入`;
   }
   return null;
 }
@@ -51,7 +51,7 @@ export default function ImportTextModal({
   });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { currentSessionId: activeSessionId, createSession } = useSessions();
+  const { currentSessionId: activeSessionId, createSession, switchSession, loadSessions } = useSessions();
 
   if (!isOpen) {
     return null;
@@ -67,32 +67,27 @@ export default function ImportTextModal({
     return created.id;
   };
 
+  const acceptFile = (nextFile: File) => {
+    const validationError = validateImportFile(nextFile);
+    if (validationError) {
+      setError(validationError);
+      setFile(null);
+      return;
+    }
+    setFile(nextFile);
+    setError(null);
+  };
+
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files?.[0]) {
-      const nextFile = event.target.files[0];
-      const validationError = validateImportFile(nextFile);
-      if (validationError) {
-        setError(validationError);
-        setFile(null);
-        return;
-      }
-      setFile(nextFile);
-      setError(null);
+      acceptFile(event.target.files[0]);
     }
   };
 
   const handleDrop = (event: React.DragEvent) => {
     event.preventDefault();
     if (event.dataTransfer.files?.[0]) {
-      const nextFile = event.dataTransfer.files[0];
-      const validationError = validateImportFile(nextFile);
-      if (validationError) {
-        setError(validationError);
-        setFile(null);
-        return;
-      }
-      setFile(nextFile);
-      setError(null);
+      acceptFile(event.dataTransfer.files[0]);
     }
   };
 
@@ -120,21 +115,32 @@ export default function ImportTextModal({
         throw new Error(response.message || '导入任务提交失败');
       }
 
+      const responseResult =
+        response.result && typeof response.result === 'object'
+          ? response.result
+          : { session_id: response.session_id || sessionId, file_name: file.name };
+      const targetSessionId =
+        response.session_id ||
+        (responseResult && typeof responseResult === 'object' && typeof (responseResult as Record<string, unknown>).session_id === 'string'
+          ? ((responseResult as Record<string, unknown>).session_id as string)
+          : sessionId);
+
       useAppStore.getState().addTask({
         id: response.task_id,
         type: 'novel_import',
-        status: 'PENDING',
-        progress: 0,
+        status: response.duplicate ? 'COMPLETED' : 'PENDING',
+        progress: response.duplicate ? 1 : 0,
         message: '导入任务已提交，正在后台处理文件与资产写入',
-        result: {
-          session_id: sessionId,
-          file_name: file.name,
-        },
+        result: responseResult,
       });
+      if (response.duplicate && targetSessionId && targetSessionId !== activeSessionId) {
+        switchSession(targetSessionId);
+        void loadSessions();
+      }
 
       onSubmitted?.({
         taskId: response.task_id,
-        sessionId,
+        sessionId: targetSessionId,
         fileName: file.name,
       });
 
@@ -179,6 +185,7 @@ export default function ImportTextModal({
       >
         <button
           onClick={onClose}
+          aria-label="关闭导入弹窗"
           style={{
             position: 'absolute',
             top: 20,
@@ -194,10 +201,13 @@ export default function ImportTextModal({
           <X size={20} />
         </button>
 
-        <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8, color: 'var(--text-primary)' }}>导入现有小说文本</h2>
+        <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8, color: 'var(--text-primary)' }}>
+          导入现有小说文本
+        </h2>
         <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 24 }}>
-          支持 `.txt / .epub / .pdf / .docx`，文件会进入统一后台处理管道，并在任务中心持续跟踪状态。
+          支持 .txt / .md / .text / .epub / .pdf / .docx。文件会进入后台处理管道，并在任务中心持续更新状态。
         </p>
+
         {openAIConfig?.api_key ? null : (
           <div
             style={{
@@ -211,7 +221,7 @@ export default function ImportTextModal({
               lineHeight: 1.6,
             }}
           >
-            当前未配置自定义 OpenAI Key，导入会走后端默认模型配置；若后端默认配置失效，导入任务会直接失败。
+            当前未配置浏览器端 OpenAI Key，导入会使用服务端默认模型配置；如果服务端配置失效，任务会直接失败。
           </div>
         )}
 
@@ -237,7 +247,7 @@ export default function ImportTextModal({
             type="file"
             ref={fileInputRef}
             onChange={handleFileSelect}
-            accept=".txt,.epub,.pdf,.docx"
+            accept=".txt,.md,.text,.epub,.pdf,.docx"
             style={{ display: 'none' }}
           />
 
@@ -286,16 +296,7 @@ export default function ImportTextModal({
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 24 }}>
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              fontSize: 14,
-              color: 'var(--text-primary)',
-              cursor: 'pointer',
-            }}
-          >
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: 'var(--text-primary)' }}>
             <input
               type="checkbox"
               checked={options.detect_chapters}
@@ -304,16 +305,7 @@ export default function ImportTextModal({
             />
             自动检测并拆分章节
           </label>
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              fontSize: 14,
-              color: 'var(--text-primary)',
-              cursor: 'pointer',
-            }}
-          >
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: 'var(--text-primary)' }}>
             <input
               type="checkbox"
               checked={options.extract_metadata}
@@ -322,16 +314,7 @@ export default function ImportTextModal({
             />
             提取书籍元数据
           </label>
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              fontSize: 14,
-              color: 'var(--text-primary)',
-              cursor: 'pointer',
-            }}
-          >
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: 'var(--text-primary)' }}>
             <input
               type="checkbox"
               checked={options.normalize_paragraphs}

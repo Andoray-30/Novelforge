@@ -2,7 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { contentService } from '@/lib/api';
+import { useAppStore } from '@/lib/hooks/use-app-store';
 import { buildContentCreateRequest, getContentAssetPayload, getContentAssetText, getContentAssetTitle } from '@/lib/content-contract';
+import {
+  formatNovelImportStageSummary,
+  parseNovelImportTaskResult,
+} from '@/lib/task-events';
 import { useSessionTaskEvents } from '@/lib/hooks/use-session-task-events';
 import {
   DEFAULT_PROJECT_PREFERENCES,
@@ -56,6 +61,7 @@ type LoadChaptersOptions = {
 
 export default function NovelEditorPage() {
   const { currentSession, currentSessionId, createSession } = useSessions();
+  const selectedNovelId = useAppStore((s) => s.selectedNovelId);
 
   const [chapters, setChapters] = useState<ContentItem[]>([]);
   const [requestedChapterId, setRequestedChapterId] = useState<string | null>(null);
@@ -110,6 +116,7 @@ export default function NovelEditorPage() {
         query: '',
         content_type: 'chapter',
         session_id: currentSessionId || undefined,
+        parent_id: selectedNovelId || undefined,
         limit: 200,
       });
 
@@ -140,7 +147,7 @@ export default function NovelEditorPage() {
         setIsLoading(false);
       }
     }
-  }, [currentSessionId, requestedChapterId]);
+  }, [currentSessionId, selectedNovelId, requestedChapterId]);
 
   useEffect(() => {
     void loadChapters();
@@ -190,13 +197,15 @@ export default function NovelEditorPage() {
       }
 
       void loadChapters({ preferLatest: true, silent: true });
-      const result = detail.result as Record<string, unknown> | undefined;
-      const chaptersCount = typeof result?.chapters_count === 'number' ? result.chapters_count : null;
-      const warning = typeof result?.analysis_warning === 'string' ? result.analysis_warning : '';
+      const result = parseNovelImportTaskResult(detail.result);
+      const chaptersCount = result?.chapters_count ?? null;
+      const warning = result?.analysis_warning?.trim() || '';
+      const stageSummary = formatNovelImportStageSummary(result) || '';
       const baseMessage = detail.taskType === 'novel_import'
-        ? `导入后的章节已经出现在编辑器列表中${chaptersCount !== null ? `（共 ${chaptersCount} 章）` : ''}。`
+        ? `${result?.analysis_status && result.analysis_status !== 'completed' ? '导入后的章节已经出现在编辑器列表中，但深度分析未完全完成' : '导入后的章节已经出现在编辑器列表中'}${chaptersCount !== null ? `（共 ${chaptersCount} 章）` : ''}。`
         : '新生成的章节已经出现在列表中。';
-      setSaveMessage(warning ? `${baseMessage} ${warning}` : baseMessage);
+      const extras = [stageSummary, warning].filter(Boolean).join(' ');
+      setSaveMessage(extras ? `${baseMessage} ${extras}` : baseMessage);
     },
     onFailed: (detail) => {
       if (!['novel_import', 'text_generation'].includes(detail.taskType)) {
@@ -318,6 +327,7 @@ export default function NovelEditorPage() {
         data: buildEmptyChapterPayload(title, nextChapterIndex),
         content: '',
         sessionId,
+        parentId: selectedNovelId || undefined,
         tags: ['editor-manual'],
       });
 
@@ -333,7 +343,7 @@ export default function NovelEditorPage() {
     } finally {
       setIsCreatingChapter(false);
     }
-  }, [chapters, createSession, currentSessionId, hasUnsavedChanges]);
+  }, [chapters, createSession, currentSessionId, hasUnsavedChanges, selectedNovelId]);
 
   const handleDeleteChapter = useCallback(async () => {
     if (!selectedChapter) {

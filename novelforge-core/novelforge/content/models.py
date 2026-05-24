@@ -85,11 +85,14 @@ class ContentSearchRequest(BaseModel):
     # TODO: 将 query 改为 Optional，支持纯 tags 过滤时不传 query 的场景
     query: Optional[str] = Field(default='', description="搜索查询，为空时返回全部")
     content_type: Optional[ContentType] = Field(default=None, description="内容类型")
+    content_types: Optional[List[ContentType]] = Field(default=None, description="内容类型列表")
     tags: Optional[List[str]] = Field(default=None, description="标签")
     status: Optional[ContentStatus] = Field(default=None, description="内容状态")
     session_id: Optional[str] = Field(default=None, description="所属会话ID过滤")
+    parent_id: Optional[str] = Field(default=None, description="父内容ID过滤，用于按小说根节点筛选资产")
     limit: int = Field(default=20, ge=1, le=500, description="返回数量限制")
     offset: int = Field(default=0, ge=0, description="偏移量")
+    include_content: bool = Field(default=True, description="是否在搜索结果中返回完整正文")
 
 
 class ContentSearchResult(BaseModel):

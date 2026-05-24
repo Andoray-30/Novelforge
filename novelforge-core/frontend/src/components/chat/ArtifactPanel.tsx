@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { X, Save, Layers, ListChecks, Check, Loader2 } from 'lucide-react';
+import { X, Save, Layers, ListChecks, Check, Loader2, Pin } from 'lucide-react';
 
 type ArtifactType = 'character_card' | 'world_setting' | 'timeline' | 'relationship' | 'outline' | 'chapter';
 
@@ -19,6 +19,7 @@ interface ArtifactPanelProps {
   visible: boolean;
   /** 保存单个资产 */
   onSaveToProject?: (artifact: ArtifactData, updatedData: Record<string, any>) => void;
+  onPinToContext?: (artifact: ArtifactData, updatedData: Record<string, any>) => void;
   /** 批量保存所有资产 */
   onSaveAll?: (dataList: Array<{ artifact: ArtifactData, data: Record<string, any> }>) => void;
 }
@@ -44,7 +45,7 @@ const LABEL_MAP: Record<ArtifactType, string> = {
 // ============================================================
 // 主面板
 // ============================================================
-export function ArtifactPanel({ artifacts, onClose, visible, onSaveToProject, onSaveAll }: ArtifactPanelProps) {
+export function ArtifactPanel({ artifacts, onClose, visible, onSaveToProject, onPinToContext, onSaveAll }: ArtifactPanelProps) {
   const [activeIndex, setActiveIndex] = useState(0);
   // 为每个资产维护一个独立的本地编辑状态
   const [localDataList, setLocalDataList] = useState<Record<string, any>[]>([]);
@@ -104,6 +105,11 @@ export function ArtifactPanel({ artifacts, onClose, visible, onSaveToProject, on
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handlePinCurrent = () => {
+    if (!onPinToContext || !currentArtifact) return;
+    onPinToContext(currentArtifact, currentLocalData);
   };
 
   const handleSaveAll = async () => {
@@ -223,6 +229,21 @@ export function ArtifactPanel({ artifacts, onClose, visible, onSaveToProject, on
               同步当前项
             </button>
             
+            <button
+              onClick={handlePinCurrent}
+              disabled={isSaving || !onPinToContext}
+              style={{
+                flex: 1, height: 48, borderRadius: 14, background: 'rgba(99, 102, 241, 0.12)',
+                border: '1px solid rgba(99, 102, 241, 0.35)', color: '#c4b5fd',
+                fontSize: 14, fontWeight: 600, cursor: isSaving || !onPinToContext ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                opacity: isSaving || !onPinToContext ? 0.6 : 1
+              }}
+            >
+              <Pin size={16} />
+              固定到聊天
+            </button>
+
             <button
               onClick={handleSaveAll}
               disabled={isSaving}

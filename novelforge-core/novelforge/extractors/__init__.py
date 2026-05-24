@@ -13,6 +13,8 @@ from .unified_world_extractor import UnifiedWorldExtractor
 from .unified_timeline_extractor import UnifiedTimelineExtractor
 from .unified_relationship_extractor import UnifiedRelationshipExtractor
 from .unified_extractor import UnifiedExtractor
+from .chapter_index_extractor import ChapterIndexExtractor
+from .chapter_index_extractor import ChapterIndexExtractor
 
 # 基础接口和配置
 from .base_extractor import (
@@ -43,6 +45,8 @@ __all__ = [
     "UnifiedTimelineExtractor",
     "UnifiedRelationshipExtractor",
     "UnifiedExtractor",
+    "ChapterIndexExtractor",
+    "ChapterIndexExtractor",
     # 向后兼容别名
     "CharacterExtractor",
     "WorldExtractor",

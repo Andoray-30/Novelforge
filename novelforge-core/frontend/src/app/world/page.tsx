@@ -1,8 +1,20 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { contentService } from '@/lib/api';
-import { getContentAssetPayload } from '@/lib/content-contract';
+import { ArtifactPanel } from '@/components/chat/ArtifactPanel';
+import {
+  resolveContentItemReopen,
+  saveReopenedContentItem,
+  type ContentItemArtifactData,
+} from '@/lib/content-item-reopen';
+import { useAppStore } from '@/lib/hooks/use-app-store';
+import { getContentAssetPayload, getContentAssetTitle } from '@/lib/content-contract';
+import {
+  bindContentItemToNovel,
+  isUnassignedNovelScopedContentItem,
+} from '@/lib/content-item-binding';
 import { useSessionTaskEvents } from '@/lib/hooks/use-session-task-events';
 import { useSessions } from '@/lib/hooks/use-sessions';
 import { Book, Clock, Database, DatabaseZap, Globe2, Map, Scale } from 'lucide-react';
@@ -10,9 +22,20 @@ import LocationMap from '@/components/World/LocationMap';
 import CulturePanel from '@/components/World/CulturePanel';
 import HistoricalTimeline from '@/components/World/HistoricalTimeline';
 import RuleHierarchyTree from '@/components/World/RuleHierarchyTree';
-import type { ContentItem, Culture, Location, TimelineEvent, WorldRule, WorldSetting } from '@/types';
+import type { ContentItem, Culture, TimelineEvent, Location, WorldRule, WorldSetting } from '@/types';
+import type { ToolCall } from '@/lib/chat-parser';
+
+type ArtifactData = ContentItemArtifactData & { toolCall?: ToolCall };
 
 type WorldTab = 'timeline' | 'locations' | 'cultures' | 'rules';
+
+function sortByUpdatedAt(items: ContentItem[]): ContentItem[] {
+  return [...items].sort((left, right) => right.metadata.updated_at.localeCompare(left.metadata.updated_at));
+}
+
+function pickLatestItem(items: ContentItem[]): ContentItem | null {
+  return sortByUpdatedAt(items)[0] ?? null;
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
@@ -164,15 +187,50 @@ function parseTimelineItem(item: ContentItem): TimelineEvent[] {
   return event ? [event] : [];
 }
 
-function sortByUpdatedAt(items: ContentItem[]): ContentItem[] {
-  return [...items].sort((left, right) => right.metadata.updated_at.localeCompare(left.metadata.updated_at));
+function buildEventContentItem(event: TimelineEvent): ContentItem {
+  return {
+    metadata: {
+      id: event.id,
+      title: event.title,
+      type: 'timeline',
+      status: 'draft',
+      author: undefined,
+      tags: [],
+      created_at: '',
+      updated_at: '',
+      version: 1,
+      parent_id: undefined,
+      children_ids: [],
+      session_id: undefined,
+    },
+    content: event.description,
+    extracted_data: {
+      id: event.id,
+      title: event.title,
+      description: event.description,
+      event_type: event.event_type,
+      characters: event.characters,
+      locations: event.locations,
+      importance: event.importance,
+      date: event.date,
+    },
+    stats: null,
+    relations: null,
+  };
 }
 
 export default function WorldSettingsPage() {
+  const router = useRouter();
   const { currentSession, currentSessionId } = useSessions();
+  const selectedNovelId = useAppStore((s) => s.selectedNovelId);
   const [activeTab, setActiveTab] = useState<WorldTab>('timeline');
   const [worldSetting, setWorldSetting] = useState<WorldSetting | null>(null);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
+  const [latestWorldItem, setLatestWorldItem] = useState<ContentItem | null>(null);
+  const [latestTimelineItem, setLatestTimelineItem] = useState<ContentItem | null>(null);
+  const [activeArtifacts, setActiveArtifacts] = useState<ArtifactData[]>([]);
+  const [artifactPanelVisible, setArtifactPanelVisible] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -188,21 +246,29 @@ export default function WorldSettingsPage() {
             query: '',
             content_type: 'world',
             session_id: currentSessionId || undefined,
+            parent_id: selectedNovelId || undefined,
             limit: 50,
+            include_content: false,
           }),
           contentService.searchContent({
             query: '',
             content_type: 'timeline',
             session_id: currentSessionId || undefined,
+            parent_id: selectedNovelId || undefined,
             limit: 200,
+            include_content: false,
           }),
         ]);
 
+        const latestWorldItem = pickLatestItem(worldResult.items);
+        const latestTimelineItem = pickLatestItem(timelineResult.items);
         const latestWorld = sortByUpdatedAt(worldResult.items).map(parseWorldSetting).find((item) => item !== null) ?? null;
         const parsedTimeline = sortByUpdatedAt(timelineResult.items)
           .flatMap(parseTimelineItem)
           .sort((left, right) => (left.date || '').localeCompare(right.date || ''));
 
+        setLatestWorldItem(latestWorldItem);
+        setLatestTimelineItem(latestTimelineItem);
         setWorldSetting(latestWorld);
         setTimeline(parsedTimeline);
       } catch (loadError) {
@@ -213,7 +279,7 @@ export default function WorldSettingsPage() {
     };
 
     void loadWorldAssets();
-  }, [currentSessionId, refreshTick]);
+  }, [currentSessionId, selectedNovelId, refreshTick]);
 
   useSessionTaskEvents({
     sessionId: currentSessionId,
@@ -240,6 +306,76 @@ export default function WorldSettingsPage() {
         { id: 'rules', label: '真理之树', icon: Scale, count: worldSetting?.rules.length || 0 },
       ] satisfies Array<{ id: WorldTab; label: string; icon: typeof Clock; count: number }>,
     [timeline.length, worldSetting]
+  );
+
+  const openWorldAsset = (item: ContentItem) => {
+    const result = resolveContentItemReopen(item, selectedNovelId);
+
+    if (result.kind === 'error') {
+      setError(result.message);
+      return;
+    }
+
+    if (result.kind === 'route') {
+      router.push(result.href);
+      return;
+    }
+
+    setActiveArtifacts([result.artifact]);
+    setArtifactPanelVisible(true);
+    setSaveMessage(result.message);
+  };
+
+  const bindWorldAssetToSelectedNovel = async (item: ContentItem) => {
+    if (!selectedNovelId || !isUnassignedNovelScopedContentItem(item)) {
+      return;
+    }
+
+    setError(null);
+    try {
+      await bindContentItemToNovel(item, selectedNovelId);
+      setSaveMessage(`已将「${getContentAssetTitle(item)}」绑定到当前小说。`);
+      setRefreshTick((current) => current + 1);
+    } catch (bindError) {
+      setError(bindError instanceof Error ? bindError.message : '绑定资产失败');
+    }
+  };
+
+  const handleSaveArtifact = async (artifact: ArtifactData, updatedData: Record<string, unknown>) => {
+    const candidates = [latestWorldItem, latestTimelineItem].filter((item): item is ContentItem => item !== null);
+
+    setError(null);
+    try {
+      const result = await saveReopenedContentItem({
+        items: candidates,
+        artifact,
+        updatedData,
+      });
+
+      if (!result.ok) {
+        setError(result.message);
+        return;
+      }
+
+      setSaveMessage(`已保存「${result.title}」的修改。`);
+      setRefreshTick((current) => current + 1);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : '保存资产失败');
+    }
+  };
+
+  const selectedTimelineAsset = useMemo(() => {
+    if (!latestTimelineItem) {
+      return timeline[0] ? buildEventContentItem(timeline[0]) : null;
+    }
+    return latestTimelineItem;
+  }, [latestTimelineItem, timeline]);
+
+  const bindableWorldAssets = useMemo(
+    () => [latestWorldItem, latestTimelineItem].filter(
+      (item): item is ContentItem => Boolean(selectedNovelId && item && isUnassignedNovelScopedContentItem(item)),
+    ),
+    [latestTimelineItem, latestWorldItem, selectedNovelId],
   );
 
   const isEmpty = !worldSetting && timeline.length === 0;
@@ -272,6 +408,7 @@ export default function WorldSettingsPage() {
               这里展示当前项目中已保存的世界观、时间线、地点、文化与规则资产，而不是临时内存状态。
             </p>
             <p className="mt-3 text-sm text-slate-500">当前项目: {currentSession?.title || '未选择，默认显示全部世界资产'}</p>
+            <p className="mt-2 text-sm text-slate-500">当前小说: {selectedNovelId ? '已按当前小说容器收敛展示' : '当前展示全部小说聚合世界资产'}</p>
             {worldSetting?.name && <p className="mt-3 font-medium text-emerald-400">当前世界: {worldSetting.name}</p>}
             {worldSetting?.description && <p className="mt-2 max-w-3xl text-sm text-slate-500">{worldSetting.description}</p>}
           </div>
@@ -287,6 +424,26 @@ export default function WorldSettingsPage() {
         </div>
 
         {error && <div className="mb-6 rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-red-200">{error}</div>}
+        {saveMessage && <div className="mb-6 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-5 py-4 text-emerald-200">{saveMessage}</div>}
+        {bindableWorldAssets.length > 0 && (
+          <div className="mb-6 rounded-2xl border border-indigo-500/30 bg-indigo-500/10 px-5 py-4 text-indigo-100">
+            <div className="mb-3 text-sm font-semibold">发现未绑定到当前小说的世界资产</div>
+            <div className="flex flex-wrap gap-2">
+              {bindableWorldAssets.map((item) => (
+                <button
+                  key={item.metadata.id}
+                  type="button"
+                  onClick={() => {
+                    void bindWorldAssetToSelectedNovel(item);
+                  }}
+                  className="rounded-full border border-indigo-300/30 bg-indigo-400/10 px-3 py-1 text-xs font-medium text-indigo-100 transition hover:border-indigo-200/60 hover:bg-indigo-400/20"
+                >
+                  绑定「{getContentAssetTitle(item)}」到当前小说
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {isEmpty ? (
           <div className="mt-12 flex flex-1 flex-col items-center justify-center rounded-3xl border-2 border-dashed border-slate-800 bg-slate-900/20 py-24 backdrop-blur-sm">
@@ -348,15 +505,45 @@ export default function WorldSettingsPage() {
               />
 
               <div className="world-panel-container h-full">
-                {activeTab === 'timeline' && <HistoricalTimeline events={timeline} />}
-                {activeTab === 'locations' && <LocationMap locations={worldSetting?.locations || []} />}
-                {activeTab === 'cultures' && <CulturePanel cultures={worldSetting?.cultures || []} />}
-                {activeTab === 'rules' && <RuleHierarchyTree rules={worldSetting?.rules || []} />}
+                {activeTab === 'timeline' && <HistoricalTimeline events={timeline} onEventClick={() => {
+                  if (selectedTimelineAsset) {
+                    openWorldAsset(selectedTimelineAsset);
+                  }
+                }} />}
+                {activeTab === 'locations' && <LocationMap locations={worldSetting?.locations || []} onLocationClick={() => {
+                  if (latestWorldItem) {
+                    openWorldAsset(latestWorldItem);
+                  }
+                }} />}
+                {activeTab === 'cultures' && <CulturePanel cultures={worldSetting?.cultures || []} onCultureClick={() => {
+                  if (latestWorldItem) {
+                    openWorldAsset(latestWorldItem);
+                  }
+                }} />}
+                {activeTab === 'rules' && <RuleHierarchyTree rules={worldSetting?.rules || []} onRuleClick={() => {
+                  if (latestWorldItem) {
+                    openWorldAsset(latestWorldItem);
+                  }
+                }} />}
               </div>
             </div>
           </div>
         )}
       </div>
+
+      <ArtifactPanel
+        visible={artifactPanelVisible}
+        onClose={() => setArtifactPanelVisible(false)}
+        artifacts={activeArtifacts}
+        onSaveToProject={(artifact, updatedData) => {
+          void handleSaveArtifact(artifact, updatedData);
+        }}
+        onSaveAll={async (payload) => {
+          for (const item of payload) {
+            await handleSaveArtifact(item.artifact, item.data);
+          }
+        }}
+      />
     </div>
   );
 }

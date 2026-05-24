@@ -5,13 +5,11 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import {
-  BarChart3,
   FileSearch,
   FileText,
   Globe,
   Home,
   Settings,
-  Sparkles,
   Users,
 } from 'lucide-react';
 
@@ -28,12 +26,6 @@ const navigationItems: NavigationItem[] = [
     href: '/',
     icon: Home,
     description: '工作区首页与项目仪表盘。',
-  },
-  {
-    title: 'AI 规划',
-    href: '/ai-planning',
-    icon: Sparkles,
-    description: '生成大纲、角色和世界观资产。',
   },
   {
     title: '提取',
@@ -58,12 +50,6 @@ const navigationItems: NavigationItem[] = [
     href: '/editor',
     icon: FileText,
     description: '打开并编辑章节资产。',
-  },
-  {
-    title: '分析',
-    href: '/analytics',
-    icon: BarChart3,
-    description: '查看真实项目指标。',
   },
   {
     title: '设置',

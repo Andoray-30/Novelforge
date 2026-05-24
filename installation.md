@@ -40,9 +40,23 @@ Minimal example:
 
 ```env
 OPENAI_API_KEY=your-api-key
-OPENAI_BASE_URL=https://api.siliconflow.cn/v1
+OPENAI_BASE_URL=https://newapi.sync-api.xyz/v1
 OPENAI_MODEL=Pro/deepseek-ai/DeepSeek-V3.2
+STORAGE_TYPE=content_db
+USE_CONTENT_DATABASE=true
 ```
+
+Public deployment also requires:
+
+```env
+NOVELFORGE_PUBLIC_DEPLOYMENT=true
+NOVELFORGE_ADMIN_PASSWORD=change-this-password
+NOVELFORGE_SESSION_SECRET=replace-with-a-long-random-string
+FRONTEND_ORIGIN=https://your-frontend-domain.example
+NOVELFORGE_ALLOW_RUNTIME_OPENAI_OVERRIDES=false
+```
+
+In public deployment, the browser-side API key override is disabled and all protected APIs require the admin login cookie.
 
 ## 4) Start Backend
 

@@ -12,7 +12,7 @@ class DefaultTextPreprocessor(TextPreprocessor):
     def __init__(self):
         # 编译常用的正则表达式以提高性能
         self.patterns = {
-            'extra_whitespace': re.compile(r'\s+'),
+            'horizontal_whitespace': re.compile(r'[^\S\r\n]+'),
             'multiple_newlines': re.compile(r'\n\s*\n\s*\n+'),
             'chapter_headers': re.compile(
                 r'(第[一二三四五六七八九十\d]+[章节卷集部篇])|'
@@ -70,8 +70,8 @@ class DefaultTextPreprocessor(TextPreprocessor):
         Returns:
             处理后的文本
         """
-        # 将连续的空白字符（空格、制表符、换页符等）替换为单个空格
-        text = self.patterns['extra_whitespace'].sub(' ', text)
+        # 只压缩横向空白，不能吞掉换行；章节检测依赖行边界。
+        text = self.patterns['horizontal_whitespace'].sub(' ', text)
         
         # 处理换行符逻辑，保留段落之间的换行
         lines = text.split('\n')
@@ -128,7 +128,10 @@ class DefaultTextPreprocessor(TextPreprocessor):
         # 移除开头的短行
         start_idx = 0
         for i, line in enumerate(lines):
-            if len(line.strip()) > 20:  # 如果行长度超过20个字符，则认为是内容
+            stripped_line = line.strip()
+            if not stripped_line:
+                continue
+            if self.patterns['chapter_headers'].search(stripped_line) or len(stripped_line) > 20:
                 start_idx = i
                 break
         

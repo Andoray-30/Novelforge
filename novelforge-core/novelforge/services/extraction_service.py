@@ -26,6 +26,7 @@ from ..core.config import Config
 from ..core.models import Character, Culture, NetworkEdge, TimelineEvent, WorldSetting
 from ..extractors.base_extractor import ExtractionConfig, SmartChunker
 from ..extractors.unified_character_extractor import UnifiedCharacterExtractor
+from ..extractors.chapter_index_extractor import ChapterIndexExtractor
 from ..extractors.unified_relationship_extractor import UnifiedRelationshipExtractor
 from ..extractors.unified_timeline_extractor import UnifiedTimelineExtractor
 from ..extractors.unified_world_extractor import UnifiedWorldExtractor
@@ -66,6 +67,10 @@ class ExtractionService:
             config=unified_config,
             ai_service=ai_service,
         )
+        self.chapter_index_extractor = ChapterIndexExtractor(
+            config=unified_config,
+            ai_service=ai_service,
+        )
 
     async def extract_characters(self, text: str) -> List[Character]:
         return await self.unified_character_extractor.extract_characters(text)
@@ -78,6 +83,23 @@ class ExtractionService:
 
     async def extract_relationships(self, text: str) -> List[NetworkEdge]:
         return await self.unified_relationship_extractor.extract_relationships(text)
+
+    async def extract_relationships_guided(self, text: str, characters: Optional[List[Character]] = None) -> List[NetworkEdge]:
+        return await self.unified_relationship_extractor.extract_relationships_guided(text, characters=characters)
+
+    async def extract_chapter_index_assets(self, chapters: List[Dict[str, Any]]) -> Dict[str, Any]:
+        result = await self.chapter_index_extractor.extract_and_merge(chapters)
+        return {
+            "characters": result.characters,
+            "world_setting": result.world_setting,
+            "timeline_events": result.timeline_events,
+            "relationships": result.relationships,
+            "analysis_diagnostics": result.diagnostics.model_dump(),
+            "candidate_counts": result.diagnostics.candidate_counts,
+            "failed_chapters": result.diagnostics.failed_chapters,
+            "relationship_unresolved_endpoints": result.diagnostics.relationship_unresolved_endpoints,
+            "timeline_mismatch_events": result.diagnostics.timeline_mismatch_events,
+        }
 
     async def extract_all(self, text: str) -> Dict[str, Any]:
         """Extract all supported assets with partial-failure tolerance."""

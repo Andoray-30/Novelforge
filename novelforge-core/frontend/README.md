@@ -3,6 +3,7 @@
 > 基于 Next.js 15 的小说创作辅助工具前端界面  
 > 最后更新：2026-03-20
 
+公开版前端只暴露“快速 / Pro”创作模式。真实模型名、API Key 和 Base URL 由后端 `OPENAI_*`、`NOVELFORGE_FAST_MODEL`、`NOVELFORGE_PRO_MODEL` 管理。
 ---
 
 ## 技术栈
@@ -111,6 +112,8 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 # SillyTavern 地址
 NEXT_PUBLIC_SILLYTAVERN_URL=http://localhost:8000
 ```
+
+公开部署时，前端请求会携带 HttpOnly 登录 Cookie；后端需配置 `FRONTEND_ORIGIN` 为前端域名。公开部署模式下浏览器端 OpenAI Key 覆盖入口会隐藏，统一使用后端服务端 Key。
 
 ---
 

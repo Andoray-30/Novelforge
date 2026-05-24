@@ -4,6 +4,7 @@
 import sqlite3
 import json
 import asyncio
+import re
 from typing import Any, Optional, List, Dict
 from pathlib import Path
 from datetime import datetime
@@ -216,6 +217,7 @@ class ContentDatabaseStorage(BaseStorage):
             async with self._lock:
                 with self._get_connection() as conn:
                     # SQLite的CASCADE会自动删除相关标签
+                    conn.execute('DELETE FROM tags WHERE content_id = ?', (content_id,))
                     cursor = conn.execute('DELETE FROM content WHERE id = ?', (content_id,))
                     conn.commit()
                     return cursor.rowcount > 0
@@ -230,6 +232,13 @@ class ContentDatabaseStorage(BaseStorage):
                 with self._get_connection() as conn:
                     # 获取该 session 的所有 content_id，以便触发 tags 级联（如果没配外键级联）
                     # 实际上上面 init_db 已经配了 FOREIGN KEY ... ON DELETE CASCADE
+                    content_ids = [
+                        row['id']
+                        for row in conn.execute('SELECT id FROM content WHERE session_id = ?', (session_id,)).fetchall()
+                    ]
+                    if content_ids:
+                        placeholders = ','.join(['?'] * len(content_ids))
+                        conn.execute(f'DELETE FROM tags WHERE content_id IN ({placeholders})', content_ids)
                     cursor = conn.execute('DELETE FROM content WHERE session_id = ?', (session_id,))
                     count = cursor.rowcount
                     conn.commit()
@@ -239,12 +248,14 @@ class ContentDatabaseStorage(BaseStorage):
             return 0
     
     async def search_content(
-        self, 
+        self,
         query: Optional[str] = None,
         content_type: Optional[ContentType] = None,
+        content_types: Optional[List[ContentType]] = None,
         tags: Optional[List[str]] = None,
         status: Optional[ContentStatus] = None,
         session_id: Optional[str] = None,
+        parent_id: Optional[str] = None,
         limit: int = 20,
         offset: int = 0
     ) -> Dict[str, Any]:
@@ -254,22 +265,50 @@ class ContentDatabaseStorage(BaseStorage):
                 # 构建查询条件
                 conditions = []
                 params = []
-                
-                if content_type:
+
+                resolved_types = [item for item in (content_types or []) if item is not None]
+
+                if resolved_types:
+                    type_placeholders = ", ".join(["?"] * len(resolved_types))
+                    conditions.append(f"type IN ({type_placeholders})")
+                    params.extend([item.value for item in resolved_types])
+                elif content_type:
                     conditions.append("type = ?")
                     params.append(content_type.value)
-                
+
                 if status:
                     conditions.append("status = ?")
                     params.append(status.value)
-                
+
                 if session_id:
                     conditions.append("session_id = ?")
                     params.append(session_id)
+
+                if parent_id:
+                    conditions.append("parent_id = ?")
+                    params.append(parent_id)
                 
                 if query:
-                    conditions.append("title LIKE ?")
-                    params.append(f"%{query}%")
+                    normalized_query = query.strip()
+                    query_tokens = [
+                        token.strip()
+                        for token in re.split(r"[\s,，、]+", normalized_query)
+                        if token.strip()
+                    ]
+                    search_terms: List[str] = []
+                    for term in [normalized_query, *query_tokens]:
+                        if not term:
+                            continue
+                        if term not in search_terms:
+                            search_terms.append(term)
+
+                    if search_terms:
+                        search_conditions = []
+                        for term in search_terms:
+                            search_value = f"%{term}%"
+                            search_conditions.append("(title LIKE ? OR content LIKE ? OR extracted_data LIKE ? OR relations LIKE ?)")
+                            params.extend([search_value, search_value, search_value, search_value])
+                        conditions.append(f"({' OR '.join(search_conditions)})")
                 
                 where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
                 
@@ -375,7 +414,16 @@ class ContentDatabaseStorage(BaseStorage):
                 status_counts = {row['status']: row['count'] for row in status_cursor.fetchall()}
                 
                 # 标签统计
-                tag_cursor = conn.execute('SELECT tag, COUNT(*) as count FROM tags GROUP BY tag ORDER BY count DESC LIMIT 50')
+                tag_cursor = conn.execute(
+                    '''
+                    SELECT t.tag, COUNT(*) as count
+                    FROM tags t
+                    INNER JOIN content c ON c.id = t.content_id
+                    GROUP BY t.tag
+                    ORDER BY count DESC
+                    LIMIT 50
+                    '''
+                )
                 tag_counts = {row['tag']: row['count'] for row in tag_cursor.fetchall()}
                 
                 return {

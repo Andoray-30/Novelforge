@@ -1,10 +1,9 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { buildContentCreateRequest } from '@/lib/content-contract';
 import { useAIPlanning } from '@/lib/hooks/use-ai-planning';
 import { useSessions } from '@/lib/hooks/use-sessions';
-import { loadEffectiveOpenAIConfig } from '@/lib/openai-config';
 import { upsertContentAsset } from '@/lib/content-upsert';
 import type {
   CharacterDesign,
@@ -13,6 +12,8 @@ import type {
   StoryOutlineParams,
   WorldSetting,
 } from '@/types';
+
+const AI_PLANNING_CONFIG: OpenAIConfig = { ai_mode: 'pro' };
 
 function toRecord<T extends object>(value: T): Record<string, unknown> {
   return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
@@ -56,7 +57,6 @@ function buildWorldContent(world: WorldSetting): string {
 export default function AIPlanningPage() {
   const { isLoading, error, generateStoryOutline, designCharacter, buildWorld } = useAIPlanning();
   const { currentSession, currentSessionId, createSession } = useSessions();
-  const [openAIConfig, setOpenAIConfig] = useState<OpenAIConfig | undefined>(undefined);
 
   const [formData, setFormData] = useState<StoryOutlineParams>({
     novel_type: 'fantasy',
@@ -72,10 +72,6 @@ export default function AIPlanningPage() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isGeneratingCharacters, setIsGeneratingCharacters] = useState(false);
   const [isBuildingWorld, setIsBuildingWorld] = useState(false);
-
-  useEffect(() => {
-    setOpenAIConfig(loadEffectiveOpenAIConfig());
-  }, []);
 
   const ensureSessionId = async (): Promise<string> => {
     if (currentSessionId) {
@@ -111,7 +107,7 @@ export default function AIPlanningPage() {
     try {
       const outline = await generateStoryOutline({
         ...formData,
-        openai_config: openAIConfig,
+        openai_config: AI_PLANNING_CONFIG,
       });
       const sessionId = await ensureSessionId();
       const outlineId = await saveOutlineAsset(outline, sessionId);
@@ -154,7 +150,7 @@ export default function AIPlanningPage() {
           designCharacter({
             context,
             roles: [role.role],
-            openai_config: openAIConfig,
+            openai_config: AI_PLANNING_CONFIG,
           })
         )
       );
@@ -202,7 +198,7 @@ export default function AIPlanningPage() {
 
       const world = await buildWorld({
         story_outline: toRecord(currentOutline),
-        openai_config: openAIConfig,
+        openai_config: AI_PLANNING_CONFIG,
       });
 
       await upsertContentAsset(

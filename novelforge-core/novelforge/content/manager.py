@@ -152,9 +152,11 @@ class ContentManager:
             result = await self.db_storage.search_content(
                 query=request.query,
                 content_type=request.content_type,
+                content_types=request.content_types,
                 tags=request.tags,
                 status=request.status,
                 session_id=request.session_id,
+                parent_id=request.parent_id,
                 limit=request.limit,
                 offset=request.offset
             )
@@ -163,6 +165,13 @@ class ContentManager:
         else:
             # 使用原有的O(N)遍历搜索
             all_keys = await self.storage.list_keys()
+            requested_types = [item for item in (request.content_types or []) if item is not None]
+            normalized_query = (request.query or "").strip().lower()
+            query_tokens = [
+                token.strip()
+                for token in normalized_query.replace("，", " ").replace("、", " ").split()
+                if token.strip()
+            ]
             
             # 获取所有索引项
             index_keys = [key for key in all_keys if key.startswith("index_")]
@@ -174,7 +183,9 @@ class ContentManager:
                     continue
                 
                 # 检查筛选条件
-                if request.content_type and index_data.get("type") != request.content_type:
+                if requested_types and index_data.get("type") not in requested_types:
+                    continue
+                if request.content_type and not requested_types and index_data.get("type") != request.content_type:
                     continue
                 if request.status and index_data.get("status") != request.status:
                     continue
@@ -182,6 +193,11 @@ class ContentManager:
                 # 核心修复: 如果指定了 session_id，则必须匹配
                 if request.session_id:
                     if index_data.get("session_id") != request.session_id:
+                        continue
+
+                # 按父内容ID过滤（小说根节点筛选）
+                if request.parent_id:
+                    if index_data.get("parent_id") != request.parent_id:
                         continue
                 
                 # 如果指定了标签，检查是否包含（如果已经有 session_id 过滤，tags 可作为二级过滤）
@@ -196,19 +212,34 @@ class ContentManager:
                     elif not has_any_tag:
                         continue
                 
-                # 检查标题是否匹配查询
-                item_title = index_data.get("title", "")
-                if request.query and request.query.lower() not in item_title.lower():
-                    continue
-                
                 # 获取完整内容
                 content_id = index_data.get("id")
                 if not content_id:
                     continue
                     
                 content = await self.get_content(str(content_id))
-                if content:
-                    results.append(content)
+                if not content:
+                    continue
+
+                if normalized_query:
+                    payload_text = json.dumps(content.extracted_data or {}, ensure_ascii=False)
+                    relations_text = json.dumps(content.relations or {}, ensure_ascii=False)
+                    haystack = " ".join([
+                        content.metadata.title,
+                        content.content or "",
+                        payload_text,
+                        relations_text,
+                    ]).lower()
+
+                    if normalized_query not in haystack:
+                        if query_tokens:
+                            matched_tokens = sum(1 for token in query_tokens if token in haystack)
+                            if matched_tokens == 0:
+                                continue
+                        else:
+                            continue
+
+                results.append(content)
             
             total = len(results)
             # 分页处理已经在数据库查询中处理，这里不需要再次分页
@@ -221,6 +252,12 @@ class ContentManager:
             start = request.offset
             end = start + request.limit
             paginated_results = results[start:end]
+
+        if not request.include_content:
+            paginated_results = [
+                item.model_copy(update={"content": ""})
+                for item in paginated_results
+            ]
         
         return ContentSearchResult(
             items=paginated_results,

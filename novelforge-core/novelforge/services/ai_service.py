@@ -78,6 +78,7 @@ class AIService:
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         model: Optional[str] = None,
+        ai_mode: Optional[str] = None,
         strict_model: Optional[bool] = None,
     ) -> "AIService":
         """Create a new AI service instance with runtime OpenAI overrides."""
@@ -85,6 +86,7 @@ class AIService:
             api_key=api_key,
             base_url=base_url,
             model=model,
+            ai_mode=ai_mode,
             strict_model=strict_model,
         )
         return AIService(runtime_config)
@@ -115,6 +117,7 @@ class AIService:
             self._http_client = httpx.AsyncClient(
                 timeout=httpx.Timeout(connect=30.0, read=120.0, write=120.0, pool=120.0),
                 follow_redirects=True,
+                proxy=getattr(self.config, "openai_proxy", "") or None,
                 trust_env=False,
             )
             self._http_client_loop_id = current_loop_id
@@ -208,7 +211,7 @@ class AIService:
     ) -> str:
         errors: list[APIErrorWithStatus] = []
         last_model = self.config.model
-        candidate_timeout = min(timeout, 45.0)
+        candidate_timeout = timeout if max_tokens >= 5000 or timeout > 120 else min(timeout, 45.0)
 
         for model_name in self._candidate_models():
             last_model = model_name
@@ -256,12 +259,13 @@ class AIService:
                 if exc.status_code < 500 and exc.status_code not in {403, 429}:
                     raise
             except (httpx.HTTPError, RuntimeError, ValueError, TimeoutError) as exc:
+                error_text = str(exc) or exc.__class__.__name__
                 logger.warning(
                     "Model %s failed during chat request: %s",
                     model_name,
-                    exc,
+                    error_text,
                 )
-                errors.append(APIErrorWithStatus(f"Model {model_name} request failed: {exc}", 503))
+                errors.append(APIErrorWithStatus(f"Model {model_name} request failed: {error_text}", 503))
                 continue
 
         if errors:

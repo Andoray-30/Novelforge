@@ -7,12 +7,14 @@ from typing import Optional
 import tempfile
 import os
 import uuid
+import hashlib
 from pathlib import Path
 from importlib.util import find_spec
 import json
 
 from ..core.config import Config
 from ..content.manager import ContentManager
+from ..content.models import ContentSearchRequest
 from ..services.ai_scheduler import TaskPriority as SchedulerTaskPriority
 from ..services.ai_scheduler import get_ai_scheduler
 from ..services.ai_service import AIService
@@ -64,6 +66,34 @@ def _validate_format_dependencies(file_extension: str) -> None:
             detail=f"{file_extension} 导入缺少依赖: {', '.join(missing)}",
         )
 
+
+async def _delete_empty_session_if_safe(ai_scheduler, session_id: Optional[str]) -> bool:
+    if not session_id:
+        return False
+    try:
+        content_result = await ai_scheduler.content_manager.search_content(
+            ContentSearchRequest(session_id=session_id, limit=1)
+        )
+        if getattr(content_result, "total", 0) > 0:
+            return False
+
+        key = f"conversation_{session_id}"
+        try:
+            conversation = await ai_scheduler.storage.load(key, storage_type="file")
+        except TypeError:
+            conversation = await ai_scheduler.storage.load(key)
+        if not isinstance(conversation, dict):
+            return False
+        if conversation.get("messages"):
+            return False
+        try:
+            await ai_scheduler.storage.delete(key, storage_type="file")
+        except TypeError:
+            await ai_scheduler.storage.delete(key)
+        return True
+    except Exception:
+        return False
+
 router = APIRouter(prefix="/text-processing", tags=["text-processing"])
 
 
@@ -78,7 +108,7 @@ async def upload_and_process(
     detect_chapters: bool = Form(True),
     extract_metadata: bool = Form(True),
     remove_headers_footers: bool = Form(True),
-    preserve_line_breaks: bool = Form(False)
+    preserve_line_breaks: bool = Form(True)
 ):
     """
     异步上传并处理文本文件，支持用户隔离的 AI 配置
@@ -96,7 +126,7 @@ async def upload_and_process(
         )
 
     # 验证文件类型
-    allowed_extensions = {'.txt', '.epub', '.pdf', '.docx'}
+    allowed_extensions = {'.txt', '.md', '.text', '.epub', '.pdf', '.docx'}
     file_extension = Path(file.filename).suffix.lower()
     
     if file_extension not in allowed_extensions:
@@ -110,14 +140,42 @@ async def upload_and_process(
     temp_file_path = None
 
     try:
+        content = await file.read()
+        if not content:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="上传文件为空",
+            )
+
+        raw_upload_sha256 = hashlib.sha256(content).hexdigest()
+        ai_scheduler = _get_shared_ai_scheduler()
+        duplicate_result = await ai_scheduler.find_existing_import_by_upload_hash(
+            raw_upload_sha256,
+            exclude_session_id=session_id,
+        )
+        if duplicate_result:
+            deleted_empty_session = await _delete_empty_session_if_safe(ai_scheduler, session_id)
+            duplicate_result.update({
+                "requested_session_id": session_id,
+                "deleted_empty_session": deleted_empty_session,
+            })
+            duplicate_task = await ai_scheduler.create_completed_duplicate_import_task(
+                requested_session_id=session_id,
+                duplicate_result=duplicate_result,
+                source_file_name=file.filename,
+            )
+            return {
+                "success": True,
+                "task_id": duplicate_task.id,
+                "duplicate": True,
+                "session_id": duplicate_result.get("session_id"),
+                "parent_id": duplicate_result.get("parent_id"),
+                "result": duplicate_result,
+                "message": "检测到相同原文已导入，已复用现有项目资产。",
+            }
+
         # 1. 保存临时文件
         with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
-            content = await file.read()
-            if not content:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="上传文件为空",
-                )
             temp_file.write(content)
             temp_file_path = temp_file.name
         
@@ -161,6 +219,7 @@ async def upload_and_process(
                 "config": process_config,
                 "openai_config": parsed_openai_config, # 注入模型配置
                 "source_file_name": file.filename,
+                "raw_upload_sha256": raw_upload_sha256,
                 "import_run_id": f"import_{uuid.uuid4().hex[:12]}",
             },
             priority=SchedulerTaskPriority.HIGH
@@ -195,7 +254,7 @@ async def process_text(
     detect_chapters: bool = Form(True),
     extract_metadata: bool = Form(True),
     remove_headers_footers: bool = Form(True),
-    preserve_line_breaks: bool = Form(False)
+    preserve_line_breaks: bool = Form(True)
 ):
     """
     直接处理文本内容
@@ -308,6 +367,8 @@ async def get_supported_formats():
             "formats": [fmt.value for fmt in TextFormat],
             "description": {
                 "txt": "纯文本文件",
+                "md": "Markdown 文本",
+                "text": "通用文本文件",
                 "epub": "电子书格式",
                 "pdf": "便携式文档格式",
                 "docx": "Microsoft Word文档"

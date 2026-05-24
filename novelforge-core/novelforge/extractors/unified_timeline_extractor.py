@@ -62,6 +62,8 @@ class UnifiedTimelineExtractor(TimelineExtractorInterface):
 - 因果链条（识别此事件由哪个前置事件引起，又将直接导致什么后果）
 - 情节钩子（识别是否存在预留的伏笔或悬念）
 - 影响评估（该事件对世界观设定或人物关系的重大改变）
+- 原文证据（每个事件必须附带能支撑标题和描述的原文短句）
+- 章节/片段定位（如果文本中没有明确章节名，至少填写片段编号）
 
 ## 输出格式
 请以JSON格式输出：
@@ -74,6 +76,8 @@ class UnifiedTimelineExtractor(TimelineExtractorInterface):
             "event_type": "事件类型（battle/revelation/betrayal/sacrifice/transformation等）",
             "absolute_time": "具体时间",
             "relative_time": "相对时间",
+            "narrative_time": "叙事顺序或阶段，如第一章开端/中段/结尾",
+            "chapter_reference": "章节或片段引用，如第一章/片段2",
             "causal_link": {{
                 "cause": "起因事件简述",
                 "impact": "对后续剧情的直接驱动作用"
@@ -118,7 +122,9 @@ class UnifiedTimelineExtractor(TimelineExtractorInterface):
                     continue
 
                 event = self._create_event_from_dict(event_data)
-                events.append(event)
+                if event.title and event.description:
+                    setattr(event, "timeline_quality", self._build_event_quality(event))
+                    events.append(event)
 
             return events
         except Exception as e:
@@ -154,6 +160,19 @@ class UnifiedTimelineExtractor(TimelineExtractorInterface):
             consequences=consequences,
             evidence=evidence
         )
+
+    def _build_event_quality(self, event: TimelineEvent) -> Dict[str, object]:
+        evidence_count = len(event.evidence or [])
+        has_location = bool(event.locations)
+        has_characters = bool(event.characters)
+        has_time_anchor = bool(event.chapter_reference or event.narrative_time or event.relative_time or event.absolute_time)
+        return {
+            "evidence_count": evidence_count,
+            "has_characters": has_characters,
+            "has_location": has_location,
+            "has_time_anchor": has_time_anchor,
+            "confidence": "high" if evidence_count and has_characters and has_time_anchor else "medium" if evidence_count or has_time_anchor else "low",
+        }
 
     def _ensure_list(self, data) -> List[str]:
         """确保数据是列表"""
@@ -253,8 +272,13 @@ class UnifiedTimelineExtractor(TimelineExtractorInterface):
 
         for other in events[1:]:
             # 合并描述（取最长的）
-            if len(other.description) > len(base.description):
+            if len(other.description or "") > len(base.description or ""):
                 base.description = other.description
+
+            if not base.chapter_reference and other.chapter_reference:
+                base.chapter_reference = other.chapter_reference
+            if not base.narrative_time and other.narrative_time:
+                base.narrative_time = other.narrative_time
 
             # 合并角色（去重）
             base.characters = list(set(base.characters + other.characters))
@@ -276,4 +300,5 @@ class UnifiedTimelineExtractor(TimelineExtractorInterface):
             if importance_priority.get(other.importance, 0) > importance_priority.get(base.importance, 0):
                 base.importance = other.importance
 
+        setattr(base, "timeline_quality", self._build_event_quality(base))
         return base

@@ -57,8 +57,14 @@ copy .env.example .env
 ```env
 # AI 服务配置
 OPENAI_API_KEY=your-api-key
-OPENAI_BASE_URL=https://api.siliconflow.cn/v1
-OPENAI_MODEL=Pro/deepseek-ai/DeepSeek-V3.2
+OPENAI_BASE_URL=https://newapi.sync-api.xyz/v1
+NOVELFORGE_OPENAI_PROXY=
+OPENAI_MODEL=gemini-3.5-flash
+NOVELFORGE_FAST_MODEL=gemini-3.5-flash
+NOVELFORGE_PRO_MODEL=gemini-3.1-pro-preview
+NOVELFORGE_DEFAULT_AI_MODE=fast
+STORAGE_TYPE=content_db
+USE_CONTENT_DATABASE=true
 
 # 提取配置
 MAX_TEXT_LENGTH=500000
@@ -70,6 +76,19 @@ MAX_CONCURRENCY=10
 RPM_LIMIT=500
 TPM_LIMIT=2000000
 ```
+
+公开部署最小配置：
+
+```env
+NOVELFORGE_PUBLIC_DEPLOYMENT=true
+NOVELFORGE_ADMIN_PASSWORD=change-this-password
+NOVELFORGE_SESSION_SECRET=replace-with-a-long-random-string
+FRONTEND_ORIGIN=https://your-frontend-domain.example
+NOVELFORGE_ALLOW_RUNTIME_OPENAI_OVERRIDES=false
+# 普通用户只选择“快速 / Pro”；真实模型由 NOVELFORGE_FAST_MODEL / NOVELFORGE_PRO_MODEL 映射
+```
+
+公开部署模式会启用单管理员登录、HttpOnly Cookie 会话、服务端 AI Key，并在启动时检查管理员密码、Session Secret、AI Key、SQLite 内容库和数据目录写权限。
 
 ### 启动后端服务
 

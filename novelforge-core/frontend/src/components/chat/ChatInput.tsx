@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUp, Loader2, Mic, Paperclip, Sparkles, X } from 'lucide-react';
 import { aiService } from '@/lib/api';
 import type { OpenAIConfig } from '@/types';
+import type { AIMode } from '@/lib/openai-config';
 
 const DEFAULT_PROMPT_SUGGESTIONS = [
   '帮我设计一个有魅力且复杂的反派角色。',
@@ -19,6 +20,8 @@ interface ChatInputProps {
   placeholder?: string;
   sessionId?: string;
   openAIConfig?: OpenAIConfig;
+  aiMode?: AIMode;
+  onAIModeChange?: (mode: AIMode) => void;
 }
 
 export function ChatInput({
@@ -27,6 +30,8 @@ export function ChatInput({
   placeholder,
   sessionId,
   openAIConfig,
+  aiMode = 'fast',
+  onAIModeChange,
 }: ChatInputProps) {
   const [input, setInput] = useState('');
   const [isFocused, setIsFocused] = useState(false);
@@ -36,6 +41,7 @@ export function ChatInput({
   const apiKeyInput = openAIConfig?.api_key ?? '';
   const baseUrlInput = openAIConfig?.base_url ?? '';
   const modelInput = openAIConfig?.model ?? '';
+  const modeInput = openAIConfig?.ai_mode ?? aiMode;
 
   const requestConfig = useMemo(() => {
     const normalized: OpenAIConfig = {};
@@ -46,9 +52,10 @@ export function ChatInput({
     if (apiKey) normalized.api_key = apiKey;
     if (baseUrl) normalized.base_url = baseUrl;
     if (model) normalized.model = model;
+    normalized.ai_mode = modeInput === 'pro' ? 'pro' : 'fast';
 
     return Object.keys(normalized).length > 0 ? normalized : undefined;
-  }, [apiKeyInput, baseUrlInput, modelInput]);
+  }, [apiKeyInput, baseUrlInput, modelInput, modeInput]);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -235,9 +242,46 @@ export function ChatInput({
             marginTop: 10,
           }}
         >
-          <div style={{ display: 'flex', gap: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <ToolButton icon={<Paperclip size={15} />} title="上传文本文件" disabled />
             <ToolButton icon={<Mic size={15} />} title="语音输入（即将支持）" disabled />
+            {onAIModeChange ? (
+              <div
+                role="group"
+                aria-label="创作模式"
+                style={{
+                  display: 'flex',
+                  padding: 2,
+                  borderRadius: 999,
+                  border: '1px solid var(--border-subtle)',
+                  background: 'rgba(255,255,255,0.03)',
+                }}
+              >
+                {(['fast', 'pro'] as AIMode[]).map((mode) => {
+                  const active = aiMode === mode;
+                  return (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => onAIModeChange(mode)}
+                      title={mode === 'fast' ? '快速模式：适合灵感、聊天和轻量改写' : 'Pro 模式：适合深度创作、序章和复杂分析'}
+                      style={{
+                        border: 'none',
+                        borderRadius: 999,
+                        padding: '4px 9px',
+                        fontSize: 11,
+                        fontWeight: active ? 700 : 500,
+                        background: active ? 'rgba(139, 92, 246, 0.24)' : 'transparent',
+                        color: active ? 'var(--text-primary)' : 'var(--text-muted)',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {mode === 'fast' ? '快速' : 'Pro'}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

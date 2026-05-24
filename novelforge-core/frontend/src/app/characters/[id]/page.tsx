@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Character, ContentItem, ImportanceLevel } from '@/types';
 import { contentService } from '@/lib/api';
 import { useSessions } from '@/lib/hooks/use-sessions';
+import { useAppStore } from '@/lib/hooks/use-app-store';
 
 function parseCharacter(item: ContentItem): Character | null {
   const payload = item.extracted_data;
@@ -16,6 +17,9 @@ function parseCharacter(item: ContentItem): Character | null {
   }
 
   const data = payload as Record<string, unknown>;
+  const creativeSignals = data.creative_signals && typeof data.creative_signals === 'object'
+    ? data.creative_signals as Record<string, unknown>
+    : {};
   const name = typeof data.name === 'string' && data.name.trim().length > 0
     ? data.name
     : item.metadata.title;
@@ -23,7 +27,11 @@ function parseCharacter(item: ContentItem): Character | null {
   const importance =
     data.importance === 'critical' || data.importance === 'high' || data.importance === 'medium' || data.importance === 'low'
       ? (data.importance as ImportanceLevel)
-      : 'medium';
+      : String(data.role || '').toLowerCase().split('.').pop() === 'protagonist'
+        ? 'critical'
+        : String(data.role || '').toLowerCase().split('.').pop() === 'antagonist'
+          ? 'high'
+          : 'medium';
 
   return {
     id: item.metadata.id,
@@ -31,13 +39,39 @@ function parseCharacter(item: ContentItem): Character | null {
     description: typeof data.description === 'string' ? data.description : item.content,
     personality: typeof data.personality === 'string' ? data.personality : '',
     background: typeof data.background === 'string' ? data.background : '',
-    role: typeof data.role === 'string' ? data.role : 'supporting',
+    role: typeof data.role === 'string' ? data.role.split('.').pop() || data.role : 'supporting',
     age: typeof data.age === 'number' ? data.age : undefined,
     gender: typeof data.gender === 'string' ? data.gender : undefined,
     appearance: typeof data.appearance === 'string' ? data.appearance : undefined,
     occupation: typeof data.occupation === 'string' ? data.occupation : undefined,
     abilities: Array.isArray(data.abilities) ? data.abilities.filter((value): value is string => typeof value === 'string') : [],
     tags: Array.isArray(data.tags) ? data.tags.filter((value): value is string => typeof value === 'string') : item.metadata.tags,
+    aliases: Array.isArray(data.aliases) ? data.aliases.filter((value): value is string => typeof value === 'string') : [],
+    goals: [
+      ...(Array.isArray(data.goals) ? data.goals.filter((value): value is string => typeof value === 'string') : []),
+      ...(Array.isArray(creativeSignals.desires) ? creativeSignals.desires.filter((value): value is string => typeof value === 'string') : []),
+    ],
+    desires: [
+      ...(Array.isArray(data.desires) ? data.desires.filter((value): value is string => typeof value === 'string') : []),
+      ...(Array.isArray(creativeSignals.desires) ? creativeSignals.desires.filter((value): value is string => typeof value === 'string') : []),
+    ],
+    fears: [
+      ...(Array.isArray(data.fears) ? data.fears.filter((value): value is string => typeof value === 'string') : []),
+      ...(Array.isArray(creativeSignals.wounds) ? creativeSignals.wounds.filter((value): value is string => typeof value === 'string') : []),
+    ],
+    wounds: [
+      ...(Array.isArray(data.wounds) ? data.wounds.filter((value): value is string => typeof value === 'string') : []),
+      ...(Array.isArray(creativeSignals.wounds) ? creativeSignals.wounds.filter((value): value is string => typeof value === 'string') : []),
+    ],
+    conflicts: Array.isArray(data.conflicts) ? data.conflicts.filter((value): value is string => typeof value === 'string') : [],
+    personality_tension: typeof data.personality_tension === 'string'
+      ? data.personality_tension
+      : Array.isArray(creativeSignals.emotional_states)
+        ? creativeSignals.emotional_states.find((value): value is string => typeof value === 'string')
+        : undefined,
+    character_arc: typeof data.character_arc === 'string' ? data.character_arc : undefined,
+    relationship_hooks: Array.isArray(data.relationship_hooks) ? data.relationship_hooks.filter((value): value is string => typeof value === 'string') : [],
+    entity_type: typeof data.entity_type === 'string' ? data.entity_type : undefined,
     relationships: Array.isArray(data.relationships)
       ? data.relationships
           .filter((value): value is Record<string, unknown> => typeof value === 'object' && value !== null)
@@ -128,6 +162,7 @@ const CharacterDetailPage: React.FC = () => {
   const params = useParams();
   const router = useRouter();
   const { currentSession, currentSessionId } = useSessions();
+  const selectedNovelId = useAppStore((state) => state.selectedNovelId);
   const id = typeof params.id === 'string' ? params.id : Array.isArray(params.id) ? params.id[0] : undefined;
 
   const [character, setCharacter] = useState<Character | null>(null);
@@ -149,11 +184,11 @@ const CharacterDetailPage: React.FC = () => {
         const item = await contentService.getContentItem(id);
 
         if (
-          currentSessionId &&
-          item.metadata.session_id &&
-          item.metadata.session_id !== currentSessionId
+          selectedNovelId &&
+          item.metadata.parent_id &&
+          item.metadata.parent_id !== selectedNovelId
         ) {
-          setError('该角色不属于当前项目，请先切换到对应项目后再查看。');
+          setError('该角色不属于当前小说，请先切换到对应小说后再查看。');
           setCharacter(null);
           return;
         }
@@ -175,7 +210,7 @@ const CharacterDetailPage: React.FC = () => {
     };
 
     void loadCharacter();
-  }, [currentSessionId, id]);
+  }, [currentSessionId, id, selectedNovelId]);
 
   const personalityTraits = useMemo(
     () => splitTraits(character?.personality || ''),
@@ -278,6 +313,53 @@ const CharacterDetailPage: React.FC = () => {
                   </p>
                 </div>
               </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <DetailSection title="目标 / 欲望">
+                  {[...(character.goals ?? []), ...(character.desires ?? [])].length > 0 ? (
+                    <div className="space-y-2">
+                      {[...(character.goals ?? []), ...(character.desires ?? [])].slice(0, 4).map((item, index) => (
+                        <div key={`${item}-${index}`} className="rounded-xl border border-violet-400/20 bg-violet-400/10 px-3 py-2 text-violet-100">
+                          {item}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-slate-500">暂无明确目标。</span>
+                  )}
+                </DetailSection>
+
+                <DetailSection title="恐惧 / 冲突">
+                  {[...(character.fears ?? []), ...(character.wounds ?? []), ...(character.conflicts ?? [])].length > 0 ? (
+                    <div className="space-y-2">
+                      {[...(character.fears ?? []), ...(character.wounds ?? []), ...(character.conflicts ?? [])].slice(0, 4).map((item, index) => (
+                        <div key={`${item}-${index}`} className="rounded-xl border border-rose-400/20 bg-rose-400/10 px-3 py-2 text-rose-100">
+                          {item}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-slate-500">暂无明确冲突。</span>
+                  )}
+                </DetailSection>
+              </div>
+
+              {character.personality_tension || character.character_arc ? (
+                <DetailSection title="创作弧光">
+                  <div className="space-y-3">
+                    {character.personality_tension ? (
+                      <p className="rounded-2xl border border-blue-400/20 bg-blue-400/10 px-4 py-3 text-blue-100">
+                        {character.personality_tension}
+                      </p>
+                    ) : null}
+                    {character.character_arc ? (
+                      <p className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 text-emerald-100">
+                        {character.character_arc}
+                      </p>
+                    ) : null}
+                  </div>
+                </DetailSection>
+              ) : null}
 
               <DetailSection title="角色背景">
                 {character.background || '暂无背景信息。'}

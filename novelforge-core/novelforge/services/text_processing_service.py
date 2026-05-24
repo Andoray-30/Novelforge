@@ -5,6 +5,7 @@ from typing import Optional, Dict, Any
 from pathlib import Path
 import tempfile
 import os
+import unicodedata
 
 from novelforge.types.text_processing import (
     TextProcessingConfig, ProcessedText, TextFormat, TextMetadata
@@ -107,23 +108,39 @@ class TextProcessingService:
             # 默认按文本文件处理
             return self._read_txt_file(file_path)
     
+    def _score_decoded_text(self, text: str) -> int:
+        sample = text[:5000]
+        if not sample:
+            return -100000
+
+        cjk_count = sum(1 for char in sample if '一' <= char <= '鿿')
+        replacement_count = sample.count('�')
+        control_count = sum(
+            1
+            for char in sample
+            if unicodedata.category(char)[0] == 'C' and char not in '\r\n\t'
+        )
+        return cjk_count * 3 - replacement_count * 100 - control_count * 5
+
     def _read_txt_file(self, file_path: str) -> str:
         """读取TXT文件"""
         try:
-            # 尝试不同的编码格式
             encodings = ['utf-8-sig', 'utf-8', 'gb18030', 'gbk', 'gb2312', 'utf-16', 'latin-1']
-            
+            raw_content = Path(file_path).read_bytes()
+            candidates = []
+
             for encoding in encodings:
                 try:
-                    with open(file_path, 'r', encoding=encoding) as f:
-                        content = f.read()
-                    return content
+                    content = raw_content.decode(encoding)
+                    candidates.append((self._score_decoded_text(content), encoding, content))
                 except UnicodeDecodeError:
                     continue
-            
-            # 如果所有编码都失败，使用错误处理
-            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
-                return f.read()
+
+            if candidates:
+                candidates.sort(key=lambda item: item[0], reverse=True)
+                return candidates[0][2]
+
+            return raw_content.decode('utf-8', errors='replace')
         except Exception as e:
             raise ProcessingError(
                 message=f"无法读取TXT文件 {file_path}: {str(e)}",

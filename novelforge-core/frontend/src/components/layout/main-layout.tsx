@@ -40,6 +40,11 @@ export function MainLayout({
       <MobileNav
         isOpen={isMobileNavOpen}
         onClose={() => setIsMobileNavOpen(false)}
+        currentSessionTitle={currentSessionTitle}
+        currentSessionId={currentSessionId}
+        projects={projects}
+        onProjectChange={onProjectChange}
+        onCreateProject={onCreateProject}
       />
 
       <div className="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-64 lg:flex-col">

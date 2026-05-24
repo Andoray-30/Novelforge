@@ -1,14 +1,30 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui';
 import { contentService, taskService } from '@/lib/api';
 import { getContentAssetPayload, getContentAssetText, getContentAssetTitle } from '@/lib/content-contract';
+import {
+  resolveContentItemReopen,
+  saveReopenedContentItem,
+  type ContentItemArtifactData,
+} from '@/lib/content-item-reopen';
+import { ArtifactPanel } from '@/components/chat/ArtifactPanel';
 import { useSessionTaskEvents } from '@/lib/hooks/use-session-task-events';
 import { useSessions } from '@/lib/hooks/use-sessions';
+import { useAppStore } from '@/lib/hooks/use-app-store';
+import {
+  bindContentItemToNovel,
+  isUnassignedNovelScopedContentItem,
+} from '@/lib/content-item-binding';
 import { formatDate } from '@/lib/utils';
 import { BarChart3, CheckCircle2, Clock3, FileText, RefreshCw, Users } from 'lucide-react';
 import type { AITask, ContentItem } from '@/types';
+import type { ToolCall } from '@/lib/chat-parser';
+
+type ArtifactData = ContentItemArtifactData & { toolCall?: ToolCall };
+
 
 function countChapterCharacters(items: ContentItem[]): number {
   return items.reduce((total, item) => total + getContentAssetText(item).replace(/\s+/g, '').length, 0);
@@ -30,11 +46,16 @@ function sortByUpdatedAt(items: ContentItem[]): ContentItem[] {
 }
 
 export default function AnalyticsPage() {
+  const router = useRouter();
   const { currentSession, currentSessionId } = useSessions();
+  const selectedNovelId = useAppStore((s) => s.selectedNovelId);
   const [items, setItems] = useState<ContentItem[]>([]);
   const [tasks, setTasks] = useState<AITask[]>([]);
+  const [activeArtifacts, setActiveArtifacts] = useState<ArtifactData[]>([]);
+  const [artifactPanelVisible, setArtifactPanelVisible] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => {
@@ -46,6 +67,7 @@ export default function AnalyticsPage() {
         const assetPromise = contentService.searchContent({
           query: '',
           session_id: currentSessionId || undefined,
+          parent_id: selectedNovelId || undefined,
           limit: 500,
         });
         const taskPromise = currentSessionId ? taskService.getActiveTasks(currentSessionId) : Promise.resolve([]);
@@ -61,7 +83,7 @@ export default function AnalyticsPage() {
     };
 
     void loadAnalytics();
-  }, [currentSessionId, refreshTick]);
+  }, [currentSessionId, selectedNovelId, refreshTick]);
 
   useSessionTaskEvents({
     sessionId: currentSessionId,
@@ -115,6 +137,61 @@ export default function AnalyticsPage() {
     [outlines.length, chapters.length, characters.length, worlds.length, timelines.length, relationships.length]
   );
 
+  const openRecentAsset = (item: ContentItem) => {
+    const result = resolveContentItemReopen(item, selectedNovelId);
+
+    if (result.kind === 'error') {
+      setError(result.message);
+      return;
+    }
+
+    if (result.kind === 'route') {
+      router.push(result.href);
+      return;
+    }
+
+    setActiveArtifacts([result.artifact]);
+    setArtifactPanelVisible(true);
+    setSaveMessage(result.message);
+  };
+
+  const bindRecentAssetToSelectedNovel = async (item: ContentItem) => {
+    if (!selectedNovelId || !isUnassignedNovelScopedContentItem(item)) {
+      return;
+    }
+
+    setError(null);
+    try {
+      await bindContentItemToNovel(item, selectedNovelId);
+      setSaveMessage(`已将「${getContentAssetTitle(item)}」绑定到当前小说。`);
+      setRefreshTick((current) => current + 1);
+    } catch (bindError) {
+      setError(bindError instanceof Error ? bindError.message : '绑定资产失败');
+    }
+  };
+
+  const handleSaveArtifact = async (artifact: ArtifactData, updatedData: Record<string, unknown>) => {
+    setError(null);
+    try {
+      const result = await saveReopenedContentItem({
+        items,
+        artifact,
+        updatedData,
+      });
+
+      if (!result.ok) {
+        setError(result.message);
+        return;
+      }
+
+      setSaveMessage(`已保存「${result.title}」的修改。`);
+      setRefreshTick((current) => current + 1);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : '保存资产失败');
+    }
+  };
+
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100">
@@ -138,6 +215,7 @@ export default function AnalyticsPage() {
               分析页 v1 已切换到真实项目资产统计。这里展示的章节数、字数、角色数、世界要素和活跃任务都来自当前内容库。
             </p>
             <p className="mt-3 text-sm text-slate-500">当前项目: {currentSession?.title || '未选择项目，默认统计全部资产'}</p>
+            <p className="mt-2 text-sm text-slate-500">当前小说: {selectedNovelId ? '已按当前小说容器收敛统计' : '当前展示全部小说聚合统计'}</p>
           </div>
 
           <Button
@@ -151,6 +229,7 @@ export default function AnalyticsPage() {
         </div>
 
         {error && <div className="mb-6 rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-red-200">{error}</div>}
+        {saveMessage && <div className="mb-6 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-5 py-4 text-emerald-200">{saveMessage}</div>}
 
         <div className="mb-8 grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-5">
           {statusCards.map((stat) => (
@@ -199,17 +278,42 @@ export default function AnalyticsPage() {
               {recentAssets.length === 0 ? (
                 <p className="text-sm text-slate-500">当前没有可分析资产。</p>
               ) : (
-                recentAssets.map((item) => (
-                  <div key={item.metadata.id} className="rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="font-medium text-white">{getContentAssetTitle(item)}</p>
-                        <p className="mt-1 text-xs text-slate-500">{formatDate(item.metadata.updated_at)}</p>
-                      </div>
-                      <Badge variant="outline">{item.metadata.type}</Badge>
+                recentAssets.map((item) => {
+                  const canBindToCurrentNovel = Boolean(selectedNovelId && isUnassignedNovelScopedContentItem(item));
+
+                  return (
+                    <div
+                      key={item.metadata.id}
+                      className="w-full rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-left transition hover:border-cyan-500/40 hover:bg-slate-900"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => openRecentAsset(item)}
+                        className="w-full text-left"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="font-medium text-white">{getContentAssetTitle(item)}</p>
+                            <p className="mt-1 text-xs text-slate-500">{formatDate(item.metadata.updated_at)}</p>
+                          </div>
+                          <Badge variant="outline">{item.metadata.type}</Badge>
+                        </div>
+                      </button>
+                      {canBindToCurrentNovel && (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void bindRecentAssetToSelectedNovel(item);
+                          }}
+                          className="mt-3 rounded-full border border-indigo-400/30 bg-indigo-500/10 px-3 py-1 text-xs font-medium text-indigo-200 transition hover:border-indigo-300/60 hover:bg-indigo-500/20"
+                        >
+                          绑定到当前小说
+                        </button>
+                      )}
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </CardContent>
           </Card>
@@ -259,6 +363,20 @@ export default function AnalyticsPage() {
           </Card>
         </div>
       </div>
+
+      <ArtifactPanel
+        visible={artifactPanelVisible}
+        onClose={() => setArtifactPanelVisible(false)}
+        artifacts={activeArtifacts}
+        onSaveToProject={(artifact, updatedData) => {
+          void handleSaveArtifact(artifact, updatedData);
+        }}
+        onSaveAll={async (payload) => {
+          for (const item of payload) {
+            await handleSaveArtifact(item.artifact, item.data);
+          }
+        }}
+      />
     </div>
   );
 }

@@ -1,11 +1,16 @@
 'use client'
 
 import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { usePathname } from 'next/navigation'
 import { Loader2, CheckCircle2, AlertCircle, Info, X } from 'lucide-react'
 import { taskService } from '@/lib/api/novelforge-api'
 import { useAppStore } from '@/lib/hooks/use-app-store'
 import { loadProjectPreferences, PROJECT_PREFERENCES_CHANGED_EVENT } from '@/lib/project-preferences'
-import { emitTaskLifecycleEvent } from '@/lib/task-events'
+import {
+  emitTaskLifecycleEvent,
+  formatNovelImportStageSummary,
+  parseNovelImportTaskResult,
+} from '@/lib/task-events'
 import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress-bar'
 import { cn } from '@/lib/utils'
@@ -13,6 +18,7 @@ import { cn } from '@/lib/utils'
 const TERMINAL_STATUSES = new Set(['COMPLETED', 'FAILED', 'CANCELLED'])
 const ACTIVE_STATUSES = new Set(['PENDING', 'RUNNING'])
 const TASK_EVENT_STATE_STORAGE_KEY = 'novelforge-task-event-states'
+const REPAIR_PREVIEW_TASK_TYPES = new Set(['chapter_index_rerun', 'relationship_backfill', 'timeline_rebuild'])
 
 function loadNotifiedTaskStates() {
   if (typeof window === 'undefined') {
@@ -57,21 +63,71 @@ function getTaskSummary(task: {
   result?: unknown
   error?: string | null
 }) {
+  if (REPAIR_PREVIEW_TASK_TYPES.has(task.type || '')) {
+    const result = task.result && typeof task.result === 'object'
+      ? (task.result as Record<string, unknown>)
+      : {}
+    const relationships = typeof result.relationships_count === 'number' ? result.relationships_count : 0
+    const timeline = typeof result.timeline_count === 'number' ? result.timeline_count : 0
+    const diff = result.repair_diff && typeof result.repair_diff === 'object'
+      ? (result.repair_diff as Record<string, unknown>)
+      : null
+    const relationshipDiff = diff?.relationships && typeof diff.relationships === 'object'
+      ? (diff.relationships as Record<string, unknown>)
+      : null
+    const timelineDiff = diff?.timeline && typeof diff.timeline === 'object'
+      ? (diff.timeline as Record<string, unknown>)
+      : null
+    const relationshipNew = typeof relationshipDiff?.new === 'number' ? relationshipDiff.new : null
+    const relationshipDuplicates = typeof relationshipDiff?.duplicates === 'number' ? relationshipDiff.duplicates : null
+    const timelineNew = typeof timelineDiff?.new === 'number' ? timelineDiff.new : null
+    const timelineDuplicates = typeof timelineDiff?.duplicates === 'number' ? timelineDiff.duplicates : null
+    if (normalizeTaskStatus(task.status) === 'COMPLETED') {
+      if (
+        relationshipNew !== null ||
+        relationshipDuplicates !== null ||
+        timelineNew !== null ||
+        timelineDuplicates !== null
+      ) {
+        return [
+          '修复预览完成。',
+          `关系新增 ${relationshipNew ?? relationships} / 跳过 ${relationshipDuplicates ?? 0}`,
+          `时间线新增 ${timelineNew ?? timeline} / 跳过 ${timelineDuplicates ?? 0}`,
+        ].join(' ')
+      }
+      return `修复预览完成：关系 ${relationships} 条，时间线 ${timeline} 条。`
+    }
+    return task.message || '质量修复任务正在处理中...'
+  }
+
+  if ((task.type || '') === 'import_repair_apply') {
+    const result = task.result && typeof task.result === 'object'
+      ? (task.result as Record<string, unknown>)
+      : {}
+    const relationships = typeof result.relationships_count === 'number' ? result.relationships_count : 0
+    const timeline = typeof result.timeline_count === 'number' ? result.timeline_count : 0
+    return normalizeTaskStatus(task.status) === 'COMPLETED'
+      ? `修复写回完成：关系 ${relationships} 条，时间线 ${timeline} 条。`
+      : task.message || '修复写回正在处理中...'
+  }
+
   if ((task.type || '') !== 'novel_import') {
     return task.error || task.message || '任务状态已更新'
   }
 
-  const result = task.result && typeof task.result === 'object'
-    ? task.result as Record<string, unknown>
-    : null
-  const chaptersCount = typeof result?.chapters_count === 'number' ? result.chapters_count : null
-  const warning = typeof result?.analysis_warning === 'string' && result.analysis_warning.trim().length > 0
-    ? result.analysis_warning.trim()
-    : null
+  const result = parseNovelImportTaskResult(task.result)
+  const chaptersCount = result?.chapters_count ?? null
+  const warning = result?.analysis_warning?.trim() || null
+  const stageSummary = formatNovelImportStageSummary(result)
 
   if (normalizeTaskStatus(task.status) === 'COMPLETED') {
-    const base = chaptersCount !== null ? `导入完成，已写入 ${chaptersCount} 个章节。` : '导入完成。'
-    return warning ? `${base} ${warning}` : base
+    const isPartial = result?.analysis_status && result.analysis_status !== 'completed'
+    const base = isPartial
+      ? '导入完成，但分析未完全完成。'
+      : chaptersCount !== null
+        ? `导入完成，已写入 ${chaptersCount} 个章节。`
+        : '导入完成。'
+    return [base, stageSummary, warning].filter(Boolean).join(' ')
   }
 
   if (normalizeTaskStatus(task.status) === 'FAILED') {
@@ -87,12 +143,14 @@ function getTaskSummary(task: {
 
 export const TaskCenter = () => {
   const { activeTasks, updateTask, removeTask, activeConversationId, currentSessionId } = useAppStore()
+  const pathname = usePathname()
   const tasks = Object.values(activeTasks)
 
   const timers = useRef<Record<string, NodeJS.Timeout>>({})
   const notifiedTaskStates = useRef<Record<string, string>>(loadNotifiedTaskStates())
   const [showTaskCenter, setShowTaskCenter] = useState(() => loadProjectPreferences(currentSessionId).show_task_center)
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null)
+  const [applyingRepairTaskId, setApplyingRepairTaskId] = useState<string | null>(null)
 
   const clearAllTimers = useCallback(() => {
     Object.keys(timers.current).forEach((id) => {
@@ -199,7 +257,7 @@ export const TaskCenter = () => {
   }, [clearAllTimers])
 
   useEffect(() => {
-    if (!showTaskCenter || !activeConversationId) {
+    if (!showTaskCenter || !activeConversationId || pathname === '/login') {
       return
     }
 
@@ -210,6 +268,26 @@ export const TaskCenter = () => {
           const store = useAppStore.getState()
           const normalizedStatus = normalizeTaskStatus(remoteTask.status)
           const existing = store.activeTasks[remoteTask.id]
+
+          if (TERMINAL_STATUSES.has(normalizedStatus)) {
+            if (notifiedTaskStates.current[remoteTask.id] !== normalizedStatus) {
+              notifiedTaskStates.current[remoteTask.id] = normalizedStatus
+              persistNotifiedTaskStates(notifiedTaskStates.current)
+              emitTaskLifecycleEvent({
+                id: remoteTask.id,
+                type: remoteTask.type,
+                status: normalizedStatus as 'COMPLETED' | 'FAILED' | 'CANCELLED',
+                result: remoteTask.result,
+                error: remoteTask.error,
+                message: remoteTask.message,
+                parameters: remoteTask.parameters,
+              })
+            }
+            if (existing) {
+              store.removeTask(remoteTask.id)
+            }
+            return
+          }
 
           if (!existing) {
             store.addTask({
@@ -260,7 +338,7 @@ export const TaskCenter = () => {
     }
 
     void recoverTasks()
-  }, [activeConversationId, showTaskCenter])
+  }, [activeConversationId, pathname, showTaskCenter])
 
   if (!showTaskCenter || tasks.length === 0) {
     return null
@@ -298,12 +376,65 @@ export const TaskCenter = () => {
     }
   }
 
+  const handleApplyRepairPreview = async (task: { id: string; type?: string; result?: unknown; parameters?: Record<string, unknown> }) => {
+    const previewResult = task.result && typeof task.result === 'object'
+      ? (task.result as Record<string, unknown>)
+      : null
+    if (!previewResult) {
+      return
+    }
+
+    setApplyingRepairTaskId(task.id)
+    try {
+      const sessionId =
+        typeof task.parameters?.session_id === 'string'
+          ? task.parameters.session_id
+          : typeof previewResult.session_id === 'string'
+            ? previewResult.session_id
+            : currentSessionId || undefined
+      const parentId =
+        typeof task.parameters?.parent_id === 'string'
+          ? task.parameters.parent_id
+          : typeof previewResult.parent_id === 'string'
+            ? previewResult.parent_id
+            : undefined
+      const response = await taskService.submitTask('import_repair_apply', {
+        session_id: sessionId,
+        parent_id: parentId || null,
+        preview_task_id: task.id,
+        preview_result: previewResult,
+      })
+      if (!response.success || !response.task_id) {
+        throw new Error(response.message || '修复写回任务提交失败')
+      }
+      useAppStore.getState().addTask({
+        id: response.task_id,
+        type: 'import_repair_apply',
+        status: 'PENDING',
+        progress: 0,
+        message: response.message || '修复写回任务已提交',
+        result: {
+          session_id: sessionId,
+          parent_id: parentId || null,
+        },
+        created_at: new Date().toISOString(),
+      })
+    } catch (error) {
+      updateTask(task.id, {
+        error: error instanceof Error ? error.message : '修复写回任务提交失败',
+      })
+    } finally {
+      setApplyingRepairTaskId(null)
+    }
+  }
+
   return (
     <div className="fixed bottom-6 right-6 z-[60] flex w-full max-w-xs flex-col gap-3 animate-in slide-in-from-right-5 duration-300">
       {tasks.map((task) => {
         const status = normalizeTaskStatus(task.status)
         const isCompleted = status === 'COMPLETED'
         const isFailed = status === 'FAILED'
+        const canApplyRepairPreview = isCompleted && REPAIR_PREVIEW_TASK_TYPES.has(task.type || '')
 
         return (
           <Card
@@ -350,7 +481,7 @@ export const TaskCenter = () => {
               <div className="space-y-2">
                 <div className="flex items-end justify-between">
                   <p className="mr-2 flex-1 line-clamp-2 text-xs font-medium text-foreground">
-                    {task.message || 'Preparing task...'}
+                    {getTaskSummary(task)}
                   </p>
                   <span className="text-xs font-bold text-primary">
                     {Math.round((task.progress || 0) * 100)}%
@@ -392,6 +523,19 @@ export const TaskCenter = () => {
                     <CheckCircle2 className="h-3 w-3" />
                     {getTaskSummary(task)}
                   </div>
+                ) : null}
+
+                {canApplyRepairPreview ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleApplyRepairPreview(task)
+                    }}
+                    disabled={applyingRepairTaskId === task.id}
+                    className="mt-2 inline-flex items-center rounded-md border border-green-500/30 bg-green-500/10 px-2 py-1 text-[10px] font-semibold text-green-700 transition hover:bg-green-500/20 disabled:cursor-not-allowed disabled:opacity-60 dark:text-green-300"
+                  >
+                    {applyingRepairTaskId === task.id ? 'Submitting...' : 'Confirm writeback'}
+                  </button>
                 ) : null}
               </div>
             </CardContent>

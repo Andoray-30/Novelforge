@@ -13,7 +13,7 @@ class RegexBasedChapterDetector(ChapterDetector):
         # 预编译章节标题的正则表达式模式
         self.chapter_patterns = [
             # 中文数字章节（第X章、第X节等）
-            re.compile(r'(第[一二三四五六七八九十百千万零\d]+(?:章|节|卷|集|部|篇))\s*(.+?)(?=\n|$)', re.IGNORECASE),
+            re.compile(r'(第[一二三四五六七八九十百千万零\d]+(?:章|节|卷|集|部|篇))\s*(.*?)(?=\n|$)', re.IGNORECASE),
             
             # 阿拉伯数字章节
             re.compile(r'(Chapter|Ch\.)\s+(\d+|\w+)\s*(.+?)(?=\n|$)', re.IGNORECASE),
@@ -84,56 +84,58 @@ class RegexBasedChapterDetector(ChapterDetector):
         """
         chapters = []
         
-        # 用于跟踪已处理的文本位置，避免重复
+        positions = []
         processed_positions = set()
-        
+
         for pattern in self.chapter_patterns:
             for match in pattern.finditer(text):
                 start_pos = match.start()
                 end_pos = match.end()
-                
-                # 避免重复处理相同位置
-                if any(abs(start_pos - pos) < 100 for pos in processed_positions):
+
+                if any(abs(start_pos - pos) < 2 for pos in processed_positions):
                     continue
-                
-                # 获取章节标题
+
                 groups = match.groups()
-                
-                # 根据不同模式提取标题信息
-                if len(groups) >= 2 and groups[0] and groups[1]:
+
+                if len(groups) >= 2 and groups[0]:
                     title_part1 = groups[0].strip()
-                    title_part2 = groups[1].strip()
+                    title_part2 = groups[1].strip() if groups[1] else ""
                     title = f"{title_part1} {title_part2}".strip()
                 elif groups and groups[0]:
                     title = groups[0].strip()
                 else:
                     continue
-                
-                # 验证章节标题的合理性
+
                 if not self._is_valid_chapter_title(title):
                     continue
-                
-                # 确定章节内容的起始位置
-                content_start = end_pos
-                
-                # 确定章节内容的结束位置（到下一个章节标题或文本末尾）
-                next_chapter_pos = self._find_next_chapter_position(text, end_pos)
-                content_end = next_chapter_pos if next_chapter_pos != -1 else len(text)
-                
-                # 提取章节内容
-                content = text[content_start:content_end].strip()
-                
-                # 创建章节对象
-                chapter = Chapter(
+
+                if start_pos > 0:
+                    line_start = text.rfind('\n', 0, start_pos) + 1
+                    if text[line_start:start_pos].strip():
+                        continue
+                    previous_line_start = text.rfind('\n', 0, max(line_start - 1, 0)) + 1
+                    previous_line = text[previous_line_start:line_start].strip()
+                    if previous_line and '。' in previous_line:
+                        continue
+
+                positions.append((start_pos, end_pos, title))
+                processed_positions.add(start_pos)
+
+        positions.sort(key=lambda item: item[0])
+        for index, (start_pos, end_pos, title) in enumerate(positions):
+            next_start = positions[index + 1][0] if index + 1 < len(positions) else len(text)
+            content = text[end_pos:next_start].strip()
+            if not content and index + 1 < len(positions):
+                continue
+            chapters.append(
+                Chapter(
                     title=title,
                     content=content,
                     start_position=start_pos,
-                    end_position=content_end
+                    end_position=next_start,
                 )
-                
-                chapters.append(chapter)
-                processed_positions.add(start_pos)
-        
+            )
+
         return chapters
     
     def _detect_implicit_chapters(self, text: str) -> List[Chapter]:
@@ -413,9 +415,12 @@ class EnhancedChapterDetector(RegexBasedChapterDetector):
         """
         对检测到的章节进行后处理，提升质量
         """
-        if len(chapters) <= 1:
+        if len(chapters) == 1:
+            only_chapter = chapters[0]
+            if len(only_chapter.content.strip()) < 10 and len(text.strip()) > len(only_chapter.content.strip()):
+                return []
             return chapters
-        
+
         processed_chapters = []
         i = 0
         
@@ -424,8 +429,12 @@ class EnhancedChapterDetector(RegexBasedChapterDetector):
             
             # 检查当前章节是否过短（可能是标题段落）
             if len(current_chapter.content.strip()) < 10 and i + 1 < len(chapters):
-                # 合并到下一章节
                 next_chapter = chapters[i + 1]
+                if current_chapter.end_position <= next_chapter.start_position:
+                    processed_chapters.append(current_chapter)
+                    i += 1
+                    continue
+                # 合并到下一章节
                 merged_content = (current_chapter.content + '\n\n' + next_chapter.content).strip()
                 merged_chapter = Chapter(
                     title=current_chapter.title,

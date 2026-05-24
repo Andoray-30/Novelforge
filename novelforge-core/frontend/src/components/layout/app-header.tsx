@@ -1,9 +1,14 @@
 'use client';
 
+import * as React from 'react';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import { BookOpen, FolderKanban, Menu, Plus } from 'lucide-react';
+import { BookOpen, FolderKanban, Library, LogOut, Menu, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useAppStore } from '@/lib/hooks/use-app-store';
+import { contentService } from '@/lib/api/novelforge-api';
+import { authService } from '@/lib/api/novelforge-api';
+import type { Novel } from '@/types';
 
 type ProjectOption = {
   id: string;
@@ -37,6 +42,34 @@ export function AppHeader({
   showMenuButton = true,
   actions,
 }: AppHeaderProps) {
+  const selectedNovelId = useAppStore((s) => s.selectedNovelId);
+  const setSelectedNovelId = useAppStore((s) => s.setSelectedNovelId);
+  const [novels, setNovels] = React.useState<Novel[]>([]);
+
+  React.useEffect(() => {
+    if (!currentSessionId) {
+      setNovels([]);
+      return;
+    }
+    let cancelled = false;
+    contentService.getNovels(currentSessionId).then((res) => {
+      if (!cancelled) {
+        setNovels(res.novels);
+        if (res.novels.length === 1 && !selectedNovelId) {
+          setSelectedNovelId(res.novels[0].id);
+        }
+      }
+    }).catch(() => {
+      if (!cancelled) setNovels([]);
+    });
+    return () => { cancelled = true; };
+  }, [currentSessionId, setSelectedNovelId, selectedNovelId]);
+
+  const novelOptions = React.useMemo(() => {
+    const all = [{ id: '', title: '全部小说' }];
+    return [...all, ...novels];
+  }, [novels]);
+
   return (
     <header
       className={cn(
@@ -119,6 +152,27 @@ export function AppHeader({
             </div>
           )}
 
+          {novels.length > 0 ? (
+            <div className="hidden items-center gap-2 rounded-2xl border border-violet-500/20 bg-violet-500/10 px-2 py-1.5 text-xs text-violet-100 md:flex">
+              <Library className="ml-1 h-4 w-4 flex-shrink-0" />
+              <select
+                value={selectedNovelId ?? ''}
+                onChange={(event) => {
+                  const val = event.target.value;
+                  setSelectedNovelId(val || null);
+                }}
+                className="max-w-48 truncate bg-transparent text-xs font-medium text-violet-50 outline-none"
+                aria-label="切换当前小说"
+              >
+                {novelOptions.map((novel) => (
+                  <option key={novel.id} value={novel.id} className="bg-zinc-950 text-zinc-100">
+                    {novel.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
+
           {actions}
 
           <Link
@@ -127,6 +181,18 @@ export function AppHeader({
           >
             设置
           </Link>
+          <button
+            type="button"
+            onClick={async () => {
+              await authService.logout();
+              window.location.assign('/login');
+            }}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/5 text-zinc-300 transition-colors hover:bg-white/10 hover:text-white"
+            aria-label="退出登录"
+            title="退出登录"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
         </div>
       </div>
     </header>

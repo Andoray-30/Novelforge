@@ -3,7 +3,7 @@ FastAPI Web API for NovelForge
 鎻愪緵AI瑙勫垝銆佽鑹叉彁鍙栥€佷笘鐣屾瀯寤虹瓑Web API鎺ュ彛
 """
 
-from fastapi import FastAPI, HTTPException, Query, status, File, UploadFile, Form
+from fastapi import FastAPI, HTTPException, Query, status, File, UploadFile, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -11,7 +11,15 @@ from typing import Any, Dict, List, Optional, Literal, Set, Tuple
 from datetime import datetime
 import uuid
 import json
+import base64
+import hashlib
+import hmac
+import html
+import secrets
+import time
 from enum import Enum
+from pathlib import Path
+from contextlib import asynccontextmanager
 
 from .types import (
     NovelType,
@@ -30,6 +38,7 @@ from .types import (
     ErrorResponse,
     ChatRequest,
     ChatResponse,
+    StartConversationRequest,
     ExtractionRequest,
     Message,
     Conversation,
@@ -82,6 +91,93 @@ def _use_content_database(storage_type: Optional[str]) -> bool:
 config = Config.load()
 ai_service = AIService(config)
 ai_planning_service = get_ai_planning_service(ai_service)
+
+SESSION_COOKIE_NAME = "novelforge_session"
+SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
+CHAT_STORAGE_TYPE = "file"
+
+
+class AuthLoginRequest(BaseModel):
+    password: str = Field(..., min_length=1)
+
+
+def _auth_is_enabled() -> bool:
+    return bool(getattr(config, "auth_required", False))
+
+
+def _session_secret() -> str:
+    return getattr(config, "session_secret", None) or "novelforge-local-dev-session-secret"
+
+
+def _sign_session_payload(payload: str) -> str:
+    return hmac.new(_session_secret().encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _create_session_token() -> str:
+    payload = json.dumps(
+        {"sub": "admin", "iat": int(time.time()), "nonce": secrets.token_urlsafe(16)},
+        separators=(",", ":"),
+    )
+    encoded = base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii").rstrip("=")
+    return f"{encoded}.{_sign_session_payload(encoded)}"
+
+
+def _decode_session_token(token: str) -> Optional[Dict[str, Any]]:
+    if not token or "." not in token:
+        return None
+    encoded, signature = token.split(".", 1)
+    if not hmac.compare_digest(signature, _sign_session_payload(encoded)):
+        return None
+    padded = encoded + "=" * (-len(encoded) % 4)
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict) or payload.get("sub") != "admin":
+        return None
+    issued_at = int(payload.get("iat") or 0)
+    if issued_at <= 0 or int(time.time()) - issued_at > SESSION_MAX_AGE_SECONDS:
+        return None
+    return payload
+
+
+def _request_is_authenticated(request: Request) -> bool:
+    if not _auth_is_enabled():
+        return True
+    return _decode_session_token(request.cookies.get(SESSION_COOKIE_NAME, "")) is not None
+
+
+def _is_public_path(path: str) -> bool:
+    return (
+        path == "/"
+        or path == "/health"
+        or path.startswith("/api/auth/")
+    )
+
+
+def _validate_public_deployment_config() -> None:
+    if not getattr(config, "public_deployment", False):
+        return
+
+    missing = []
+    if not getattr(config, "admin_password", None):
+        missing.append("NOVELFORGE_ADMIN_PASSWORD")
+    if not getattr(config, "session_secret", None):
+        missing.append("NOVELFORGE_SESSION_SECRET")
+    if not getattr(config, "api_key", None):
+        missing.append("OPENAI_API_KEY")
+    if getattr(config, "storage_type", "") != "content_db":
+        missing.append("STORAGE_TYPE=content_db")
+    if not getattr(config, "use_content_database", False):
+        missing.append("USE_CONTENT_DATABASE=true")
+    if missing:
+        raise RuntimeError("公开部署配置不完整: " + ", ".join(missing))
+
+    data_dir = Path(config.data_dir)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    probe = data_dir / ".novelforge_write_probe"
+    probe.write_text("ok", encoding="utf-8")
+    probe.unlink(missing_ok=True)
 
 # 鍒涘缓鎻愬彇鍣ㄥ崗璋冨櫒
 extractor_orchestrator = UnifiedExtractor(
@@ -166,6 +262,46 @@ def _topology_payload(item: ContentItem) -> Dict[str, Any]:
     return item.extracted_data if isinstance(item.extracted_data, dict) else {}
 
 
+def _content_type_value(value: object) -> str:
+    if hasattr(value, "value"):
+        return str(getattr(value, "value"))
+    return str(value or "")
+
+
+def _clean_title(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    return html.unescape(value).strip()
+
+
+def _normalize_relationship_type(value: object) -> str:
+    raw = str(value or "other").strip()
+    if "." in raw:
+        raw = raw.rsplit(".", 1)[-1]
+    key = raw.lower().replace("relationshiptype", "").strip("._- ")
+    mapping = {
+        "friend": "friendship",
+        "friendship": "friendship",
+        "family": "family",
+        "lover": "romantic",
+        "romantic": "romantic",
+        "enemy": "conflict",
+        "conflict": "conflict",
+        "rival": "conflict",
+        "mentor": "mentorship",
+        "mentorship": "mentorship",
+        "colleague": "professional",
+        "professional": "professional",
+        "ally": "alliance",
+        "alliance": "alliance",
+    }
+    return mapping.get(key, key if key in {"family", "friendship", "romantic", "professional", "conflict", "alliance", "mentorship"} else "other")
+
+
+def _as_string(value: object) -> Optional[str]:
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
 def _as_string_list(value: object) -> List[str]:
     if isinstance(value, str):
         return [value.strip()] if value.strip() else []
@@ -177,6 +313,30 @@ def _as_string_list(value: object) -> List[str]:
         if isinstance(item, str) and item.strip():
             results.append(item.strip())
     return results
+
+
+def _unique_strings(values: List[object]) -> List[str]:
+    seen: Set[str] = set()
+    results: List[str] = []
+    for value in values:
+        if isinstance(value, str):
+            cleaned = value.strip()
+            key = cleaned.lower()
+            if cleaned and key not in seen:
+                seen.add(key)
+                results.append(cleaned)
+    return results
+
+
+def _first_nonempty(values: List[object]) -> Optional[str]:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, list):
+            joined = "；".join(item.strip() for item in value if isinstance(item, str) and item.strip())
+            if joined:
+                return joined
+    return None
 
 
 def _extract_topology_lookup_keys(item: ContentItem) -> List[str]:
@@ -275,9 +435,62 @@ def _collect_relation_references(item: ContentItem) -> List[Tuple[str, str]]:
     return references
 
 
+def _world_fact_title(value: object) -> Optional[str]:
+    if isinstance(value, str):
+        return value.strip()[:80] or None
+    if isinstance(value, dict):
+        for key in ("name", "title", "location", "organization", "rule", "concept", "summary"):
+            candidate = _as_string(value.get(key))
+            if candidate:
+                return candidate[:80]
+        description = _as_string(value.get("description") or value.get("content"))
+        if description:
+            return description[:80]
+    return None
+
+
+def _build_world_semantic_nodes(world_id: str, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    facts: List[Tuple[str, object]] = []
+    for fact_type in ("locations", "rules", "cultures", "organizations", "history", "themes", "concepts"):
+        value = payload.get(fact_type)
+        if isinstance(value, list):
+            facts.extend((fact_type, item) for item in value[:20])
+        elif isinstance(value, str) and value.strip():
+            facts.append((fact_type, value))
+
+    nodes: List[Dict[str, Any]] = []
+    seen: Set[str] = set()
+    for index, (fact_type, fact) in enumerate(facts, start=1):
+        title = _world_fact_title(fact)
+        if not title:
+            continue
+        key = _normalize_topology_key(f"{fact_type}:{title}")
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        nodes.append({
+            "id": f"{world_id}::world_fact::{fact_type}::{index}",
+            "type": f"world_{fact_type.rstrip('s')}",
+            "title": title,
+            "metadata": {
+                "parent_id": world_id,
+                "world_fact_type": fact_type,
+                "importance": "medium",
+            },
+        })
+    return nodes
+
+
 def _resolve_runtime_ai_service(openai_config: Optional[dict] = None) -> AIService:
     if not openai_config:
         return ai_service
+
+    ai_mode = openai_config.get("ai_mode")
+    if not isinstance(ai_mode, str) or ai_mode not in {"fast", "pro"}:
+        ai_mode = None
+
+    if not getattr(config, "allow_runtime_openai_overrides", True):
+        return ai_service.with_overrides(ai_mode=ai_mode) if ai_mode else ai_service
 
     api_key = openai_config.get("api_key")
     base_url = openai_config.get("base_url")
@@ -286,19 +499,24 @@ def _resolve_runtime_ai_service(openai_config: Optional[dict] = None) -> AIServi
     if not isinstance(strict_model, bool):
         strict_model = None
 
-    if not api_key and not base_url and not model:
+    if not api_key and not base_url and not model and not ai_mode:
         return ai_service
 
     return ai_service.with_overrides(
         api_key=api_key,
         base_url=base_url,
         model=model,
+        ai_mode=ai_mode,
         strict_model=strict_model,
     )
 
 
 def _build_chat_system_prompt(context: Optional[Dict[str, Any]] = None) -> str:
-    prompt_parts = ["你是一位专业小说创作助手，请根据用户请求和当前项目上下文生成内容。"]
+    prompt_parts = [
+        "你是一位专业小说创作助手，请根据用户请求和当前项目上下文生成内容。",
+        "核心目标是把项目资产转化为真正可落地的创作成果：尤其是能写出动人、优美、有情绪张力的小说序章，并在创作过程中持续提供灵感、共情和情绪价值。",
+        "创作时优先使用已提取资产中的角色欲望、伤痕、关系张力、关键事件、世界观规则、意象和伏笔；如果这些信息不足，先通过资产请求补足上下文。",
+    ]
 
     if not context:
         return "\n".join(prompt_parts)
@@ -315,6 +533,49 @@ def _build_chat_system_prompt(context: Optional[Dict[str, Any]] = None) -> str:
     project_title = context.get("project_title")
     if isinstance(project_title, str) and project_title.strip():
         prompt_parts.append(f"当前项目标题：{project_title.strip()}")
+
+    prompt_parts.append(
+        "如果你继续创作前需要查看当前项目中的特定资产，请在回答末尾追加"
+        " <asset_request>{\"types\":[\"character\",\"world\"],\"query\":\"关键词\",\"reason\":\"需要这些资产的原因\",\"limit\":3}</asset_request>。"
+        " `types` 必须是合法 JSON 数组，只填写你当前真正需要的一种或多种资产类型。"
+        " 这个结构块只用于向系统请求候选资产，不要在正文里解释标签本身。"
+    )
+
+    prompt_parts.append(
+        "如果你建议新增或修改项目资产（角色、世界观、时间线、关系、大纲、章节/序章），请在回答末尾追加一个或多个"
+        " <save_asset>{\"type\":\"chapter\",\"title\":\"序章\",\"data\":{\"content\":\"...\"}}</save_asset> 标签。"
+        " `type` 必须是 character / world / timeline / relationship / outline / chapter 之一。"
+        " `title` 为资产标题，`data` 为该资产的结构化数据。"
+        " 用户确认后系统会将资产保存到项目内容库。"
+        " 如果要修改已有资产，请在 data 中包含原始 id 字段。"
+        " 不要在正文里解释标签本身，它们会被系统解析为可操作的保存建议。"
+    )
+
+    focused_assets = context.get("focused_assets")
+    if isinstance(focused_assets, list):
+        focused_lines: List[str] = []
+        for index, asset in enumerate(focused_assets[:8], start=1):
+            if not isinstance(asset, dict):
+                continue
+
+            asset_type = asset.get("type")
+            title = asset.get("title")
+            summary = asset.get("summary")
+
+            title_text = title.strip() if isinstance(title, str) and title.strip() else f"资产 {index}"
+            type_text = asset_type.strip() if isinstance(asset_type, str) and asset_type.strip() else "unknown"
+            summary_text = summary.strip() if isinstance(summary, str) and summary.strip() else "暂无摘要"
+
+            focused_lines.append(f"{index}. [{type_text}] {title_text}\n{summary_text}")
+
+        if focused_lines:
+            prompt_parts.append("本轮对话请优先参考以下当前聚焦资产，保持设定连续、关系一致、逻辑闭环：")
+            prompt_parts.extend(focused_lines)
+
+    focused_assets_summary = context.get("focused_assets_summary")
+    if isinstance(focused_assets_summary, str) and focused_assets_summary.strip() and not isinstance(focused_assets, list):
+        prompt_parts.append("本轮对话请优先参考以下当前聚焦资产，保持设定连续、关系一致、逻辑闭环：")
+        prompt_parts.append(focused_assets_summary.strip())
 
     return "\n".join(prompt_parts)
 
@@ -359,13 +620,178 @@ def _build_content_item_from_request(
         relations=request.relations if "relations" in request_fields_set else (existing_item.relations if existing_item else None),
     )
 
+
+def _is_decorative_chapter(item: ContentItem, payload: Dict[str, Any]) -> bool:
+    title = _clean_title(payload.get("chapter_title") or payload.get("title") or item.metadata.title).lower()
+    text = (item.content or _as_string(payload.get("content")) or "").strip()
+    decorative_tokens = ("插图", "illustration", "image", "封面")
+    return len(text) <= 80 and any(token in title for token in decorative_tokens)
+
+
+async def _next_chapter_index(parent_id: Optional[str], session_id: Optional[str]) -> int:
+    result = await content_manager.search_content(ContentSearchRequest(
+        content_type="chapter",
+        parent_id=parent_id,
+        session_id=session_id,
+        limit=500,
+        include_content=False,
+    ))
+    max_index = 0
+    for item in result.items:
+        payload = _topology_payload(item)
+        raw_index = payload.get("chapter_index") or payload.get("index")
+        try:
+            max_index = max(max_index, int(raw_index))
+        except (TypeError, ValueError):
+            continue
+    return max_index + 1
+
+
+async def _normalize_content_item_for_write(item: ContentItem) -> ContentItem:
+    payload: Dict[str, Any] = dict(item.extracted_data or {})
+    item.metadata.title = _clean_title(item.metadata.title) or item.metadata.title
+    content_type = _content_type_value(item.metadata.type)
+
+    if content_type == "chapter":
+        chapter_title = _clean_title(payload.get("chapter_title") or payload.get("title") or item.metadata.title)
+        if chapter_title:
+            item.metadata.title = chapter_title
+            payload["chapter_title"] = chapter_title
+        if not payload.get("chapter_index"):
+            payload["chapter_index"] = await _next_chapter_index(item.metadata.parent_id, item.metadata.session_id)
+        payload["is_decorative"] = bool(payload.get("is_decorative") or _is_decorative_chapter(item, payload))
+        if "generated_by_ai" not in payload and ("ai-generated" in item.metadata.tags or "ai-suggested" in item.metadata.tags):
+            payload["generated_by_ai"] = True
+
+    if content_type == "relationship":
+        rel_type = _normalize_relationship_type(payload.get("relationship_type") or payload.get("relationship"))
+        payload["relationship_type"] = rel_type
+        payload["relationship"] = rel_type
+        evolution = _unique_strings([
+            *(_as_string_list(payload.get("evolution"))),
+            payload.get("tension"),
+            payload.get("relationship_tension"),
+        ])
+        if evolution:
+            payload["evolution"] = evolution[:6]
+            payload.setdefault("relationship_tension", evolution[0])
+        if not payload.get("confidence"):
+            evidence_count = len(_as_string_list(payload.get("evidence")))
+            payload["confidence"] = "high" if evidence_count >= 3 else "medium" if evidence_count >= 1 else "low"
+        source = _as_string(payload.get("source"))
+        target = _as_string(payload.get("target") or payload.get("target_name"))
+        if source and target:
+            item.metadata.title = f"{source} -> {target} ({rel_type})"
+
+    if content_type == "character":
+        quality = payload.get("extraction_quality") if isinstance(payload.get("extraction_quality"), dict) else {}
+        creative = payload.get("creative_signals") if isinstance(payload.get("creative_signals"), dict) else {}
+        aliases = _unique_strings([
+            *(_as_string_list(payload.get("aliases"))),
+            *(_as_string_list(quality.get("aliases") if isinstance(quality, dict) else None)),
+            *(_as_string_list(payload.get("tags"))),
+        ])
+        if aliases:
+            payload["aliases"] = aliases
+        if "evidence" not in payload:
+            evidence = _as_string_list(payload.get("source_contexts")) or _as_string_list(quality.get("evidence") if isinstance(quality, dict) else None)
+            if evidence:
+                payload["evidence"] = evidence[:8]
+        if not payload.get("importance"):
+            role = str(payload.get("role") or "").lower().rsplit(".", 1)[-1]
+            payload["importance"] = "critical" if role == "protagonist" else "high" if role == "antagonist" else "medium" if role == "supporting" else "low"
+        desires = _unique_strings([
+            *(_as_string_list(payload.get("desires"))),
+            *(_as_string_list(payload.get("goals"))),
+            *(_as_string_list(creative.get("desires") if isinstance(creative, dict) else None)),
+            *(_as_string_list(payload.get("behavior_examples"))),
+        ])
+        wounds = _unique_strings([
+            *(_as_string_list(payload.get("fears"))),
+            *(_as_string_list(payload.get("wounds"))),
+            *(_as_string_list(creative.get("wounds") if isinstance(creative, dict) else None)),
+        ])
+        emotional_states = _unique_strings([
+            *(_as_string_list(payload.get("emotional_states"))),
+            *(_as_string_list(creative.get("emotional_states") if isinstance(creative, dict) else None)),
+        ])
+        voices = _unique_strings([
+            *(_as_string_list(payload.get("voices"))),
+            *(_as_string_list(creative.get("voices") if isinstance(creative, dict) else None)),
+            *(_as_string_list(payload.get("example_dialogues"))),
+        ])
+        if desires:
+            payload["desires"] = desires[:6]
+            payload.setdefault("goals", desires[:4])
+        if wounds:
+            payload["wounds"] = wounds[:6]
+            payload.setdefault("fears", wounds[:4])
+        conflict = _first_nonempty([
+            payload.get("conflict"),
+            payload.get("conflicts"),
+            wounds,
+            desires,
+        ])
+        if conflict:
+            payload["conflicts"] = _unique_strings([payload.get("conflicts"), conflict])[:4]
+        tension = _first_nonempty([
+            payload.get("personality_tension"),
+            emotional_states,
+            voices,
+        ])
+        if tension:
+            payload["personality_tension"] = tension
+        arc = _first_nonempty([
+            payload.get("character_arc"),
+            f"从「{wounds[0]}」走向「{desires[0]}」" if wounds and desires else None,
+        ])
+        if arc:
+            payload["character_arc"] = arc
+        hooks = _unique_strings([
+            *(_as_string_list(payload.get("relationship_hooks"))),
+            *(_as_string_list(payload.get("relationships"))),
+        ])
+        if hooks:
+            payload["relationship_hooks"] = hooks[:6]
+        name = _as_string(payload.get("name")) or item.metadata.title
+        if any(separator in name for separator in ("与", "和", "+", "、")):
+            payload["suspected_merged_character"] = True
+        entity_hint = " ".join([str(payload.get("role_hint") or ""), str(payload.get("description") or ""), item.metadata.title]).lower()
+        if any(token in entity_hint for token in ("组织", "机构", "团体", "company", "organization")):
+            payload.setdefault("entity_type", "organization")
+        else:
+            payload.setdefault("entity_type", "person")
+
+    if content_type == "world":
+        semantic_nodes = _build_world_semantic_nodes(str(item.metadata.id), payload)
+        if semantic_nodes:
+            payload["semantic_nodes"] = [
+                {
+                    "id": node["id"],
+                    "type": node["type"],
+                    "title": node["title"],
+                    "world_fact_type": node.get("metadata", {}).get("world_fact_type"),
+                }
+                for node in semantic_nodes
+            ]
+
+    item.extracted_data = payload or item.extracted_data
+    return item
+
 # 鍒濆鍖朏astAPI搴旂敤
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    _validate_public_deployment_config()
+    yield
+
+
 app = FastAPI(
     title="NovelForge AI Planning API",
     description="AI-driven story planning and creative workflow API.",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 # CORS閰嶇疆
@@ -375,14 +801,29 @@ app.add_middleware(
         "http://localhost:3000",
         "http://localhost:3001",
         "http://localhost:3002",
+        "http://localhost:3010",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:3001",
         "http://127.0.0.1:3002",
+        "http://127.0.0.1:3010",
+        config.frontend_origin,
     ],  # 鍓嶇寮€鍙戞湇鍔″櫒
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def require_admin_session(request: Request, call_next):
+    if request.method == "OPTIONS" or _is_public_path(request.url.path):
+        return await call_next(request)
+    if not _request_is_authenticated(request):
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={"error": "未登录", "detail": "请先登录 NovelForge 管理员账号"},
+        )
+    return await call_next(request)
 
 # 鎸傝浇瀛愯矾鐢?
 app.include_router(text_processing_router, prefix="/api")
@@ -403,6 +844,53 @@ async def root():
 async def health_check():
     """鍋ュ悍妫€鏌?"""
     return {"status": "healthy", "timestamp": datetime.now()}
+
+
+@app.post("/api/auth/login")
+async def login(request: AuthLoginRequest):
+    """Single-admin login for public deployments."""
+    configured_password = getattr(config, "admin_password", None)
+    if _auth_is_enabled() and not configured_password:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="管理员密码未配置",
+        )
+    if configured_password and not secrets.compare_digest(request.password, configured_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="管理员密码错误",
+        )
+
+    response = JSONResponse({"authenticated": True, "mode": "admin"})
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        _create_session_token(),
+        max_age=SESSION_MAX_AGE_SECONDS,
+        httponly=True,
+        secure=bool(getattr(config, "public_deployment", False)),
+        samesite="lax",
+        path="/",
+    )
+    return response
+
+
+@app.post("/api/auth/logout")
+async def logout():
+    response = JSONResponse({"authenticated": False})
+    response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    return response
+
+
+@app.get("/api/auth/me")
+async def get_current_auth(request: Request):
+    authenticated = _request_is_authenticated(request)
+    return {
+        "authenticated": authenticated,
+        "auth_required": _auth_is_enabled(),
+        "mode": "admin" if authenticated else None,
+        "public_deployment": bool(getattr(config, "public_deployment", False)),
+        "runtime_openai_overrides_allowed": bool(getattr(config, "allow_runtime_openai_overrides", True)),
+    }
 
 # AI瑙勫垝鐩稿叧绔偣
 
@@ -711,16 +1199,22 @@ async def extract_relationships(request: ExtractionRequest):
 
 # AI瀵硅瘽鍒涗綔鐩稿叧绔偣
 @app.post("/api/chat/start-conversation", response_model=Conversation)
-async def start_conversation():
+async def start_conversation(request: Optional[StartConversationRequest] = None):
    """寮€濮嬫柊瀵硅瘽"""
    try:
+       title = (request.title.strip() if request and isinstance(request.title, str) else "") or "新创作项目"
+       metadata = request.metadata if request and isinstance(request.metadata, dict) else {}
        conversation = Conversation(
-           title="新创作对话",
+           title=title,
            messages=[],
-           metadata={"type": "novel_creation"}
+           metadata={"type": "novel_creation", **metadata}
        )
        # 保存到存储
-       saved = await storage_manager.save(f"conversation_{conversation.id}", conversation.model_dump())
+       saved = await storage_manager.save(
+           f"conversation_{conversation.id}",
+           conversation.model_dump(),
+           storage_type=CHAT_STORAGE_TYPE,
+       )
        if not saved:
            raise RuntimeError("瀵硅瘽淇濆瓨澶辫触")
        return conversation
@@ -744,12 +1238,16 @@ async def send_message(request: ChatRequest):
                metadata={"type": "novel_creation"},
            )
            conversation_id = conversation.id
-           saved = await storage_manager.save(f"conversation_{conversation_id}", conversation.model_dump())
+           saved = await storage_manager.save(
+               f"conversation_{conversation_id}",
+               conversation.model_dump(),
+               storage_type=CHAT_STORAGE_TYPE,
+           )
            if not saved:
                raise RuntimeError("对话初始化失败")
        else:
            # 鍔犺浇鐜版湁瀵硅瘽
-           loaded = await storage_manager.load(f"conversation_{conversation_id}")
+           loaded = await storage_manager.load(f"conversation_{conversation_id}", storage_type=CHAT_STORAGE_TYPE)
            if loaded:
                conversation = Conversation(**loaded)
            else:
@@ -782,7 +1280,11 @@ async def send_message(request: ChatRequest):
        conversation.updated_at = datetime.now()
        
        # 淇濆瓨鏇存柊鐨勫璇?
-       saved = await storage_manager.save(f"conversation_{conversation_id}", conversation.model_dump())
+       saved = await storage_manager.save(
+           f"conversation_{conversation_id}",
+           conversation.model_dump(),
+           storage_type=CHAT_STORAGE_TYPE,
+       )
        if not saved:
            raise RuntimeError("瀵硅瘽鏇存柊澶辫触")
        
@@ -814,7 +1316,7 @@ async def send_message(request: ChatRequest):
 async def get_conversation(conversation_id: str):
    """Get one conversation by id."""
    try:
-       loaded = await storage_manager.load(f"conversation_{conversation_id}")
+       loaded = await storage_manager.load(f"conversation_{conversation_id}", storage_type=CHAT_STORAGE_TYPE)
        if not loaded:
            raise HTTPException(
                status_code=status.HTTP_404_NOT_FOUND,
@@ -834,7 +1336,7 @@ async def get_conversation(conversation_id: str):
 async def send_chat_message_stream(request: ChatRequest):
     conversation_id = request.conversation_id or str(uuid.uuid4())
     runtime_ai_service = _resolve_runtime_ai_service(request.openai_config)
-    conversation = await storage_manager.load(f"conversation_{conversation_id}")
+    conversation = await storage_manager.load(f"conversation_{conversation_id}", storage_type=CHAT_STORAGE_TYPE)
 
     if not conversation:
         conversation = Conversation(id=conversation_id, title="新对话")
@@ -842,7 +1344,11 @@ async def send_chat_message_stream(request: ChatRequest):
     user_message = Message(role="user", content=request.message)
     conversation.messages.append(user_message)
     conversation.updated_at = datetime.now()
-    await storage_manager.save(f"conversation_{conversation_id}", conversation)
+    await storage_manager.save(
+        f"conversation_{conversation_id}",
+        conversation.model_dump(),
+        storage_type=CHAT_STORAGE_TYPE,
+    )
 
     async def event_generator():
         assistant_content = ""
@@ -865,25 +1371,37 @@ async def send_chat_message_stream(request: ChatRequest):
             assistant_message = Message(role="assistant", content=assistant_content)
             conversation.messages.append(assistant_message)
             conversation.updated_at = datetime.now()
-            await storage_manager.save(f"conversation_{conversation_id}", conversation)
+            await storage_manager.save(
+                f"conversation_{conversation_id}",
+                conversation.model_dump(),
+                storage_type=CHAT_STORAGE_TYPE,
+            )
 
             yield f"data: {json.dumps({'type': 'persisted', 'conversation_id': conversation_id, 'message_id': assistant_message.id}, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
         except Exception as exc:
             yield f"data: {json.dumps({'type': 'error', 'error': str(exc)}, ensure_ascii=False)}\n\n"
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/api/chat/conversations", response_model=List[Conversation])
 async def get_conversations():
    """鍒楀嚭鎵€鏈夊璇?"""
    try:
-       all_keys = await storage_manager.list_keys()
+       all_keys = await storage_manager.list_keys(storage_type=CHAT_STORAGE_TYPE)
        conversation_keys = [key for key in all_keys if key.startswith("conversation_")]
        conversations = []
        for key in conversation_keys:
-           loaded = await storage_manager.load(key)
+           loaded = await storage_manager.load(key, storage_type=CHAT_STORAGE_TYPE)
            if loaded:
                conversations.append(Conversation(**loaded))
        conversations.sort(key=lambda item: item.updated_at, reverse=True)
@@ -895,17 +1413,55 @@ async def get_conversations():
        )
 
 
+@app.delete("/api/chat/conversations/empty", response_model=dict)
+async def cleanup_empty_conversations():
+   """Delete conversations that have no messages and no content assets."""
+   try:
+       all_keys = await storage_manager.list_keys(storage_type=CHAT_STORAGE_TYPE)
+       conversation_keys = [key for key in all_keys if key.startswith("conversation_")]
+       deleted_ids: List[str] = []
+
+       for key in conversation_keys:
+           loaded = await storage_manager.load(key, storage_type=CHAT_STORAGE_TYPE)
+           if not loaded:
+               continue
+
+           conversation = Conversation(**loaded)
+           if conversation.messages:
+               continue
+
+           content_result = await content_manager.search_content(
+               ContentSearchRequest(session_id=conversation.id, limit=1)
+           )
+           if content_result.total > 0:
+               continue
+
+           await storage_manager.delete(key, storage_type=CHAT_STORAGE_TYPE)
+           deleted_ids.append(conversation.id)
+
+       return {
+           "success": True,
+           "deleted": len(deleted_ids),
+           "deleted_ids": deleted_ids,
+       }
+   except Exception as e:
+       raise HTTPException(
+           status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+           detail=f"清理空项目失败: {str(e)}"
+       )
+
+
 @app.delete("/api/chat/conversations/{conversation_id}", response_model=dict)
 async def delete_conversation(conversation_id: str):
    """鍒犻櫎瀵硅瘽鍙婂叾鍏宠仈鍐呭"""
    try:
-       loaded = await storage_manager.load(f"conversation_{conversation_id}")
+       loaded = await storage_manager.load(f"conversation_{conversation_id}", storage_type=CHAT_STORAGE_TYPE)
        if not loaded:
            raise HTTPException(
                status_code=status.HTTP_404_NOT_FOUND,
                detail="对话不存在"
            )
-       await storage_manager.delete(f"conversation_{conversation_id}")
+       await storage_manager.delete(f"conversation_{conversation_id}", storage_type=CHAT_STORAGE_TYPE)
        await content_manager.delete_by_session(conversation_id)
        return {
            "success": True,
@@ -926,12 +1482,7 @@ async def list_openai_models(payload: Optional[dict] = None):
    try:
        payload = payload or {}
        openai_config = payload.get("openai_config") or {}
-       runtime_service = ai_service.with_overrides(
-           api_key=openai_config.get("api_key"),
-           base_url=openai_config.get("base_url"),
-           model=openai_config.get("model"),
-           strict_model=openai_config.get("strict_model") if isinstance(openai_config.get("strict_model"), bool) else None,
-       )
+       runtime_service = _resolve_runtime_ai_service(openai_config)
        models = await runtime_service.list_models()
        return {
            "models": models,
@@ -1153,6 +1704,7 @@ async def create_content(request: ContentCreateRequest):
    """鍒涘缓鍐呭"""
    try:
        content_item = _build_content_item_from_request(request)
+       content_item = await _normalize_content_item_for_write(content_item)
        content_id = await content_manager.create_content(content_item)
        return {
            "success": True,
@@ -1178,6 +1730,47 @@ async def search_content(request: ContentSearchRequest):
            detail=f"鍐呭鎼滅储澶辫触: {str(e)}"
        )
 
+
+
+@app.get("/api/content/novels/{session_id}")
+async def list_novels(session_id: str):
+    """获取指定项目下的所有小说根节点及其资产统计"""
+    try:
+        from ..content.models import ContentType
+        novel_req = ContentSearchRequest(
+            session_id=session_id,
+            content_type=ContentType("novel"),
+            limit=100,
+        )
+        novel_result = await content_manager.search_content(novel_req)
+
+        novels = []
+        for novel in novel_result.items:
+            stats = {}
+            for asset_type in ["chapter", "character", "world", "timeline", "relationship"]:
+                type_req = ContentSearchRequest(
+                    session_id=session_id,
+                    parent_id=novel.metadata.id,
+                    content_type=ContentType(asset_type),
+                    limit=1,
+                )
+                type_result = await content_manager.search_content(type_req)
+                stats[asset_type] = type_result.total
+
+            novels.append({
+                "id": novel.metadata.id,
+                "title": novel.metadata.title,
+                "created_at": novel.metadata.created_at.isoformat(),
+                "updated_at": novel.metadata.updated_at.isoformat(),
+                "stats": stats,
+            })
+
+        return {"novels": novels, "total": len(novels)}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取小说列表失败: {str(e)}"
+        )
 
 @app.post("/api/content/export")
 async def export_content(request: ContentExportRequest):
@@ -1234,28 +1827,38 @@ async def get_content_stats():
 
 
 @app.get("/api/content/topology/{session_id}")
-async def get_content_topology(session_id: str):
+async def get_content_topology(session_id: str, parent_id: Optional[str] = None):
     """
     鑾峰彇鍐呭鐨勬嫇鎵戠粨鏋勭粨鏋勶紝鐢ㄤ簬涓栫晫鏍戝彲瑙嗗寲
     """
     try:
-        search_req = ContentSearchRequest(session_id=session_id, limit=200)
+        search_req = ContentSearchRequest(session_id=session_id, parent_id=parent_id, limit=200, include_content=False)
         result = await content_manager.search_content(search_req)
+        items = list(result.items)
+        if parent_id and all(str(item.metadata.id) != parent_id for item in items):
+            parent_item = await content_manager.get_content(parent_id)
+            if parent_item and parent_item.metadata.session_id == session_id:
+                items.insert(0, parent_item.model_copy(update={"content": ""}))
 
         nodes = []
         edges = []
         seen_edges = set()
-        node_ids = {str(item.metadata.id) for item in result.items}
-        topology_lookup = _build_topology_lookup(result.items)
+        node_ids = {str(item.metadata.id) for item in items}
+        topology_lookup = _build_topology_lookup(items)
 
-        for item in result.items:
+        for item in items:
             node_id = str(item.metadata.id)
-            node_type = str(item.metadata.type)
+            node_type = _content_type_value(item.metadata.type)
             payload = _topology_payload(item)
             nodes.append({
                 "id": node_id,
                 "type": node_type,
-                "title": item.metadata.title,
+                "title": _clean_title(item.metadata.title) or item.metadata.title,
+                "metadata": {
+                    "parent_id": item.metadata.parent_id,
+                    "importance": payload.get("importance") or "medium",
+                    "is_decorative": payload.get("is_decorative") is True,
+                },
             })
 
             if item.metadata.parent_id:
@@ -1305,6 +1908,22 @@ async def get_content_topology(session_id: str):
                             "source": resolved_source,
                             "target": resolved_target,
                             "type": "relationship",
+                        })
+
+            if node_type == "world":
+                for semantic_node in _build_world_semantic_nodes(node_id, payload):
+                    semantic_id = semantic_node["id"]
+                    if semantic_id in node_ids:
+                        continue
+                    node_ids.add(semantic_id)
+                    nodes.append(semantic_node)
+                    edge_key = (node_id, semantic_id, "world_fact")
+                    if edge_key not in seen_edges:
+                        seen_edges.add(edge_key)
+                        edges.append({
+                            "source": node_id,
+                            "target": semantic_id,
+                            "type": "world_fact",
                         })
 
         return {
@@ -1376,6 +1995,7 @@ async def update_content(content_id: str, request: ContentUpdateRequest):
                detail="内容不存在"
            )
        content_item = _build_content_item_from_request(request, content_id=content_id, existing_item=existing)
+       content_item = await _normalize_content_item_for_write(content_item)
        success = await content_manager.update_content(content_id, content_item)
        if not success:
            raise HTTPException(
@@ -1512,6 +2132,27 @@ async def get_active_tasks_by_session(session_id: str):
         )
 
 
+@app.get("/api/scheduler/recent/{session_id}", response_model=List[dict])
+async def get_recent_tasks_by_session(
+    session_id: str,
+    limit: int = 10,
+    task_type: Optional[str] = None,
+):
+    """获取指定项目最近任务，包含已完成任务，用于恢复质量诊断。"""
+    try:
+        tasks = await ai_scheduler.get_recent_tasks_by_session(
+            session_id,
+            limit=limit,
+            task_type=task_type,
+        )
+        return [_serialize_scheduler_task(task) for task in tasks]
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取最近任务失败: {str(e)}"
+        )
+
+
     """鑾峰彇璋冨害鍣ㄧ粺璁′俊鎭?"""
     try:
         stats = ai_scheduler.get_queue_stats()
@@ -1578,10 +2219,6 @@ async def general_exception_handler(request, exc):
             "timestamp": datetime.now().isoformat()
         }
     )
-
-
-
-
 
 
 
