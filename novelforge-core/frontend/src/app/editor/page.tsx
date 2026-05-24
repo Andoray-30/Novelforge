@@ -3,7 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { contentService } from '@/lib/api';
 import { useAppStore } from '@/lib/hooks/use-app-store';
-import { buildContentCreateRequest, getContentAssetPayload, getContentAssetText, getContentAssetTitle } from '@/lib/content-contract';
+import { buildContentCreateRequest, getContentAssetPayload, getContentAssetText } from '@/lib/content-contract';
+import {
+  buildManualChapterPayload,
+  buildUpdatedChapterPayload,
+  getNextManualChapterIndex,
+  resolveChapterDirectoryMetadata,
+  sortChaptersByDirectory,
+} from '@/lib/chapter-metadata';
 import {
   formatNovelImportStageSummary,
   parseNovelImportTaskResult,
@@ -19,16 +26,6 @@ import { useSessions } from '@/lib/hooks/use-sessions';
 import { BookOpen, FilePlus2, FileText, RefreshCw, Save, Sparkles, Trash2 } from 'lucide-react';
 import type { ContentItem } from '@/types';
 
-function sortByUpdatedAt(items: ContentItem[]): ContentItem[] {
-  return [...items].sort((left, right) => right.metadata.updated_at.localeCompare(left.metadata.updated_at));
-}
-
-function getChapterIndex(item: ContentItem, fallbackIndex: number): number {
-  const payload = getContentAssetPayload(item);
-  const rawIndex = payload.chapter_index;
-  return typeof rawIndex === 'number' && Number.isFinite(rawIndex) ? rawIndex : fallbackIndex;
-}
-
 function syncChapterQueryParam(chapterId: string | null) {
   if (typeof window === 'undefined') {
     return;
@@ -41,16 +38,6 @@ function syncChapterQueryParam(chapterId: string | null) {
     url.searchParams.delete('chapterId');
   }
   window.history.replaceState({}, '', `${url.pathname}${url.search}`);
-}
-
-function buildEmptyChapterPayload(title: string, chapterIndex: number) {
-  return {
-    title,
-    chapter_title: title,
-    content: '',
-    chapter_index: chapterIndex,
-    source: 'editor_manual',
-  };
 }
 
 type LoadChaptersOptions = {
@@ -120,7 +107,7 @@ export default function NovelEditorPage() {
         limit: 200,
       });
 
-      const items = sortByUpdatedAt(result.items);
+      const items = sortChaptersByDirectory(result.items);
       setChapters(items);
 
       setSelectedChapterId((currentSelected) => {
@@ -170,7 +157,7 @@ export default function NovelEditorPage() {
     }
 
     const payload = getContentAssetPayload(selectedChapter);
-    setDraftTitle(getContentAssetTitle(selectedChapter, payload));
+    setDraftTitle(resolveChapterDirectoryMetadata(selectedChapter).displayTitle);
     setDraftContent(getContentAssetText(selectedChapter, payload));
     setSaveMessage(null);
   }, [selectedChapter]);
@@ -181,7 +168,7 @@ export default function NovelEditorPage() {
     }
 
     const payload = getContentAssetPayload(selectedChapter);
-    return draftTitle !== getContentAssetTitle(selectedChapter, payload) || draftContent !== getContentAssetText(selectedChapter, payload);
+    return draftTitle !== resolveChapterDirectoryMetadata(selectedChapter).displayTitle || draftContent !== getContentAssetText(selectedChapter, payload);
   }, [draftContent, draftTitle, selectedChapter]);
 
   useSessionTaskEvents({
@@ -247,13 +234,11 @@ export default function NovelEditorPage() {
 
     try {
       const nextTitle = draftTitle.trim() || selectedChapter.metadata.title || 'Untitled Chapter';
-      const payload = getContentAssetPayload(selectedChapter);
-      const updatedPayload = {
-        ...payload,
+      const updatedPayload = buildUpdatedChapterPayload({
+        item: selectedChapter,
         title: nextTitle,
-        chapter_title: nextTitle,
         content: draftContent,
-      };
+      });
 
       const request = buildContentCreateRequest({
         type: 'chapter',
@@ -316,15 +301,13 @@ export default function NovelEditorPage() {
         sessionId = createdSession.id;
       }
 
-      const nextChapterIndex = chapters.reduce((maxIndex, chapter, index) => {
-        return Math.max(maxIndex, getChapterIndex(chapter, index + 1));
-      }, 0) + 1;
+      const nextChapterIndex = getNextManualChapterIndex(chapters);
 
       const title = `第 ${nextChapterIndex} 章`;
       const request = buildContentCreateRequest({
         type: 'chapter',
         title,
-        data: buildEmptyChapterPayload(title, nextChapterIndex),
+        data: buildManualChapterPayload({ title, chapterIndex: nextChapterIndex }),
         content: '',
         sessionId,
         parentId: selectedNovelId || undefined,
@@ -335,7 +318,7 @@ export default function NovelEditorPage() {
       const createdChapter = await contentService.getById(created.content_id);
 
       setRequestedChapterId(createdChapter.metadata.id);
-      setChapters((current) => sortByUpdatedAt([createdChapter, ...current.filter((chapter) => chapter.metadata.id !== createdChapter.metadata.id)]));
+      setChapters((current) => sortChaptersByDirectory([createdChapter, ...current.filter((chapter) => chapter.metadata.id !== createdChapter.metadata.id)]));
       setSelectedChapterId(createdChapter.metadata.id);
       setSaveMessage('新章节已创建，现在可以立即开始写作。');
     } catch (createError) {
@@ -521,11 +504,10 @@ export default function NovelEditorPage() {
 
               <div className="space-y-3">
                 {chapters.map((chapter, index) => {
+                  const chapterMeta = resolveChapterDirectoryMetadata(chapter, index + 1);
                   const payload = getContentAssetPayload(chapter);
-                  const title = getContentAssetTitle(chapter, payload);
                   const preview = getContentAssetText(chapter, payload).slice(0, 90);
                   const isActive = chapter.metadata.id === selectedChapterId;
-                  const chapterIndex = getChapterIndex(chapter, index + 1);
 
                   return (
                     <button
@@ -534,16 +516,38 @@ export default function NovelEditorPage() {
                       onClick={() => handleSelectChapter(chapter.metadata.id)}
                       className={[
                         'w-full rounded-2xl border p-4 text-left transition-all',
+                        chapterMeta.isDecorative ? 'opacity-60' : '',
                         isActive
-                          ? 'border-amber-400/40 bg-amber-400/10 shadow-[0_0_20px_rgba(251,191,36,0.08)]'
-                          : 'border-slate-800 bg-slate-950/50 hover:border-slate-700 hover:bg-slate-900',
+                          ? chapterMeta.isDecorative
+                            ? 'border-amber-400/30 bg-slate-950/80 shadow-[0_0_20px_rgba(251,191,36,0.06)]'
+                            : 'border-amber-400/40 bg-amber-400/10 shadow-[0_0_20px_rgba(251,191,36,0.08)]'
+                          : chapterMeta.isDecorative
+                            ? 'border-dashed border-slate-800 bg-slate-950/30 hover:border-slate-700 hover:bg-slate-900/60'
+                            : 'border-slate-800 bg-slate-950/50 hover:border-slate-700 hover:bg-slate-900',
                       ].join(' ')}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Chapter {chapterIndex}</p>
-                          <h3 className="truncate font-semibold text-white">{title}</h3>
-                          <p className="mt-2 line-clamp-3 text-sm text-slate-500">{preview || 'No body content yet.'}</p>
+                          <p className="text-[11px] text-slate-500">{chapterMeta.structureLabel}</p>
+                          <h3 className={`truncate font-semibold ${chapterMeta.isDecorative ? 'text-slate-300' : 'text-white'}`}>
+                            {chapterMeta.displayTitle}
+                          </h3>
+                          {chapterMeta.isSplitSegment && chapterMeta.originalTitle !== chapterMeta.displayTitle ? (
+                            <p className="mt-1 truncate text-xs text-slate-600">源自：{chapterMeta.originalTitle}</p>
+                          ) : null}
+                          <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+                            <span className="rounded-full border border-slate-700 px-2 py-1 text-slate-300">{chapterMeta.sourceLabel}</span>
+                            <span className={`rounded-full border px-2 py-1 ${chapterMeta.isDecorative ? 'border-slate-700 text-slate-500' : 'border-slate-700 text-slate-300'}`}>
+                              {chapterMeta.roleLabel}
+                            </span>
+                            <span className="rounded-full border border-slate-700 px-2 py-1 text-slate-400">{chapterMeta.wordCount} 字</span>
+                            {chapterMeta.qualityFlagLabels.map((flag) => (
+                              <span key={flag} className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-amber-200">
+                                {flag}
+                              </span>
+                            ))}
+                          </div>
+                          <p className="mt-2 line-clamp-3 text-sm text-slate-500">{preview || '暂无正文内容。'}</p>
                         </div>
                         <Sparkles className={`mt-1 h-4 w-4 shrink-0 ${isActive ? 'text-amber-300' : 'text-slate-600'}`} />
                       </div>
