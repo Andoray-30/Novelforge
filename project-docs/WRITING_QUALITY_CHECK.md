@@ -125,7 +125,10 @@ Trace/save/editor result:
 - Parsed `save_asset`: yes.
 - Saved content id: `edadc25c-a113-4fc0-a638-f228511e0efa`.
 - Saved draft body length: 1415 chars.
-- Editor UI/browser reopen: attempted with the Browser plugin on `localhost`, `127.0.0.1`, `10.90.0.10`, and `lvh.me`; all local editor URLs were blocked by the browser runtime with `net::ERR_BLOCKED_BY_CLIENT`.
+- Editor UI/browser reopen: attempted with the Browser plugin on `localhost`, `127.0.0.1`, `10.90.0.10`, `lvh.me`, `127.0.0.1.sslip.io`, `localtest.me`, `novelforge.localhost`, and `0.0.0.0`.
+  - `localhost`, `127.0.0.1`, `10.90.0.10`, and `lvh.me` were blocked by the browser runtime with `net::ERR_BLOCKED_BY_CLIENT`.
+  - `127.0.0.1.sslip.io` returned `ERR_CONNECTION_REFUSED`.
+  - `localtest.me`, `novelforge.localhost`, and `0.0.0.0` were blocked by Browser Use URL policy after navigation resolved to a browser error data URL.
 - Editor data readiness: verified through `GET /api/content/{id}` using UTF-8 decoding. The saved draft title is `Goal8 序章候选 - 完整版`, and the saved body starts with `黑暗。那是连时间都会被冻结的、绝对的黑暗。`.
 
 Writing quality verdict for Goal 8:
