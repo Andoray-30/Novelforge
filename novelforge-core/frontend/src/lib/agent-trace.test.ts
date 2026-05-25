@@ -45,4 +45,57 @@ describe('agent trace normalization', () => {
       tool_calls: [],
     });
   });
+
+  it('normalizes relationship quality and repair suggestion trace fields', () => {
+    const trace = normalizeAgentTrace({
+      enabled: true,
+      plan_summary: 'used relationship context',
+      used_assets: [
+        { id: 'rel-enriched', type: 'relationship', title: 'A/B', relationship_enriched: true },
+      ],
+      retrieval_coverage: {
+        counts: { characters: 2, relationships: 1, world: 1, chapter_snippets: 1 },
+        issues: ['relationship weak'],
+      },
+      relationship_quality_report: {
+        total_relationships: 1,
+        tension_relationships: 0,
+        low_information_relationships: 1,
+        missing_plot_function_relationships: 1,
+        missing_signals: { emotional_tension: 1 },
+        status: 'thin',
+      },
+      relationship_repair_suggestions: [
+        {
+          relationship_id: 'rel-1',
+          title: 'A/B repair',
+          source: 'A',
+          target: 'B',
+          core: 'make the choice cost visible',
+          scene_potential: ['A hides the truth from B'],
+          missing_signals: ['emotional_tension'],
+          usable_signals: ['relationship_type'],
+          enriched_relationship_draft: { conflict: 'truth versus safety' },
+        },
+      ],
+    });
+
+    expect(trace?.used_assets[0]).toMatchObject({
+      id: 'rel-enriched',
+      relationship_enriched: true,
+    });
+    expect(trace?.retrieval_coverage?.counts.relationships).toBe(1);
+    expect(trace?.relationship_quality_report).toMatchObject({
+      total_relationships: 1,
+      low_information_relationships: 1,
+      missing_signals: { emotional_tension: 1 },
+    });
+    expect(trace?.relationship_repair_suggestions[0]).toMatchObject({
+      relationship_id: 'rel-1',
+      source: 'A',
+      target: 'B',
+      missing_signals: ['emotional_tension'],
+      enriched_relationship_draft: { conflict: 'truth versus safety' },
+    });
+  });
 });

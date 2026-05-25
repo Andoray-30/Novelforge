@@ -229,6 +229,66 @@ def test_thin_relationship_gets_repair_suggestion() -> None:
     assert "scene_potential" in item["repair_suggestion"]
 
 
+def test_enriched_relationships_are_prioritized_and_marked_in_trace() -> None:
+    manager, storage = build_manager()
+    run(
+        manager.create_content(
+            build_item(
+                "rel-thin",
+                title="A -> B",
+                content_type=ContentType.RELATIONSHIP,
+                content="old friends",
+                extracted_data={"source": "A", "target": "B", "relationship_type": "friendship"},
+            )
+        )
+    )
+    run(
+        manager.create_content(
+            build_item(
+                "rel-enriched",
+                title="A -> B enriched",
+                content_type=ContentType.RELATIONSHIP,
+                content=(
+                    "dependency: A needs B for safety. misunderstanding: B thinks A betrayed them. "
+                    "debt: A owes B a rescue. conflict: truth versus safety. "
+                    "emotional_tension: staying hurts and leaving hurts. plot_function: forces the prologue choice."
+                ),
+                extracted_data={
+                    "source": "A",
+                    "target": "B",
+                    "repair_status": "confirmed",
+                    "quality_flags": ["relationship_enriched"],
+                    "dependency": "A needs B for safety.",
+                    "misunderstanding": "B thinks A betrayed them.",
+                    "debt": "A owes B a rescue.",
+                    "conflict": "truth versus safety.",
+                    "emotional_tension": "staying hurts and leaving hurts.",
+                    "scene_potential": ["B forces A to choose."],
+                },
+            )
+        )
+    )
+    runtime = WritingAgentRuntime(manager, storage)
+    scope = AgentScope(session_id="session-a", selected_novel_id="novel-a")
+
+    observation = run(runtime.search_project_assets(scope, {"query": "", "types": ["relationship"], "limit": 2}))
+
+    assert observation.items[0]["id"] == "rel-enriched"
+    assert observation.items[0]["relationship_enriched"] is True
+    assert "repair_suggestion" not in observation.items[0]
+    assert observation.items[1]["id"] == "rel-thin"
+    assert "repair_suggestion" in observation.items[1]
+
+    trace = runtime._build_trace(
+        {"plan_summary": "test"},
+        [observation],
+        degraded=False,
+    )
+    assert trace["used_assets"][0]["relationship_enriched"] is True
+    assert trace["relationship_quality_report"]["tension_relationships"] >= 1
+    assert trace["relationship_repair_suggestions"][0]["relationship_id"] == "rel-thin"
+
+
 def test_relationship_repair_helper_uses_related_characters_and_chapter_snippets() -> None:
     manager, storage = build_manager()
     run(

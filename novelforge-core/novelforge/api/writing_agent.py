@@ -512,6 +512,7 @@ def _relationship_repair_suggestion(item: ContentItem, diagnostics: Dict[str, An
     core = f"{source} 与 {target} 的关系需要从“{available}”推进到可制造选择和代价的张力结构。"
     return {
         "type": "relationship_repair_suggestion",
+        "relationship_id": item.metadata.id,
         "title": f"{title} - 关系补强建议",
         "source": source,
         "target": target,
@@ -564,6 +565,16 @@ def _relationship_quality_report(relationship_assets: Sequence[Dict[str, Any]]) 
         "missing_signals": missing_signals,
         "status": "thin" if total and low_info_count >= max(1, total // 2) else ("empty" if total == 0 else "usable"),
     }
+
+
+def _is_enriched_relationship(item: ContentItem) -> bool:
+    if item.metadata.type != ContentType.RELATIONSHIP:
+        return False
+    payload = _payload(item)
+    flags = payload.get("quality_flags")
+    if isinstance(flags, list) and "relationship_enriched" in flags:
+        return True
+    return _as_str(payload.get("repair_status")) == "confirmed"
 
 
 def _extract_snippet(content: str, query: str, mode: str, limit: int = MAX_SNIPPET_CHARS) -> str:
@@ -1242,15 +1253,27 @@ class WritingAgentRuntime:
             )
             return list(result.items)
 
+        def sort_candidates(candidates: List[ContentItem]) -> List[ContentItem]:
+            if requested_types and ContentType.RELATIONSHIP not in requested_types:
+                return candidates
+            return sorted(
+                candidates,
+                key=lambda candidate: (
+                    0 if _is_enriched_relationship(candidate) else 1,
+                    candidate.metadata.updated_at or "",
+                ),
+            )
+
         candidates = await run_search(query)
         items: List[Dict[str, Any]] = []
-        for item in candidates:
+        for item in sort_candidates(candidates):
             if not _item_in_scope(item, scope):
                 continue
             if item.metadata.type == ContentType.CHAPTER and not include_ai_versions and _is_ai_draft_or_candidate(item):
                 continue
             text = _content_text(item) or json.dumps(_payload(item), ensure_ascii=False)
             item_type = _type_name(item.metadata.type)
+            enriched_relationship = _is_enriched_relationship(item)
             diagnostics = _creative_diagnostics(
                 item_type,
                 _diagnostic_source_text(item, text),
@@ -1258,7 +1281,9 @@ class WritingAgentRuntime:
             )
             repair_suggestion = (
                 _relationship_repair_suggestion(item, diagnostics)
-                if item_type == "relationship" and diagnostics.get("relationship_creative_readiness") != "strong"
+                if item_type == "relationship"
+                and not enriched_relationship
+                and diagnostics.get("relationship_creative_readiness") != "strong"
                 else None
             )
             items.append(
@@ -1269,6 +1294,7 @@ class WritingAgentRuntime:
                     "summary": _clip(text, MAX_ASSET_SUMMARY),
                     "creative_diagnostics": diagnostics,
                     "diagnostic_summary": diagnostics["summary"],
+                    **({"relationship_enriched": True} if enriched_relationship else {}),
                     **({"repair_suggestion": repair_suggestion} if repair_suggestion else {}),
                 }
             )
@@ -1276,13 +1302,14 @@ class WritingAgentRuntime:
                 break
 
         if not items and query:
-            for item in await run_search(""):
+            for item in sort_candidates(await run_search("")):
                 if not _item_in_scope(item, scope):
                     continue
                 if item.metadata.type == ContentType.CHAPTER and not include_ai_versions and _is_ai_draft_or_candidate(item):
                     continue
                 text = _content_text(item) or json.dumps(_payload(item), ensure_ascii=False)
                 item_type = _type_name(item.metadata.type)
+                enriched_relationship = _is_enriched_relationship(item)
                 diagnostics = _creative_diagnostics(
                     item_type,
                     _diagnostic_source_text(item, text),
@@ -1290,7 +1317,9 @@ class WritingAgentRuntime:
                 )
                 repair_suggestion = (
                     _relationship_repair_suggestion(item, diagnostics)
-                    if item_type == "relationship" and diagnostics.get("relationship_creative_readiness") != "strong"
+                    if item_type == "relationship"
+                    and not enriched_relationship
+                    and diagnostics.get("relationship_creative_readiness") != "strong"
                     else None
                 )
                 items.append(
@@ -1301,6 +1330,7 @@ class WritingAgentRuntime:
                         "summary": _clip(text, MAX_ASSET_SUMMARY),
                         "creative_diagnostics": diagnostics,
                         "diagnostic_summary": diagnostics["summary"],
+                        **({"relationship_enriched": True} if enriched_relationship else {}),
                         **({"repair_suggestion": repair_suggestion} if repair_suggestion else {}),
                     }
                 )
@@ -1324,6 +1354,7 @@ class WritingAgentRuntime:
         max_chars = min(max(int(args.get("max_chars") or MAX_DETAIL_CHARS), 120), MAX_DETAIL_CHARS)
         text = _content_text(item) or json.dumps(_payload(item), ensure_ascii=False)
         item_type = _type_name(item.metadata.type)
+        enriched_relationship = _is_enriched_relationship(item)
         diagnostics = _creative_diagnostics(
             item_type,
             _diagnostic_source_text(item, text),
@@ -1331,7 +1362,9 @@ class WritingAgentRuntime:
         )
         repair_suggestion = (
             _relationship_repair_suggestion(item, diagnostics)
-            if item_type == "relationship" and diagnostics.get("relationship_creative_readiness") != "strong"
+            if item_type == "relationship"
+            and not enriched_relationship
+            and diagnostics.get("relationship_creative_readiness") != "strong"
             else None
         )
         return ToolObservation(
@@ -1346,6 +1379,7 @@ class WritingAgentRuntime:
                     "summary": _clip(text, max_chars),
                     "creative_diagnostics": diagnostics,
                     "diagnostic_summary": diagnostics["summary"],
+                    **({"relationship_enriched": True} if enriched_relationship else {}),
                     **({"repair_suggestion": repair_suggestion} if repair_suggestion else {}),
                 }
             ],
@@ -1573,6 +1607,7 @@ class WritingAgentRuntime:
                             "type": item.get("type"),
                             "title": item.get("title"),
                             "creative_diagnostics": item.get("creative_diagnostics"),
+                            "relationship_enriched": item.get("relationship_enriched"),
                             "repair_suggestion": item.get("repair_suggestion"),
                         }
                     )

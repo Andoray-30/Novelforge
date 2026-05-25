@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   buildSaveAssetPreviewRows,
   getSaveAssetBlockingReason,
@@ -13,7 +13,7 @@ import {
   normalizeChapterSaveDestination,
   type ChapterSaveDestination,
 } from '@/lib/chapter-save-destinations';
-import type { AgentTrace } from '@/lib/agent-trace';
+import type { AgentRelationshipRepairSuggestion, AgentTrace } from '@/lib/agent-trace';
 import type { SaveAssetRequest } from '@/lib/chat-parser';
 
 export type MessageRole = 'user' | 'assistant' | 'system';
@@ -75,6 +75,8 @@ interface MessageBubbleProps {
   onRejectSaveAsset?: (messageId: string, requestIndex: number) => void;
   onChangeSaveAssetDestination?: (messageId: string, requestIndex: number, destination: ChapterSaveDestination) => void;
   onSelectSaveAssetTarget?: (messageId: string, requestIndex: number, targetId: string) => void;
+  onSaveRelationshipRepairDraft?: (messageId: string, suggestionIndex: number) => void;
+  onUpdateRelationshipRepair?: (messageId: string, suggestionIndex: number) => void;
   onRetryMessage?: (messageId: string, retryText: string) => void;
 }
 
@@ -182,9 +184,137 @@ function getAgentModeLabel(mode?: string): string {
   return '上下文读取';
 }
 
-function AgentTracePanel({ trace }: { trace: AgentTrace }) {
+function topMissingSignals(missingSignals?: Record<string, number>): string {
+  const entries = Object.entries(missingSignals ?? {})
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+  return entries.length > 0 ? entries.map(([key, count]) => `${key}×${count}`).join('、') : '暂无';
+}
+
+function RepairSuggestionCard({
+  suggestion,
+  index,
+  messageId,
+  onSaveRelationshipRepairDraft,
+  onUpdateRelationshipRepair,
+}: {
+  suggestion: AgentRelationshipRepairSuggestion;
+  index: number;
+  messageId: string;
+  onSaveRelationshipRepairDraft?: (messageId: string, suggestionIndex: number) => void;
+  onUpdateRelationshipRepair?: (messageId: string, suggestionIndex: number) => void;
+}) {
+  const [skipped, setSkipped] = useState(false);
+  if (skipped) {
+    return null;
+  }
+
+  return (
+    <div style={{
+      display: 'grid',
+      gap: 8,
+      borderRadius: 8,
+      border: '1px solid rgba(245, 158, 11, 0.26)',
+      background: 'rgba(245, 158, 11, 0.08)',
+      padding: '10px 12px',
+    }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ color: '#fcd34d', fontWeight: 700, fontSize: 12 }}>
+            {suggestion.title || `${suggestion.source ?? '角色A'} -> ${suggestion.target ?? '角色B'}`}
+          </div>
+          <div style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 2 }}>
+            {suggestion.source || '角色A'} / {suggestion.target || '角色B'}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+          <button
+            type="button"
+            onClick={() => onSaveRelationshipRepairDraft?.(messageId, index)}
+            style={{
+              borderRadius: 6,
+              border: '1px solid rgba(16, 185, 129, 0.4)',
+              background: 'rgba(16, 185, 129, 0.14)',
+              color: '#86efac',
+              padding: '4px 8px',
+              fontSize: 11,
+              cursor: onSaveRelationshipRepairDraft ? 'pointer' : 'default',
+            }}
+          >
+            保存草稿
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (window.confirm('确认更新原关系资产？系统会保留 previous_snapshot，可回溯旧内容。')) {
+                onUpdateRelationshipRepair?.(messageId, index);
+              }
+            }}
+            disabled={!suggestion.relationship_id}
+            title={suggestion.relationship_id ? undefined : '缺少原关系 ID，无法更新原资产'}
+            style={{
+              borderRadius: 6,
+              border: '1px solid rgba(245, 158, 11, 0.38)',
+              background: 'rgba(245, 158, 11, 0.12)',
+              color: '#fcd34d',
+              padding: '4px 8px',
+              fontSize: 11,
+              cursor: suggestion.relationship_id && onUpdateRelationshipRepair ? 'pointer' : 'not-allowed',
+              opacity: suggestion.relationship_id ? 1 : 0.55,
+            }}
+          >
+            更新原关系
+          </button>
+          <button
+            type="button"
+            onClick={() => setSkipped(true)}
+            style={{
+              borderRadius: 6,
+              border: '1px solid rgba(148, 163, 184, 0.28)',
+              background: 'rgba(148, 163, 184, 0.08)',
+              color: 'var(--text-muted)',
+              padding: '4px 8px',
+              fontSize: 11,
+              cursor: 'pointer',
+            }}
+          >
+            跳过
+          </button>
+        </div>
+      </div>
+
+      <div style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.55 }}>
+        {suggestion.core}
+      </div>
+      <div style={{ display: 'grid', gap: 4, color: 'var(--text-muted)', fontSize: 11, lineHeight: 1.5 }}>
+        {suggestion.missing_signals.length > 0 ? <div>缺失信号：{suggestion.missing_signals.join('、')}</div> : null}
+        {suggestion.dependency ? <div>依赖：{suggestion.dependency}</div> : null}
+        {suggestion.misunderstanding ? <div>误解：{suggestion.misunderstanding}</div> : null}
+        {suggestion.debt ? <div>亏欠：{suggestion.debt}</div> : null}
+        {suggestion.conflict ? <div>冲突：{suggestion.conflict}</div> : null}
+        {suggestion.emotional_tension ? <div>情绪张力：{suggestion.emotional_tension}</div> : null}
+        {suggestion.arc ? <div>关系变化：{suggestion.arc}</div> : null}
+        {suggestion.scene_potential.length > 0 ? <div>可写场景：{suggestion.scene_potential.join('；')}</div> : null}
+        {suggestion.writing_advice ? <div>写作建议：{suggestion.writing_advice}</div> : null}
+      </div>
+    </div>
+  );
+}
+
+function AgentTracePanel({
+  trace,
+  messageId,
+  onSaveRelationshipRepairDraft,
+  onUpdateRelationshipRepair,
+}: {
+  trace: AgentTrace;
+  messageId: string;
+  onSaveRelationshipRepairDraft?: (messageId: string, suggestionIndex: number) => void;
+  onUpdateRelationshipRepair?: (messageId: string, suggestionIndex: number) => void;
+}) {
   const usedCount = trace.used_assets.length + trace.chapter_snippets.length;
   const summary = trace.plan_summary || '已按任务读取必要上下文。';
+  const relationshipReport = trace.relationship_quality_report;
 
   return (
     <details
@@ -222,6 +352,32 @@ function AgentTracePanel({ trace }: { trace: AgentTrace }) {
           {trace.stopped_reason ? <span> · 停止原因：{trace.stopped_reason}</span> : null}
           {trace.fallback_reason ? <span> · 降级原因：{trace.fallback_reason}</span> : null}
         </div>
+
+        {trace.retrieval_coverage ? (
+          <div style={{ color: 'var(--text-muted)', lineHeight: 1.5 }}>
+            检索覆盖：角色 {trace.retrieval_coverage.counts.characters} · 关系 {trace.retrieval_coverage.counts.relationships} · 世界观 {trace.retrieval_coverage.counts.world} · 章节片段 {trace.retrieval_coverage.counts.chapter_snippets}
+            {trace.retrieval_coverage.issues.length > 0 ? <div style={{ color: '#fcd34d' }}>{trace.retrieval_coverage.issues.join('；')}</div> : null}
+          </div>
+        ) : null}
+
+        {relationshipReport ? (
+          <div style={{
+            display: 'grid',
+            gap: 5,
+            borderRadius: 8,
+            border: '1px solid rgba(245, 158, 11, 0.22)',
+            background: 'rgba(245, 158, 11, 0.07)',
+            padding: '9px 10px',
+            color: 'var(--text-muted)',
+            lineHeight: 1.5,
+          }}>
+            <div style={{ color: '#fcd34d', fontWeight: 700 }}>关系质量报告</div>
+            <div>
+              总关系 {relationshipReport.total_relationships} · 有张力 {relationshipReport.tension_relationships} · 低信息 {relationshipReport.low_information_relationships} · 缺剧情功能 {relationshipReport.missing_plot_function_relationships}
+            </div>
+            <div>缺失最多：{topMissingSignals(relationshipReport.missing_signals)}</div>
+          </div>
+        ) : null}
 
         {trace.tool_calls.length > 0 ? (
           <div style={{ display: 'grid', gap: 6 }}>
@@ -276,6 +432,22 @@ function AgentTracePanel({ trace }: { trace: AgentTrace }) {
             ))}
           </div>
         ) : null}
+
+        {trace.relationship_repair_suggestions.length > 0 ? (
+          <div style={{ display: 'grid', gap: 8 }}>
+            <div style={{ color: '#fcd34d', fontWeight: 700 }}>关系修复建议</div>
+            {trace.relationship_repair_suggestions.map((suggestion, index) => (
+              <RepairSuggestionCard
+                key={`${suggestion.relationship_id ?? suggestion.title}-${index}`}
+                suggestion={suggestion}
+                index={index}
+                messageId={messageId}
+                onSaveRelationshipRepairDraft={onSaveRelationshipRepairDraft}
+                onUpdateRelationshipRepair={onUpdateRelationshipRepair}
+              />
+            ))}
+          </div>
+        ) : null}
       </div>
     </details>
   );
@@ -290,6 +462,8 @@ export function MessageBubble({
   onRejectSaveAsset,
   onChangeSaveAssetDestination,
   onSelectSaveAssetTarget,
+  onSaveRelationshipRepairDraft,
+  onUpdateRelationshipRepair,
   onRetryMessage,
 }: MessageBubbleProps) {
   const isUser = message.role === 'user';
@@ -360,7 +534,14 @@ export function MessageBubble({
         </div>
       ) : null}
 
-      {!isUser && message.agentTrace ? <AgentTracePanel trace={message.agentTrace} /> : null}
+      {!isUser && message.agentTrace ? (
+        <AgentTracePanel
+          trace={message.agentTrace}
+          messageId={message.id}
+          onSaveRelationshipRepairDraft={onSaveRelationshipRepairDraft}
+          onUpdateRelationshipRepair={onUpdateRelationshipRepair}
+        />
+      ) : null}
 
       <div
         style={{
@@ -862,6 +1043,8 @@ interface MessageListProps {
   onRejectSaveAsset?: (messageId: string, requestIndex: number) => void;
   onChangeSaveAssetDestination?: (messageId: string, requestIndex: number, destination: ChapterSaveDestination) => void;
   onSelectSaveAssetTarget?: (messageId: string, requestIndex: number, targetId: string) => void;
+  onSaveRelationshipRepairDraft?: (messageId: string, suggestionIndex: number) => void;
+  onUpdateRelationshipRepair?: (messageId: string, suggestionIndex: number) => void;
   onRetryMessage?: (messageId: string, retryText: string) => void;
 }
 
@@ -874,6 +1057,8 @@ export function MessageList({
   onRejectSaveAsset,
   onChangeSaveAssetDestination,
   onSelectSaveAssetTarget,
+  onSaveRelationshipRepairDraft,
+  onUpdateRelationshipRepair,
   onRetryMessage,
 }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -918,6 +1103,8 @@ export function MessageList({
           onRejectSaveAsset={onRejectSaveAsset}
           onChangeSaveAssetDestination={onChangeSaveAssetDestination}
           onSelectSaveAssetTarget={onSelectSaveAssetTarget}
+          onSaveRelationshipRepairDraft={onSaveRelationshipRepairDraft}
+          onUpdateRelationshipRepair={onUpdateRelationshipRepair}
           onRetryMessage={onRetryMessage}
         />
       ))}

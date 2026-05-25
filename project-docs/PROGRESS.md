@@ -4594,3 +4594,96 @@
 - 当前判断：
   - Goal 10 已把关系薄弱问题从“隐性质量问题”变成“trace 和 repair suggestion 中可见、可处理的问题”。
   - 下一步更适合做用户可确认的关系修复写回入口，或在导入修复任务中接入这些 enriched relationship draft。
+
+## 2026-05-25 Goal 11：关系修复确认写回闭环 v1
+- 本轮目标：
+  - 不重写提取器，不新增大型 UI，不自动覆盖原关系资产。
+  - 把 Goal 10 的 `relationship_repair_suggestions` 落成用户可见、可预览、可确认、可写回的关系补强流程。
+- 前端实现：
+  - 扩展 `agent-trace` 类型与 normalize：
+    - `retrieval_coverage`
+    - `creative_diagnostics`
+    - `relationship_quality_report`
+    - `relationship_repair_suggestions`
+    - `relationship_enriched`
+  - `MessageBubble` 的“本轮写作依据”增加关系质量卡：
+    - 关系总数
+    - 有张力关系数
+    - 低信息关系数
+    - 缺剧情功能关系数
+    - 高频缺失信号
+  - 增加关系修复建议预览卡：
+    - source / target
+    - missing_signals
+    - core
+    - dependency / misunderstanding / debt / conflict
+    - emotional_tension / arc
+    - scene_potential
+    - writing_advice
+  - 操作入口：
+    - 保存为关系补强草稿
+    - 二次确认后更新原关系资产
+    - 跳过则不写库
+- 安全写回：
+  - 默认保存新关系草稿，不覆盖原资产。
+  - 更新原关系时保留 `previous_snapshot`：
+    - old title
+    - old content
+    - old extracted_data
+    - old updated_at
+    - repaired_at
+  - 写回 metadata / extracted_data：
+    - `source_type = ai_repaired / user_confirmed_repair`
+    - `repair_from_relationship_id`
+    - `repair_status = draft / confirmed`
+    - `quality_flags = relationship_enriched`
+    - `missing_signals_resolved`
+    - `remaining_missing_signals`
+  - 前端 helper 阻断跨 session / selected novel 写回。
+- 后端实现：
+  - `search_project_assets` 对关系资产优先返回 confirmed / enriched relationship。
+  - enriched relationship 不再重复生成 repair suggestion。
+  - trace 的 `used_assets` 标记 `relationship_enriched`，前端和验收能看到 agent 是否真实使用了补强关系。
+- 真实模型复验：
+  - 使用项目：`clean_import_20260524_111341`。
+  - 原关系：`rel_clean_import_20260524_111341_014b4af2`（酒寄彩叶 -> 彩叶的母亲）。
+  - 保存关系补强草稿：
+    - `goal11_repair_6ab5408f23c9`
+    - `Goal11 关系补强草稿：彩叶与母亲`
+  - 生成并保存序章候选：
+    - `goal11_chapter_39bd71b93800`
+    - `Goal11 关系修复闭环序章候选v1`
+    - 约 1700 chars。
+  - 修复前 relationship report：
+    - total_relationships=8
+    - tension_relationships=3
+    - low_information_relationships=7
+    - missing_plot_function_relationships=8
+    - status=thin
+  - 修复后 relationship report：
+    - total_relationships=8
+    - tension_relationships=4
+    - low_information_relationships=6
+    - missing_plot_function_relationships=7
+    - status=thin
+  - 生成链路 trace：
+    - used_enriched_relationship=true
+    - generation relationship report status=usable
+    - total_relationships=4
+    - tension_relationships=3
+    - low_information_relationships=1
+- 测试：
+  - `py -m pytest -p no:cacheprovider novelforge-core\tests\api\test_writing_agent_runtime.py -q`
+    - 21 passed
+  - `cmd /c npm test`
+    - 21 files passed, 86 tests passed
+  - `cmd /c npx tsc --noEmit --incremental false`
+    - passed
+  - `cmd /c npm run build`
+    - passed
+  - 后端相关回归：
+    - `30 passed`
+- 当前判断：
+  - Goal 11 打通了第一版“诊断 -> 建议 -> 预览 -> 用户确认 -> 写回 -> agent 优先读取增强关系”的关系修复闭环。
+  - 单条关系补强已经能让生成链路的 relationship report 从 thin 局部改善到 usable。
+  - 但整个关系网络仍偏薄，内测前建议继续做 2-3 条核心关系的批量/半自动补强，或提供“核心关系一键补强队列”。

@@ -42,6 +42,10 @@ import {
   applyChapterSaveTargetToRequest,
   saveAssetRequestToContent,
 } from '@/lib/save-asset-requests';
+import {
+  saveRelationshipRepairDraft,
+  updateRelationshipWithRepair,
+} from '@/lib/relationship-repair';
 import type { ChapterSaveDestination } from '@/lib/chapter-save-destinations';
 import { resolveChapterDirectoryMetadata, sortChaptersByDirectory } from '@/lib/chapter-metadata';
 import {
@@ -1063,6 +1067,64 @@ export default function ChatPage() {
     });
   }, [currentSessionId, messagesMap, updateMessage]);
 
+  const findRelationshipRepairSuggestion = useCallback((messageId: string, suggestionIndex: number) => {
+    let targetSessionId = currentSessionId || '';
+    let messages = targetSessionId ? (messagesMap.get(targetSessionId) ?? []) : [];
+    if (!messages.some((m) => m.id === messageId)) {
+      Array.from(messagesMap.entries()).some(([sessionId, sessionMessages]) => {
+        if (sessionMessages.some((m: Message) => m.id === messageId)) {
+          targetSessionId = sessionId;
+          messages = sessionMessages;
+          return true;
+        }
+        return false;
+      });
+    }
+    const msg = messages.find((m) => m.id === messageId);
+    const suggestion = msg?.agentTrace?.relationship_repair_suggestions?.[suggestionIndex];
+    return { targetSessionId, suggestion };
+  }, [currentSessionId, messagesMap]);
+
+  const handleSaveRelationshipRepairDraft = useCallback(async (messageId: string, suggestionIndex: number) => {
+    const { targetSessionId, suggestion } = findRelationshipRepairSuggestion(messageId, suggestionIndex);
+    if (!targetSessionId || !suggestion) {
+      showSaveNotification('保存失败：没有找到关系修复建议', 3200);
+      return;
+    }
+    try {
+      const result = await saveRelationshipRepairDraft({
+        suggestion,
+        sessionId: targetSessionId,
+        parentId: currentNovelParentId || undefined,
+      });
+      showSaveNotification(`已保存关系补强草稿：${result.contentId}`, 3200);
+      refreshProjectAssets();
+    } catch (err) {
+      console.error('保存关系补强草稿失败:', err);
+      showSaveNotification('保存关系补强草稿失败，请稍后重试', 3200);
+    }
+  }, [currentNovelParentId, findRelationshipRepairSuggestion, refreshProjectAssets, showSaveNotification]);
+
+  const handleUpdateRelationshipRepair = useCallback(async (messageId: string, suggestionIndex: number) => {
+    const { targetSessionId, suggestion } = findRelationshipRepairSuggestion(messageId, suggestionIndex);
+    if (!targetSessionId || !suggestion) {
+      showSaveNotification('更新失败：没有找到关系修复建议', 3200);
+      return;
+    }
+    try {
+      const result = await updateRelationshipWithRepair({
+        suggestion,
+        sessionId: targetSessionId,
+        parentId: currentNovelParentId || undefined,
+      });
+      showSaveNotification(`已更新原关系资产：${result.contentId}`, 3200);
+      refreshProjectAssets();
+    } catch (err) {
+      console.error('更新关系资产失败:', err);
+      showSaveNotification(err instanceof Error ? err.message : '更新关系资产失败，请稍后重试', 3600);
+    }
+  }, [currentNovelParentId, findRelationshipRepairSuggestion, refreshProjectAssets, showSaveNotification]);
+
   const resolveAssetRequestCandidatesFromProject = useCallback(async (
     request: AssetRequestDirective,
   ): Promise<FocusedAsset[]> => {
@@ -1626,6 +1688,8 @@ export default function ChatPage() {
                     onRejectSaveAsset={handleRejectSaveAsset}
                     onChangeSaveAssetDestination={handleChangeSaveAssetDestination}
                     onSelectSaveAssetTarget={handleSelectSaveAssetTarget}
+                    onSaveRelationshipRepairDraft={handleSaveRelationshipRepairDraft}
+                    onUpdateRelationshipRepair={handleUpdateRelationshipRepair}
                     onRetryMessage={handleRetryMessage}
                   />
                 {isGenerating && (

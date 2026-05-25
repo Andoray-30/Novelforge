@@ -11,6 +11,7 @@ export type AgentTraceAsset = {
   id?: string;
   type?: string;
   title?: string;
+  relationship_enriched?: boolean;
 };
 
 export type AgentTraceSnippet = {
@@ -20,6 +21,55 @@ export type AgentTraceSnippet = {
   preview?: string;
 };
 
+export type AgentCreativeDiagnostics = {
+  usable: string[];
+  missing: string[];
+  missing_signals: string[];
+  score?: number;
+  summary?: string;
+  relationship_creative_readiness?: string;
+};
+
+export type AgentRelationshipQualityReport = {
+  total_relationships: number;
+  tension_relationships: number;
+  low_information_relationships: number;
+  missing_plot_function_relationships: number;
+  missing_signals: Record<string, number>;
+  status?: string;
+};
+
+export type AgentRetrievalCoverage = {
+  counts: {
+    characters: number;
+    relationships: number;
+    world: number;
+    chapter_snippets: number;
+  };
+  issues: string[];
+};
+
+export type AgentRelationshipRepairSuggestion = {
+  relationship_id?: string;
+  title?: string;
+  source?: string;
+  target?: string;
+  core?: string;
+  current_state?: string;
+  dependency?: string;
+  misunderstanding?: string;
+  debt?: string;
+  conflict?: string;
+  emotional_tension?: string;
+  arc?: string;
+  scene_potential: string[];
+  writing_advice?: string;
+  missing_signals: string[];
+  usable_signals: string[];
+  weak_spots?: string;
+  enriched_relationship_draft?: Record<string, unknown>;
+};
+
 export type AgentTrace = {
   enabled: boolean;
   mode?: 'rule_planner' | 'model_tool_loop' | 'fallback' | 'disabled' | string;
@@ -27,6 +77,16 @@ export type AgentTrace = {
   tool_calls: AgentToolCall[];
   used_assets: AgentTraceAsset[];
   chapter_snippets: AgentTraceSnippet[];
+  retrieval_coverage?: AgentRetrievalCoverage;
+  creative_diagnostics: Array<{
+    id?: string;
+    type?: string;
+    title?: string;
+    summary?: string;
+    creative_diagnostics?: AgentCreativeDiagnostics;
+  }>;
+  relationship_quality_report?: AgentRelationshipQualityReport;
+  relationship_repair_suggestions: AgentRelationshipRepairSuggestion[];
   degraded: boolean;
   fallback_reason?: string;
   stopped_reason?: string;
@@ -47,6 +107,81 @@ function asBoolean(value: unknown): boolean {
 
 function asNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim())
+    : [];
+}
+
+function normalizeDiagnostics(value: unknown): AgentCreativeDiagnostics | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  return {
+    usable: asStringArray(value.usable),
+    missing: asStringArray(value.missing),
+    missing_signals: asStringArray(value.missing_signals),
+    score: asNumber(value.score),
+    summary: asString(value.summary) || undefined,
+    relationship_creative_readiness: asString(value.relationship_creative_readiness) || undefined,
+  };
+}
+
+function normalizeMissingSignals(value: unknown): Record<string, number> {
+  if (!isRecord(value)) {
+    return {};
+  }
+  return Object.entries(value).reduce<Record<string, number>>((acc, [key, count]) => {
+    const parsed = asNumber(count);
+    if (key && typeof parsed === 'number') {
+      acc[key] = parsed;
+    }
+    return acc;
+  }, {});
+}
+
+function normalizeRelationshipQualityReport(value: unknown): AgentRelationshipQualityReport | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  return {
+    total_relationships: asNumber(value.total_relationships) ?? 0,
+    tension_relationships: asNumber(value.tension_relationships) ?? 0,
+    low_information_relationships: asNumber(value.low_information_relationships) ?? 0,
+    missing_plot_function_relationships: asNumber(value.missing_plot_function_relationships) ?? 0,
+    missing_signals: normalizeMissingSignals(value.missing_signals),
+    status: asString(value.status) || undefined,
+  };
+}
+
+function normalizeRelationshipRepairSuggestion(value: unknown): AgentRelationshipRepairSuggestion | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const enrichedDraft = isRecord(value.enriched_relationship_draft) ? value.enriched_relationship_draft : undefined;
+  const suggestion: AgentRelationshipRepairSuggestion = {
+    relationship_id: asString(value.relationship_id) || undefined,
+    title: asString(value.title) || undefined,
+    source: asString(value.source) || undefined,
+    target: asString(value.target) || undefined,
+    core: asString(value.core) || undefined,
+    current_state: asString(value.current_state) || undefined,
+    dependency: asString(value.dependency) || undefined,
+    misunderstanding: asString(value.misunderstanding) || undefined,
+    debt: asString(value.debt) || undefined,
+    conflict: asString(value.conflict) || undefined,
+    emotional_tension: asString(value.emotional_tension) || undefined,
+    arc: asString(value.arc) || undefined,
+    scene_potential: asStringArray(value.scene_potential),
+    writing_advice: asString(value.writing_advice) || undefined,
+    missing_signals: asStringArray(value.missing_signals),
+    usable_signals: asStringArray(value.usable_signals),
+    weak_spots: asString(value.weak_spots) || undefined,
+    enriched_relationship_draft: enrichedDraft,
+  };
+  return suggestion.title || suggestion.source || suggestion.target || suggestion.core ? suggestion : undefined;
 }
 
 export function normalizeAgentTrace(value: unknown): AgentTrace | undefined {
@@ -70,6 +205,7 @@ export function normalizeAgentTrace(value: unknown): AgentTrace | undefined {
         id: asString(item.id) || undefined,
         type: asString(item.type) || undefined,
         title: asString(item.title) || undefined,
+        relationship_enriched: asBoolean(item.relationship_enriched),
       })).filter((item) => item.id || item.title)
     : [];
 
@@ -80,6 +216,32 @@ export function normalizeAgentTrace(value: unknown): AgentTrace | undefined {
         mode: asString(item.mode) || undefined,
         preview: asString(item.preview) || undefined,
       })).filter((item) => item.id || item.title || item.preview)
+    : [];
+
+  const retrievalCoverage = isRecord(value.retrieval_coverage) ? {
+    counts: isRecord(value.retrieval_coverage.counts) ? {
+      characters: asNumber(value.retrieval_coverage.counts.characters) ?? 0,
+      relationships: asNumber(value.retrieval_coverage.counts.relationships) ?? 0,
+      world: asNumber(value.retrieval_coverage.counts.world) ?? 0,
+      chapter_snippets: asNumber(value.retrieval_coverage.counts.chapter_snippets) ?? 0,
+    } : { characters: 0, relationships: 0, world: 0, chapter_snippets: 0 },
+    issues: asStringArray(value.retrieval_coverage.issues),
+  } : undefined;
+
+  const creativeDiagnostics = Array.isArray(value.creative_diagnostics)
+    ? value.creative_diagnostics.filter(isRecord).map((item) => ({
+        id: asString(item.id) || undefined,
+        type: asString(item.type) || undefined,
+        title: asString(item.title) || undefined,
+        summary: asString(item.summary) || undefined,
+        creative_diagnostics: normalizeDiagnostics(item.creative_diagnostics),
+      })).filter((item) => item.id || item.title || item.summary)
+    : [];
+
+  const relationshipRepairSuggestions = Array.isArray(value.relationship_repair_suggestions)
+    ? value.relationship_repair_suggestions
+        .map(normalizeRelationshipRepairSuggestion)
+        .filter((item): item is AgentRelationshipRepairSuggestion => Boolean(item))
     : [];
 
   const planSummary = asString(value.plan_summary);
@@ -94,6 +256,10 @@ export function normalizeAgentTrace(value: unknown): AgentTrace | undefined {
     tool_calls: toolCalls,
     used_assets: usedAssets,
     chapter_snippets: chapterSnippets,
+    retrieval_coverage: retrievalCoverage,
+    creative_diagnostics: creativeDiagnostics,
+    relationship_quality_report: normalizeRelationshipQualityReport(value.relationship_quality_report),
+    relationship_repair_suggestions: relationshipRepairSuggestions,
     degraded: asBoolean(value.degraded),
     fallback_reason: asString(value.fallback_reason) || undefined,
     stopped_reason: asString(value.stopped_reason) || undefined,

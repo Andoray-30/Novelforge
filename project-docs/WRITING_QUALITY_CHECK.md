@@ -309,3 +309,121 @@ Writing quality verdict for Goal 10:
 Current conclusion:
 
 Goal 10 improves diagnosis and repairability of relationship assets. The system now clearly reports when the relationship network is not strong enough for emotionally precise writing, and the real validation draft shows a better relationship-driven choice. The next product step is to let users review/apply relationship repair suggestions, or to feed these suggestions into a relationship repair task before final writing.
+
+## Goal 11 Relationship Repair Writeback Validation
+
+Date: 2026-05-25
+
+Scope:
+
+- Goal: turn relationship repair suggestions into visible, reviewable, user-confirmed writeback assets.
+- Project used: `clean_import_20260524_111341`.
+- Novel root: `novel_clean_import_20260524_111341`.
+- Original weak relationship: `rel_clean_import_20260524_111341_014b4af2`.
+- Original relationship title: `酒寄彩叶 -> 彩叶的母亲 (RelationshipType.FAMILY)`.
+
+Implemented behavior:
+
+- Agent trace normalization now supports:
+  - `retrieval_coverage`
+  - `creative_diagnostics`
+  - `relationship_quality_report`
+  - `relationship_repair_suggestions`
+- Chat message trace can show a lightweight relationship quality card:
+  - total relationship count
+  - tension relationship count
+  - low-information relationship count
+  - missing signal summary
+  - available repair suggestions
+- Each repair suggestion card shows:
+  - source / target
+  - missing signals
+  - core
+  - dependency
+  - misunderstanding
+  - debt
+  - conflict
+  - emotional tension
+  - arc
+  - scene potential
+  - writing advice
+- User actions are wired:
+  - save as relationship repair draft
+  - update original relationship after confirmation
+  - skip by doing nothing
+- Safe writeback rules:
+  - draft save does not overwrite original relationship
+  - confirmed update stores `previous_snapshot`
+  - metadata includes `source_type`, `repair_from_relationship_id`, `repair_status`, `quality_flags`, `missing_signals_resolved`, and `remaining_missing_signals`
+  - update blocks cross-session and cross-novel writes
+- Agent retrieval now prioritizes confirmed/enriched relationship assets and marks `relationship_enriched` in trace.
+
+Live validation:
+
+- Provider/base: configured server-side NewAPI endpoint.
+- Mode/model: Fast mode, backend reported `gemini-3.5-flash`.
+- Repair draft saved:
+  - ID: `goal11_repair_6ab5408f23c9`
+  - Title: `Goal11 关系补强草稿：彩叶与母亲`
+  - Status: `draft`
+  - Flags: `relationship_enriched`
+- Generated chapter candidate saved:
+  - ID: `goal11_chapter_39bd71b93800`
+  - Title: `Goal11 关系修复闭环序章候选v1`
+  - Body length: 1700 chars
+
+Before repair report:
+
+- Total relationships: 8.
+- Tension relationships: 3.
+- Low-information relationships: 7.
+- Missing plot function relationships: 8.
+- Status: `thin`.
+- Missing signals:
+  - dependency: 8.
+  - misunderstanding: 5.
+  - debt: 7.
+  - emotional tension: 5.
+  - intimacy: 8.
+  - plot function: 8.
+  - scene potential: 7.
+  - conflict: 7.
+  - power dynamic/control: 7.
+
+After repair draft report:
+
+- Total relationships: 8.
+- Tension relationships: 4.
+- Low-information relationships: 6.
+- Missing plot function relationships: 7.
+- Status: `thin`.
+- Missing signals reduced:
+  - dependency: 8 -> 7.
+  - debt: 7 -> 6.
+  - emotional tension: 5 -> 4.
+  - plot function: 8 -> 7.
+  - conflict: 7 -> 6.
+  - power dynamic/control: 7 -> 6.
+
+Generation trace after repair:
+
+- Used enriched relationship: yes.
+- First relationship used: `Goal11 关系补强草稿：彩叶与母亲`.
+- Relationship quality report during generation:
+  - Total relationships: 4.
+  - Tension relationships: 3.
+  - Low-information relationships: 1.
+  - Missing plot function relationships: 1.
+  - Status: `usable`.
+
+Writing quality verdict:
+
+- Relationship use: pass. The model centered the prologue on 彩叶 and her mother rather than general atmosphere.
+- Actionable emotional pressure: pass. The output turns the mother relationship into a physical threshold scene around leaving home, being stopped, and choosing whether to obey or break away.
+- Asset priority: pass. The trace confirmed the enriched relationship was retrieved before ordinary relationship assets.
+- Save suitability: pass as an AI draft/candidate, but still over target length at 1700 chars and should be trimmed before becoming a formal prologue.
+- Remaining risk: partial. The relationship report still says the full relationship set is `thin` because only one relationship was repaired. The next internal-test milestone should repair 2-3 core relationships or provide a relationship repair batch action.
+
+Current conclusion:
+
+Goal 11 closes the first practical relationship repair loop: diagnosis -> suggestion -> user-visible preview -> draft/confirmed writeback -> enriched relationship retrieved by the agent -> improved relationship quality report during writing. The project is now closer to internal testing because relationship weakness is no longer just a hidden extraction defect; it can be surfaced and repaired into the project memory library.
