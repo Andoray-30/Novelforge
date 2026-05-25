@@ -4354,3 +4354,60 @@
 - 当前判断：
   - Goal 5 的主体闭环已经落地：AI 试写 -> 保存草稿/候选 -> 打开编辑器 -> 转正式，或选择目标后安全覆盖。
   - 仍需后续 UI 大改时进一步改善保存卡片的视觉层级和批量版本管理，但不阻塞当前版本工作流。
+
+## 2026-05-25 写作 Agent Runtime v1
+- 本轮目标：
+  - 将聊天从“单次用户输入 + 项目摘要”升级为轻量写作 agent。
+  - AI 正式回答前可以按任务读取最近对话、项目资产、章节片段，并把依据展示给用户。
+  - 不引入 LangGraph / 向量库 / 长期记忆系统，不绕过用户确认直接写库。
+- 后端实现：
+  - 新增 `novelforge.api.writing_agent.WritingAgentRuntime`。
+  - 执行流程为规则规划版 `plan -> tool_call -> observe -> maybe_continue -> final prompt`。
+  - 单轮最多 5 次工具调用，工具失败或达到上限时返回 degraded trace 并继续回答。
+  - 注册工具：
+    - `search_project_assets`
+    - `get_asset_detail`
+    - `search_chapter_snippets`
+    - `get_recent_conversation`
+    - `prepare_save_asset`
+    - `prepare_chapter_update`
+    - `run_quality_check`
+  - 每个工具都有用途、输入 schema 和输出长度限制。
+  - 工具范围限制在当前 `session_id` 与 `selected_novel_id`；不跨项目读取。
+  - 续写/改写/序章/章节/候选版本等任务会自动选择最近对话、资产或章节片段。
+  - 默认优先导入原文/正式章节，排除 AI 草稿/候选；用户明确提到“草稿/候选/刚才/上一版”时才允许读取 AI 版本。
+  - `search_project_assets` 增加长中文 query fallback，避免中文整句搜索无法召回角色/世界观。
+  - 聊天 API 返回 `agent_trace`，并把 trace 写入 assistant message metadata，支持刷新后回看依据。
+- 前端实现：
+  - 聊天请求上下文增加 `selected_novel_id`。
+  - 新增 `agent-trace` 类型与规范化逻辑。
+  - streaming 与 sync fallback 都会把 `agent_trace` 写入 assistant 消息。
+  - 历史消息恢复时读取 `message.metadata.agent_trace`。
+  - `MessageBubble` 顶部新增可折叠“本轮写作依据”：
+    - 计划摘要
+    - 工具调用摘要
+    - 使用资产
+    - 章节片段预览
+    - 降级状态
+  - 不再展示模型原始 thinking 内容；只在流式生成中显示“隐藏模型原始思考链”的状态提示。
+  - 保留现有 `save_asset` 卡片、`focused_assets` 与 `asset_request` fallback。
+- 测试：
+  - 后端 agent/API 目标测试：`15 passed`。
+  - 前端全量 Vitest：`82 passed`。
+  - `npx tsc --noEmit --incremental false` 通过。
+  - `compileall` 覆盖 `writing_agent.py`、`api/__init__.py`、`api/types.py` 通过。
+- 浏览器验证：
+  - 本地前端 `localhost:3010` 与后端 `127.0.0.1:8001`。
+  - 为避免测试消耗外部模型，后端验证模式禁用 runtime provider override，并使用 mock AI。
+  - 输入“请续写第一章结尾，读取章节片段和辉夜角色”：
+    - 实时显示“本轮写作依据”。
+    - 展开后看到 `读取最近对话`、`检索项目资产`、`读取章节片段`、`准备保存建议`、`写作质量检查`。
+    - 资产包含辉夜/FUSHI/帝明等角色。
+    - 章节片段包含章节结尾预览。
+  - 输入“按刚才那版改写成一句更温柔的版本”：
+    - trace 显示“参考最近对话”。
+    - 展开后看到 `读取最近对话` 与保存建议。
+  - 新开页面无可见 Runtime/Build Error；曾有一次开发服旧 chunk 的 stale console error，重启前后端并刷新后页面可正常运行。
+- 当前判断：
+  - Goal 6 主体闭环已经落地：AI 写作前能自动查项目上下文，用户能看到它参考了什么。
+  - 这仍是轻量规则 planner，不是完整多轮 agent 图；后续可以把 planner 从规则升级为模型决策，但当前不阻塞内部可用。

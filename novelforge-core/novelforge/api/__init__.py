@@ -64,6 +64,7 @@ from ..services.ai_service import AIService
 
 from ..core.config import Config
 from .ai_planning_service import get_ai_planning_service, AIPlanningService
+from .writing_agent import WritingAgentRuntime
 from ..storage.storage_manager import StorageManager
 from ..content.manager import ContentManager
 from ..content.models import (
@@ -205,6 +206,21 @@ extraction_service = get_extraction_service(ai_service, config)
 
 # 鍒涘缓AI璋冨害鍣?
 ai_scheduler = get_ai_scheduler(ai_service, storage_manager, config, content_manager)
+
+
+def _get_writing_agent_runtime() -> WritingAgentRuntime:
+    return WritingAgentRuntime(content_manager, storage_manager)
+
+
+def _openai_config_to_dict(openai_config: Optional[Any]) -> Optional[dict]:
+    if openai_config is None:
+        return None
+    if isinstance(openai_config, dict):
+        return openai_config
+    model_dump = getattr(openai_config, "model_dump", None)
+    if callable(model_dump):
+        return model_dump(exclude_none=True)
+    return None
 
 
 def _parse_openai_config_form_value(raw_value: Optional[str]) -> Optional[dict]:
@@ -1268,16 +1284,26 @@ async def send_message(request: ChatRequest):
        system_prompt = _build_chat_system_prompt(request.context)
 
        runtime_ai_service = _resolve_runtime_ai_service(
-           request.openai_config.model_dump(exclude_none=True) if request.openai_config else None
+           _openai_config_to_dict(request.openai_config)
+       )
+       agent_preparation = await _get_writing_agent_runtime().prepare(
+           user_message=request.message,
+           context=request.context,
+           conversation=conversation,
+           base_system_prompt=system_prompt,
        )
        
        ai_response = await runtime_ai_service.chat(
            prompt=request.message,
-           system_prompt=system_prompt
+           system_prompt=agent_preparation.system_prompt
        )
        
        # 娣诲姞AI鍝嶅簲
-       ai_message = Message(role="assistant", content=ai_response)
+       ai_message = Message(
+           role="assistant",
+           content=ai_response,
+           metadata={"agent_trace": agent_preparation.trace},
+       )
        conversation.messages.append(ai_message)
        
        # 鏇存柊瀵硅瘽鏃堕棿鎴?
@@ -1305,7 +1331,10 @@ async def send_message(request: ChatRequest):
        response = ChatResponse(
            conversation_id=conversation_id,
            message=ai_message,
-           context=request.context,
+           context={
+               **(request.context or {}),
+               "agent_trace": agent_preparation.trace,
+           },
            suggestions=suggestions
        )
        return response
@@ -1339,11 +1368,13 @@ async def get_conversation(conversation_id: str):
 @app.post("/api/chat/send-message-stream")
 async def send_chat_message_stream(request: ChatRequest):
     conversation_id = request.conversation_id or str(uuid.uuid4())
-    runtime_ai_service = _resolve_runtime_ai_service(request.openai_config)
+    runtime_ai_service = _resolve_runtime_ai_service(_openai_config_to_dict(request.openai_config))
     conversation = await storage_manager.load(f"conversation_{conversation_id}", storage_type=CHAT_STORAGE_TYPE)
 
     if not conversation:
         conversation = Conversation(id=conversation_id, title="新对话")
+    elif isinstance(conversation, dict):
+        conversation = Conversation(**conversation)
 
     user_message = Message(role="user", content=request.message)
     conversation.messages.append(user_message)
@@ -1354,13 +1385,21 @@ async def send_chat_message_stream(request: ChatRequest):
         storage_type=CHAT_STORAGE_TYPE,
     )
 
+    agent_preparation = await _get_writing_agent_runtime().prepare(
+        user_message=request.message,
+        context=request.context,
+        conversation=conversation,
+        base_system_prompt=_build_chat_system_prompt(request.context),
+    )
+
     async def event_generator():
         assistant_content = ""
         assistant_thinking = ""
         try:
+            yield f"data: {json.dumps({'type': 'agent_trace', 'trace': agent_preparation.trace}, ensure_ascii=False)}\n\n"
             async for event in runtime_ai_service.chat_stream(
                 prompt=request.message,
-                system_prompt=_build_chat_system_prompt(request.context),
+                system_prompt=agent_preparation.system_prompt,
             ):
                 if event["type"] == "thinking_delta":
                     assistant_thinking += event["delta"]
@@ -1372,7 +1411,11 @@ async def send_chat_message_stream(request: ChatRequest):
 
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
-            assistant_message = Message(role="assistant", content=assistant_content)
+            assistant_message = Message(
+                role="assistant",
+                content=assistant_content,
+                metadata={"agent_trace": agent_preparation.trace},
+            )
             conversation.messages.append(assistant_message)
             conversation.updated_at = datetime.now()
             await storage_manager.save(

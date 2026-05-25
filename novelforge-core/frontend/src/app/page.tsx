@@ -56,6 +56,7 @@ import {
   clipFocusedAssetSummary,
   type FocusedAsset,
 } from '@/lib/focused-assets';
+import { normalizeAgentTrace } from '@/lib/agent-trace';
 import type { ContentItem, ContentTopology, ContentType, ImportanceLevel, OpenAIConfig } from '@/types';
 
 // 用于 Artifact 面板的数据格式
@@ -309,6 +310,7 @@ export default function ChatPage() {
               role: toMessageRole(m.role),
               content: extractCleanText(m.content),
               timestamp: m.timestamp ? new Date(m.timestamp) : new Date(),
+              agentTrace: normalizeAgentTrace(m.metadata?.agent_trace),
               saveAssetRequests: saveAssetRequests.length > 0
                 ? saveAssetRequests.map((req) => ({
                     ...req,
@@ -1128,6 +1130,7 @@ export default function ChatPage() {
     };
     const requestContext = {
       session_id: targetSessionId,
+      selected_novel_id: selectedNovelId ?? undefined,
       project_title: currentSessionTitle ?? undefined,
       project_summary: projectSummary,
       focused_assets: focusedAssets.map((asset) => ({
@@ -1156,12 +1159,19 @@ export default function ChatPage() {
     try {
       let finalContent = '';
       let finalThinking = '';
+      let agentTrace: Message['agentTrace'] | undefined;
       let streamedSuccessfully = false;
       let streamAccepted = false;
 
       try {
         for await (const event of chatService.streamMessage(targetSessionId, text, requestContext, requestOpenAIConfig)) {
           streamAccepted = true;
+          if (event.type === 'agent_trace') {
+            agentTrace = normalizeAgentTrace(event.trace);
+            if (agentTrace) {
+              updateMessage(targetSessionId, assistantMessageId, { agentTrace });
+            }
+          }
           if (event.type === 'thinking_delta' && typeof event.delta === 'string') {
             finalThinking += event.delta;
             updateMessage(targetSessionId, assistantMessageId, { thinking: finalThinking });
@@ -1190,6 +1200,7 @@ export default function ChatPage() {
         }
         console.warn('Streaming request failed before response, falling back to sync chat:', streamError);
         const reply = await chatService.sendMessage(targetSessionId, text, requestContext, requestOpenAIConfig);
+        agentTrace = normalizeAgentTrace(reply.context?.agent_trace);
         const aiContent = reply.message?.content || '...';
         const parsed = parseThinkingProcess(aiContent);
         finalContent = parsed.answer || aiContent;
@@ -1197,6 +1208,7 @@ export default function ChatPage() {
         updateMessage(targetSessionId, assistantMessageId, {
           content: finalContent,
           thinking: finalThinking,
+          agentTrace,
           isStreaming: false,
         });
         streamedSuccessfully = true;
@@ -1219,6 +1231,7 @@ export default function ChatPage() {
         updateMessage(targetSessionId, assistantMessageId, {
           content: displayContent,
           thinking: finalThinking,
+          agentTrace,
           isStreaming: false,
           artifact: artifacts.length > 0
             ? {

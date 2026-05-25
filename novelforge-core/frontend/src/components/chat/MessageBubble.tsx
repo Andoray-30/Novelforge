@@ -13,6 +13,7 @@ import {
   normalizeChapterSaveDestination,
   type ChapterSaveDestination,
 } from '@/lib/chapter-save-destinations';
+import type { AgentTrace } from '@/lib/agent-trace';
 import type { SaveAssetRequest } from '@/lib/chat-parser';
 
 export type MessageRole = 'user' | 'assistant' | 'system';
@@ -24,6 +25,7 @@ export interface Message {
   timestamp: Date;
   isStreaming?: boolean;
   thinking?: string;
+  agentTrace?: AgentTrace;
   assetRequest?: {
     query?: string;
     reason?: string;
@@ -150,6 +152,119 @@ function getAssetRequestStatusText(request: NonNullable<Message['assetRequest']>
   return null;
 }
 
+function getAgentToolLabel(name: string): string {
+  const labels: Record<string, string> = {
+    search_project_assets: '检索项目资产',
+    get_asset_detail: '读取资产详情',
+    search_chapter_snippets: '读取章节片段',
+    get_recent_conversation: '读取最近对话',
+    prepare_save_asset: '准备保存建议',
+    prepare_chapter_update: '准备章节更新',
+    run_quality_check: '写作质量检查',
+  };
+  return labels[name] ?? name;
+}
+
+function getSnippetModeLabel(mode?: string): string {
+  if (mode === 'start') return '开头';
+  if (mode === 'end') return '结尾';
+  if (mode === 'keyword') return '关键词附近';
+  return '片段';
+}
+
+function AgentTracePanel({ trace }: { trace: AgentTrace }) {
+  const usedCount = trace.used_assets.length + trace.chapter_snippets.length;
+  const summary = trace.plan_summary || '已按任务读取必要上下文。';
+
+  return (
+    <details
+      style={{
+        maxWidth: '85%',
+        width: '100%',
+        borderRadius: 12,
+        border: '1px solid var(--border-subtle)',
+        background: 'rgba(99, 102, 241, 0.08)',
+        color: 'var(--text-secondary)',
+        fontSize: 12,
+        overflow: 'hidden',
+      }}
+    >
+      <summary
+        style={{
+          cursor: 'pointer',
+          listStyle: 'none',
+          padding: '10px 14px',
+          fontWeight: 700,
+          userSelect: 'none',
+          color: 'var(--text-primary)',
+        }}
+      >
+        本轮写作依据
+        <span style={{ marginLeft: 8, color: 'var(--text-muted)', fontWeight: 500 }}>
+          {trace.tool_calls.length} 个工具 · {usedCount} 条依据
+          {trace.degraded ? ' · 已降级' : ''}
+        </span>
+      </summary>
+      <div style={{ padding: '0 14px 12px', display: 'grid', gap: 10 }}>
+        <div style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>{summary}</div>
+
+        {trace.tool_calls.length > 0 ? (
+          <div style={{ display: 'grid', gap: 6 }}>
+            {trace.tool_calls.map((call, index) => (
+              <div key={`${call.name}-${index}`} style={{ color: 'var(--text-muted)', lineHeight: 1.55 }}>
+                <strong style={{ color: 'var(--text-secondary)' }}>{getAgentToolLabel(call.name)}</strong>
+                <span> · {call.status}</span>
+                {typeof call.item_count === 'number' ? <span> · {call.item_count} 条</span> : null}
+                {call.summary ? <span>：{call.summary}</span> : null}
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {trace.used_assets.length > 0 ? (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {trace.used_assets.map((asset, index) => (
+              <span
+                key={`${asset.id ?? asset.title}-${index}`}
+                style={{
+                  borderRadius: 999,
+                  border: '1px solid var(--border-subtle)',
+                  padding: '4px 8px',
+                  color: 'var(--text-secondary)',
+                }}
+              >
+                {asset.title || asset.id}
+                {asset.type ? <span style={{ color: 'var(--text-muted)' }}> · {asset.type}</span> : null}
+              </span>
+            ))}
+          </div>
+        ) : null}
+
+        {trace.chapter_snippets.length > 0 ? (
+          <div style={{ display: 'grid', gap: 8 }}>
+            {trace.chapter_snippets.map((snippet, index) => (
+              <div
+                key={`${snippet.id ?? snippet.title}-${index}`}
+                style={{
+                  borderLeft: '2px solid rgba(139, 92, 246, 0.7)',
+                  paddingLeft: 10,
+                  color: 'var(--text-muted)',
+                  lineHeight: 1.6,
+                }}
+              >
+                <div style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>
+                  {snippet.title || '章节片段'} · {getSnippetModeLabel(snippet.mode)}
+                </div>
+                {snippet.preview ? <div>{snippet.preview}</div> : null}
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
 export function MessageBubble({
   message,
   chapterSaveTargets = [],
@@ -212,42 +327,23 @@ export function MessageBubble({
         </div>
       )}
 
-      {!isUser && message.thinking ? (
-        <details
-          open={message.isStreaming}
+      {!isUser && message.thinking && message.isStreaming ? (
+        <div
           style={{
             maxWidth: '85%',
-            width: '100%',
             borderRadius: 12,
             border: '1px solid var(--border-subtle)',
             background: 'rgba(148, 163, 184, 0.08)',
             color: 'var(--text-muted)',
             fontSize: 12,
-            overflow: 'hidden',
+            padding: '10px 14px',
           }}
         >
-          <summary
-            style={{
-              cursor: 'pointer',
-              listStyle: 'none',
-              padding: '10px 14px',
-              fontWeight: 600,
-              userSelect: 'none',
-            }}
-          >
-            {message.isStreaming ? 'AI 思考中…' : '查看思考过程'}
-          </summary>
-          <div
-            style={{
-              padding: '0 14px 12px',
-              whiteSpace: 'pre-wrap',
-              lineHeight: 1.7,
-            }}
-          >
-            {message.thinking}
-          </div>
-        </details>
+          AI 正在整理回应，隐藏模型原始思考链。
+        </div>
       ) : null}
+
+      {!isUser && message.agentTrace ? <AgentTracePanel trace={message.agentTrace} /> : null}
 
       <div
         style={{
@@ -758,7 +854,7 @@ export function MessageList({
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [messages.length, lastMessage?.content, lastMessage?.thinking, lastMessage?.isStreaming]);
+  }, [messages.length, lastMessage?.content, lastMessage?.thinking, lastMessage?.agentTrace, lastMessage?.isStreaming]);
 
   return (
     <div

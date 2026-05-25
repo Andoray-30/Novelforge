@@ -187,6 +187,7 @@ class Message(BaseModel):
     role: str = Field(..., description="角色: user, assistant, system")
     content: str = Field(..., min_length=1, description="消息内容")
     timestamp: datetime = Field(default_factory=datetime.now)
+    metadata: dict = Field(default_factory=dict, description="消息元数据")
 
 
 class Conversation(BaseModel):

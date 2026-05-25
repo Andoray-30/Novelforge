@@ -238,6 +238,7 @@ export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: string | Date;
+  metadata?: Record<string, unknown>;
 }
 
 export interface Conversation {

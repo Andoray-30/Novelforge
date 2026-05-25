@@ -1,0 +1,814 @@
+"""Lightweight writing-agent runtime for chat generation.
+
+The runtime is intentionally small. It plans a bounded set of project reads,
+compresses the observations into the final writer prompt, and returns a
+user-visible trace. It never writes content directly.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Sequence
+
+from novelforge.api.types import Conversation
+from novelforge.content.manager import ContentManager
+from novelforge.content.models import ContentItem, ContentSearchRequest, ContentType
+from novelforge.storage.storage_manager import StorageManager
+
+
+MAX_TOOL_CALLS = 5
+MAX_TRACE_PREVIEW = 180
+MAX_ASSET_SUMMARY = 480
+MAX_DETAIL_CHARS = 900
+MAX_SNIPPET_CHARS = 900
+MAX_AGENT_CONTEXT_CHARS = 5200
+
+
+WRITING_AGENT_TOOL_SCHEMAS: List[Dict[str, Any]] = [
+    {
+        "name": "search_project_assets",
+        "purpose": "Find characters, world facts, timelines, relationships, outlines, and chapters in the current project only.",
+        "schema": {
+            "query": "optional string, max 120 chars",
+            "types": "array of character/world/timeline/relationship/outline/chapter/novel",
+            "limit": "integer 1-8",
+            "include_ai_versions": "boolean, default false",
+        },
+        "output_limit": f"<= {MAX_ASSET_SUMMARY} chars per item, <= 8 items",
+    },
+    {
+        "name": "get_asset_detail",
+        "purpose": "Load one project asset by id after session and novel scope validation.",
+        "schema": {"asset_id": "string", "max_chars": f"integer <= {MAX_DETAIL_CHARS}"},
+        "output_limit": f"<= {MAX_DETAIL_CHARS} chars",
+    },
+    {
+        "name": "search_chapter_snippets",
+        "purpose": "Return bounded chapter text snippets from imported or formal chapters in the current project.",
+        "schema": {
+            "query": "optional title/content keyword, max 120 chars",
+            "mode": "start/end/keyword/auto",
+            "limit": "integer 1-5",
+            "include_ai_versions": "boolean, default false",
+        },
+        "output_limit": f"<= {MAX_SNIPPET_CHARS} chars per snippet, <= 5 snippets",
+    },
+    {
+        "name": "get_recent_conversation",
+        "purpose": "Return recent user/assistant messages from the current conversation.",
+        "schema": {"limit": "integer 1-8"},
+        "output_limit": "<= 8 clipped messages",
+    },
+    {
+        "name": "prepare_save_asset",
+        "purpose": "Prepare a save_asset suggestion shape. Does not write anything.",
+        "schema": {"asset_type": "string", "title": "string", "reason": "string"},
+        "output_limit": "one bounded suggestion",
+    },
+    {
+        "name": "prepare_chapter_update",
+        "purpose": "Prepare an update-existing suggestion shape. Does not write anything.",
+        "schema": {"target_hint": "string", "reason": "string"},
+        "output_limit": "one bounded warning/suggestion",
+    },
+    {
+        "name": "run_quality_check",
+        "purpose": "Return a compact writing checklist for the current task.",
+        "schema": {"task": "string"},
+        "output_limit": "<= 8 checklist bullets",
+    },
+]
+
+
+@dataclass
+class AgentScope:
+    session_id: str
+    selected_novel_id: Optional[str] = None
+
+
+@dataclass
+class ToolObservation:
+    name: str
+    status: str
+    summary: str
+    items: List[Dict[str, Any]] = field(default_factory=list)
+    error: Optional[str] = None
+
+
+@dataclass
+class AgentPreparation:
+    system_prompt: str
+    trace: Dict[str, Any]
+
+
+def _as_str(value: Any) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _clip(value: str, limit: int) -> str:
+    normalized = re.sub(r"\s+", " ", value or "").strip()
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _payload(item: ContentItem) -> Dict[str, Any]:
+    return item.extracted_data if isinstance(item.extracted_data, dict) else {}
+
+
+def _content_text(item: ContentItem) -> str:
+    payload = _payload(item)
+    for key in ("content", "description", "summary", "text", "profile"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return item.content or ""
+
+
+def _title(item: ContentItem) -> str:
+    payload = _payload(item)
+    for key in ("display_title", "chapter_title", "title", "name"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return item.metadata.title
+
+
+def _type_name(value: Any) -> str:
+    return str(value.value if hasattr(value, "value") else value)
+
+
+def _save_destination(item: ContentItem) -> str:
+    return _as_str(_payload(item).get("save_destination"))
+
+
+def _is_imported_or_formal_chapter(item: ContentItem) -> bool:
+    payload = _payload(item)
+    destination = _save_destination(item)
+    return (
+        item.metadata.type == ContentType.CHAPTER
+        and (
+            destination in {"formal_body", "formal_prologue"}
+            or payload.get("source_type") in {"imported", "system_split"}
+            or "imported" in set(item.metadata.tags or [])
+        )
+    )
+
+
+def _is_ai_draft_or_candidate(item: ContentItem) -> bool:
+    destination = _save_destination(item)
+    if destination in {"ai_draft", "alternate_version"}:
+        return True
+    tags = set(item.metadata.tags or [])
+    return bool(tags.intersection({"ai_draft", "alternate_version", "ai_candidate"}))
+
+
+def _type_value(value: Any) -> Optional[ContentType]:
+    raw = _as_str(value).lower()
+    aliases = {
+        "character_card": "character",
+        "world_setting": "world",
+    }
+    raw = aliases.get(raw, raw)
+    try:
+        return ContentType(raw)
+    except ValueError:
+        return None
+
+
+def _item_in_scope(item: ContentItem, scope: AgentScope) -> bool:
+    item_session_id = item.metadata.session_id
+    parent_id = item.metadata.parent_id
+
+    if item_session_id and item_session_id != scope.session_id:
+        return False
+
+    if scope.selected_novel_id:
+        return item.metadata.id == scope.selected_novel_id or parent_id == scope.selected_novel_id
+
+    return item_session_id == scope.session_id
+
+
+def _lookup_terms(text: str) -> List[str]:
+    normalized = re.sub(r"[^\w\u4e00-\u9fff]+", " ", text or "", flags=re.UNICODE).strip()
+    terms = [term for term in normalized.split() if len(term) >= 2]
+    return list(dict.fromkeys(terms))[:8]
+
+
+def _mentions_recent(text: str) -> bool:
+    return bool(
+        re.search(
+            r"(刚才|上一版|上版|前面|上面|继续|接着|那版|这版|候选|草稿|rewrite|continue)",
+            text,
+            re.I,
+        )
+    )
+
+
+def _mentions_writing(text: str) -> bool:
+    return bool(
+        re.search(
+            r"(写|续写|改写|重写|润色|序章|正文|番外|章节|候选|草稿|开头|结尾|prologue|chapter|rewrite|continue)",
+            text,
+            re.I,
+        )
+    )
+
+
+def _mentions_chapter_need(text: str) -> bool:
+    return bool(
+        re.search(
+            r"(续写|接着|章节|第\s*\d+\s*章|某章|这一章|上一章|结尾|开头|序章|番外|正文|chapter|prologue|ending)",
+            text,
+            re.I,
+        )
+    )
+
+
+def _mentions_asset_need(text: str) -> bool:
+    return bool(
+        re.search(
+            r"(角色|人物|关系|羁绊|世界观|设定|地点|组织|时间线|事件|伏笔|character|world|relationship|timeline)",
+            text,
+            re.I,
+        )
+    )
+
+
+def _allow_ai_versions(text: str) -> bool:
+    return bool(re.search(r"(草稿|候选|上一版|刚才|那版|这版|备选|alternate|draft)", text, re.I))
+
+
+def _snippet_mode(text: str) -> str:
+    if re.search(r"(续写|接着|结尾|上一章|ending)", text, re.I):
+        return "end"
+    if re.search(r"(开头|序章|prologue|beginning)", text, re.I):
+        return "start"
+    return "keyword"
+
+
+def _extract_snippet(content: str, query: str, mode: str, limit: int = MAX_SNIPPET_CHARS) -> str:
+    text = content.strip()
+    if not text:
+        return ""
+    if len(text) <= limit:
+        return text
+    if mode == "start":
+        return text[:limit]
+    if mode == "end":
+        return text[-limit:]
+
+    terms = _lookup_terms(query)
+    lowered = text.lower()
+    hit = -1
+    for term in terms:
+        hit = lowered.find(term.lower())
+        if hit >= 0:
+            break
+    if hit < 0:
+        return text[:limit]
+    half = limit // 2
+    start = max(0, hit - half)
+    end = min(len(text), start + limit)
+    return text[start:end]
+
+
+class WritingAgentRuntime:
+    """Rule-planned context gatherer for writing chat."""
+
+    def __init__(self, content_manager: ContentManager, storage_manager: StorageManager):
+        self.content_manager = content_manager
+        self.storage_manager = storage_manager
+
+    async def prepare(
+        self,
+        *,
+        user_message: str,
+        context: Optional[Dict[str, Any]],
+        conversation: Optional[Conversation],
+        base_system_prompt: str,
+    ) -> AgentPreparation:
+        scope = self._scope_from_context(context)
+        if not scope:
+            return AgentPreparation(
+                system_prompt=base_system_prompt,
+                trace=self._empty_trace("缺少 session_id，已使用普通单轮上下文。", degraded=True),
+            )
+
+        plan = self._plan(user_message, context or {})
+        observations: List[ToolObservation] = []
+        degraded = False
+        seen_call_keys: set[str] = set()
+
+        calls = list(plan["calls"])
+        while calls and len(observations) < MAX_TOOL_CALLS:
+            call = calls.pop(0)
+            call_key = json.dumps(call, ensure_ascii=False, sort_keys=True)
+            if call_key in seen_call_keys:
+                continue
+            seen_call_keys.add(call_key)
+
+            try:
+                observation = await self._run_tool(
+                    call["name"],
+                    call.get("args", {}),
+                    scope,
+                    conversation,
+                    user_message,
+                )
+            except Exception as exc:  # pragma: no cover - defensive degradation
+                degraded = True
+                observation = ToolObservation(
+                    name=call["name"],
+                    status="error",
+                    summary=f"工具失败，已降级：{_clip(str(exc), 120)}",
+                    error=str(exc),
+                )
+            if observation.status == "error":
+                degraded = True
+            observations.append(observation)
+
+            for next_call in self._maybe_continue(plan, observations):
+                if len(observations) + len(calls) >= MAX_TOOL_CALLS:
+                    break
+                calls.append(next_call)
+
+        if calls:
+            degraded = True
+
+        context_block = self._build_context_block(observations)
+        trace = self._build_trace(plan, observations, degraded)
+        if context_block:
+            system_prompt = (
+                f"{base_system_prompt}\n\n"
+                "以下是本轮写作 agent 已读取并压缩后的依据。请只把它当作创作参考，"
+                "不要在正文中复述工具过程，也不要展示隐藏思考链。\n"
+                f"{context_block}"
+            )
+        else:
+            system_prompt = base_system_prompt
+
+        return AgentPreparation(system_prompt=system_prompt, trace=trace)
+
+    def _scope_from_context(self, context: Optional[Dict[str, Any]]) -> Optional[AgentScope]:
+        if not isinstance(context, dict):
+            return None
+        session_id = _as_str(context.get("session_id"))
+        if not session_id:
+            return None
+        selected_novel_id = _as_str(context.get("selected_novel_id") or context.get("selectedNovelId")) or None
+        return AgentScope(session_id=session_id, selected_novel_id=selected_novel_id)
+
+    def _plan(self, user_message: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        focused_assets = context.get("focused_assets")
+        has_focused = isinstance(focused_assets, list) and len(focused_assets) > 0
+        writing = _mentions_writing(user_message)
+        recent = _mentions_recent(user_message)
+        needs_assets = _mentions_asset_need(user_message) or (writing and not has_focused)
+        needs_chapters = _mentions_chapter_need(user_message)
+        allow_ai = _allow_ai_versions(user_message)
+
+        calls: List[Dict[str, Any]] = []
+        if recent or writing:
+            calls.append({"name": "get_recent_conversation", "args": {"limit": 6}})
+        if needs_assets:
+            calls.append(
+                {
+                    "name": "search_project_assets",
+                    "args": {
+                        "query": user_message[:120],
+                        "types": ["character", "world", "outline", "relationship", "timeline"],
+                        "limit": 5,
+                        "include_ai_versions": allow_ai,
+                    },
+                }
+            )
+        if needs_chapters:
+            calls.append(
+                {
+                    "name": "search_chapter_snippets",
+                    "args": {
+                        "query": user_message[:120],
+                        "mode": _snippet_mode(user_message),
+                        "limit": 3,
+                        "include_ai_versions": allow_ai,
+                    },
+                }
+            )
+        if re.search(r"(覆盖|替换|更新已有|改写.*章|重写.*章)", user_message):
+            calls.append(
+                {
+                    "name": "prepare_chapter_update",
+                    "args": {
+                        "target_hint": user_message[:120],
+                        "reason": "用户可能要覆盖或改写已有章节，必须生成更新建议并等待确认。",
+                    },
+                }
+            )
+        elif writing:
+            calls.append(
+                {
+                    "name": "prepare_save_asset",
+                    "args": {
+                        "asset_type": "chapter",
+                        "title": "AI 写作草稿",
+                        "reason": "写作结果可能需要保存为章节草稿或候选版本。",
+                    },
+                }
+            )
+        if writing and len(calls) < MAX_TOOL_CALLS:
+            calls.append({"name": "run_quality_check", "args": {"task": user_message[:160]}})
+
+        if not calls:
+            calls.append({"name": "get_recent_conversation", "args": {"limit": 3}})
+
+        intent_parts = ["写作/改写" if writing else "普通问答"]
+        if recent:
+            intent_parts.append("参考最近对话")
+        if needs_chapters:
+            intent_parts.append("读取章节片段")
+        if needs_assets:
+            intent_parts.append("读取项目资产")
+
+        return {
+            "intent": "，".join(intent_parts),
+            "plan_summary": (
+                f"识别为{'，'.join(intent_parts)}；优先使用聚焦资产，"
+                "并按需读取最近对话、项目资产和章节片段。"
+            ),
+            "calls": calls[:MAX_TOOL_CALLS],
+            "writing": writing,
+            "needs_assets": needs_assets,
+            "needs_chapters": needs_chapters,
+        }
+
+    def _maybe_continue(
+        self,
+        plan: Dict[str, Any],
+        observations: Sequence[ToolObservation],
+    ) -> List[Dict[str, Any]]:
+        if len(observations) >= MAX_TOOL_CALLS:
+            return []
+
+        by_name = {observation.name: observation for observation in observations}
+        next_calls: List[Dict[str, Any]] = []
+
+        asset_search = by_name.get("search_project_assets")
+        if plan.get("needs_assets") and asset_search and not asset_search.items:
+            next_calls.append(
+                {
+                    "name": "search_project_assets",
+                    "args": {
+                        "query": "",
+                        "types": ["character", "world", "outline", "relationship", "timeline"],
+                        "limit": 5,
+                        "include_ai_versions": False,
+                    },
+                }
+            )
+
+        snippet_search = by_name.get("search_chapter_snippets")
+        if plan.get("needs_chapters") and snippet_search and not snippet_search.items:
+            next_calls.append(
+                {
+                    "name": "search_chapter_snippets",
+                    "args": {
+                        "query": "",
+                        "mode": "end",
+                        "limit": 3,
+                        "include_ai_versions": False,
+                    },
+                }
+            )
+
+        return next_calls
+
+    async def _run_tool(
+        self,
+        name: str,
+        args: Dict[str, Any],
+        scope: AgentScope,
+        conversation: Optional[Conversation],
+        user_message: str,
+    ) -> ToolObservation:
+        if name == "search_project_assets":
+            return await self.search_project_assets(scope, args)
+        if name == "get_asset_detail":
+            return await self.get_asset_detail(scope, args)
+        if name == "search_chapter_snippets":
+            return await self.search_chapter_snippets(scope, args, user_message)
+        if name == "get_recent_conversation":
+            return self.get_recent_conversation(conversation, args, user_message)
+        if name == "prepare_save_asset":
+            return self.prepare_save_asset(args)
+        if name == "prepare_chapter_update":
+            return self.prepare_chapter_update(args)
+        if name == "run_quality_check":
+            return self.run_quality_check(args)
+        return ToolObservation(name=name, status="error", summary="未知工具")
+
+    async def search_project_assets(self, scope: AgentScope, args: Dict[str, Any]) -> ToolObservation:
+        query = _clip(_as_str(args.get("query")), 120)
+        limit = min(max(int(args.get("limit") or 5), 1), 8)
+        include_ai_versions = bool(args.get("include_ai_versions"))
+        requested_types = [_type_value(value) for value in args.get("types") or []]
+        requested_types = [value for value in requested_types if value is not None]
+
+        async def run_search(search_query: str) -> List[ContentItem]:
+            result = await self.content_manager.search_content(
+                ContentSearchRequest(
+                    query=search_query,
+                    content_types=requested_types or None,
+                    session_id=scope.session_id,
+                    limit=50,
+                    include_content=True,
+                )
+            )
+            return list(result.items)
+
+        candidates = await run_search(query)
+        items: List[Dict[str, Any]] = []
+        for item in candidates:
+            if not _item_in_scope(item, scope):
+                continue
+            if item.metadata.type == ContentType.CHAPTER and not include_ai_versions and _is_ai_draft_or_candidate(item):
+                continue
+            text = _content_text(item) or json.dumps(_payload(item), ensure_ascii=False)
+            items.append(
+                {
+                    "id": item.metadata.id,
+                    "type": _type_name(item.metadata.type),
+                    "title": _title(item),
+                    "summary": _clip(text, MAX_ASSET_SUMMARY),
+                }
+            )
+            if len(items) >= limit:
+                break
+
+        if not items and query:
+            for item in await run_search(""):
+                if not _item_in_scope(item, scope):
+                    continue
+                if item.metadata.type == ContentType.CHAPTER and not include_ai_versions and _is_ai_draft_or_candidate(item):
+                    continue
+                text = _content_text(item) or json.dumps(_payload(item), ensure_ascii=False)
+                items.append(
+                    {
+                        "id": item.metadata.id,
+                        "type": _type_name(item.metadata.type),
+                        "title": _title(item),
+                        "summary": _clip(text, MAX_ASSET_SUMMARY),
+                    }
+                )
+                if len(items) >= limit:
+                    break
+
+        return ToolObservation(
+            name="search_project_assets",
+            status="ok",
+            summary=f"找到 {len(items)} 个项目资产。",
+            items=items,
+        )
+
+    async def get_asset_detail(self, scope: AgentScope, args: Dict[str, Any]) -> ToolObservation:
+        asset_id = _as_str(args.get("asset_id"))
+        if not asset_id:
+            return ToolObservation(name="get_asset_detail", status="error", summary="缺少 asset_id")
+        item = await self.content_manager.get_content(asset_id)
+        if not item or not _item_in_scope(item, scope):
+            return ToolObservation(name="get_asset_detail", status="error", summary="资产不存在或不属于当前项目")
+        max_chars = min(max(int(args.get("max_chars") or MAX_DETAIL_CHARS), 120), MAX_DETAIL_CHARS)
+        text = _content_text(item) or json.dumps(_payload(item), ensure_ascii=False)
+        return ToolObservation(
+            name="get_asset_detail",
+            status="ok",
+            summary=f"读取资产：{_title(item)}。",
+            items=[
+                {
+                    "id": item.metadata.id,
+                    "type": _type_name(item.metadata.type),
+                    "title": _title(item),
+                    "summary": _clip(text, max_chars),
+                }
+            ],
+        )
+
+    async def search_chapter_snippets(
+        self,
+        scope: AgentScope,
+        args: Dict[str, Any],
+        user_message: str,
+    ) -> ToolObservation:
+        query = _clip(_as_str(args.get("query")), 120)
+        mode = _as_str(args.get("mode")) or "auto"
+        if mode == "auto":
+            mode = _snippet_mode(user_message)
+        if mode not in {"start", "end", "keyword"}:
+            mode = "keyword"
+        limit = min(max(int(args.get("limit") or 3), 1), 5)
+        include_ai_versions = bool(args.get("include_ai_versions"))
+
+        result = await self.content_manager.search_content(
+            ContentSearchRequest(
+                query=query,
+                content_type=ContentType.CHAPTER,
+                session_id=scope.session_id,
+                limit=80,
+                include_content=True,
+            )
+        )
+        candidates = [item for item in result.items if _item_in_scope(item, scope)]
+        if not candidates and query:
+            fallback = await self.content_manager.search_content(
+                ContentSearchRequest(
+                    query="",
+                    content_type=ContentType.CHAPTER,
+                    session_id=scope.session_id,
+                    limit=80,
+                    include_content=True,
+                )
+            )
+            candidates = [item for item in fallback.items if _item_in_scope(item, scope)]
+
+        def chapter_rank(item: ContentItem) -> tuple[int, str]:
+            payload = _payload(item)
+            if _is_imported_or_formal_chapter(item):
+                return (0, str(payload.get("order") or payload.get("chapter_order") or item.metadata.created_at))
+            if _is_ai_draft_or_candidate(item):
+                return (5, str(item.metadata.created_at))
+            return (2, str(payload.get("order") or item.metadata.created_at))
+
+        snippets: List[Dict[str, Any]] = []
+        for item in sorted(candidates, key=chapter_rank):
+            if not include_ai_versions and _is_ai_draft_or_candidate(item):
+                continue
+            content = _content_text(item)
+            snippet = _clip(_extract_snippet(content, query or user_message, mode), MAX_SNIPPET_CHARS)
+            if not snippet:
+                continue
+            snippets.append(
+                {
+                    "id": item.metadata.id,
+                    "title": _title(item),
+                    "mode": mode,
+                    "summary": snippet,
+                }
+            )
+            if len(snippets) >= limit:
+                break
+
+        return ToolObservation(
+            name="search_chapter_snippets",
+            status="ok",
+            summary=f"找到 {len(snippets)} 段章节片段（{mode}）。",
+            items=snippets,
+        )
+
+    def get_recent_conversation(
+        self,
+        conversation: Optional[Conversation],
+        args: Dict[str, Any],
+        user_message: str,
+    ) -> ToolObservation:
+        limit = min(max(int(args.get("limit") or 6), 1), 8)
+        if not conversation:
+            return ToolObservation(name="get_recent_conversation", status="ok", summary="没有可读取的历史对话。")
+
+        messages = list(conversation.messages)
+        if messages and messages[-1].role == "user" and messages[-1].content == user_message:
+            messages = messages[:-1]
+        selected = messages[-limit:]
+        items = [
+            {
+                "role": message.role,
+                "title": message.role,
+                "summary": _clip(message.content, 520),
+            }
+            for message in selected
+            if message.content.strip()
+        ]
+        return ToolObservation(
+            name="get_recent_conversation",
+            status="ok",
+            summary=f"读取最近 {len(items)} 条对话。",
+            items=items,
+        )
+
+    def prepare_save_asset(self, args: Dict[str, Any]) -> ToolObservation:
+        asset_type = _as_str(args.get("asset_type")) or "chapter"
+        title = _as_str(args.get("title")) or "AI 写作草稿"
+        reason = _as_str(args.get("reason")) or "本轮可能生成可保存内容。"
+        return ToolObservation(
+            name="prepare_save_asset",
+            status="ok",
+            summary="准备保存建议：最终回答如包含可落库章节，应附 save_asset 标签并等待用户确认。",
+            items=[{"type": asset_type, "title": title, "summary": _clip(reason, MAX_TRACE_PREVIEW)}],
+        )
+
+    def prepare_chapter_update(self, args: Dict[str, Any]) -> ToolObservation:
+        target_hint = _as_str(args.get("target_hint")) or "未指定"
+        reason = _as_str(args.get("reason")) or "用户可能要改写已有章节。"
+        return ToolObservation(
+            name="prepare_chapter_update",
+            status="ok",
+            summary="准备覆盖建议：不得直接写库，必须生成 update_existing 保存建议并由用户确认。",
+            items=[{"title": target_hint, "summary": _clip(reason, MAX_TRACE_PREVIEW)}],
+        )
+
+    def run_quality_check(self, args: Dict[str, Any]) -> ToolObservation:
+        task = _as_str(args.get("task")) or "写作任务"
+        checklist = [
+            "人物欲望与伤痕是否驱动行动",
+            "是否使用已提取关系张力和世界观规则",
+            "场景是否有可感知的意象、情绪转折和余韵",
+            "如生成章节，是否附带 save_asset 保存建议",
+        ]
+        return ToolObservation(
+            name="run_quality_check",
+            status="ok",
+            summary=f"为任务准备 {len(checklist)} 条写作质量检查。",
+            items=[{"title": "质量检查", "summary": "；".join(checklist), "task": _clip(task, 120)}],
+        )
+
+    def _build_context_block(self, observations: Sequence[ToolObservation]) -> str:
+        parts: List[str] = []
+        for observation in observations:
+            if observation.status != "ok" or not observation.items:
+                parts.append(f"- {observation.name}: {observation.summary}")
+                continue
+
+            parts.append(f"- {observation.name}: {observation.summary}")
+            for item in observation.items[:6]:
+                title = _as_str(item.get("title")) or _as_str(item.get("role")) or "条目"
+                item_type = _as_str(item.get("type"))
+                mode = _as_str(item.get("mode"))
+                summary = _as_str(item.get("summary"))
+                prefix = f"  * {title}"
+                if item_type:
+                    prefix += f" [{item_type}]"
+                if mode:
+                    prefix += f" ({mode})"
+                parts.append(f"{prefix}: {_clip(summary, 620)}")
+
+        block = "\n".join(parts)
+        return _clip(block, MAX_AGENT_CONTEXT_CHARS)
+
+    def _build_trace(
+        self,
+        plan: Dict[str, Any],
+        observations: Sequence[ToolObservation],
+        degraded: bool,
+    ) -> Dict[str, Any]:
+        used_assets: List[Dict[str, Any]] = []
+        chapter_snippets: List[Dict[str, Any]] = []
+        tool_calls: List[Dict[str, Any]] = []
+        for observation in observations:
+            tool_calls.append(
+                {
+                    "name": observation.name,
+                    "status": observation.status,
+                    "summary": observation.summary,
+                    "item_count": len(observation.items),
+                }
+            )
+            for item in observation.items:
+                if observation.name == "search_chapter_snippets":
+                    chapter_snippets.append(
+                        {
+                            "id": item.get("id"),
+                            "title": item.get("title"),
+                            "mode": item.get("mode"),
+                            "preview": _clip(_as_str(item.get("summary")), MAX_TRACE_PREVIEW),
+                        }
+                    )
+                elif item.get("id"):
+                    used_assets.append(
+                        {
+                            "id": item.get("id"),
+                            "type": item.get("type"),
+                            "title": item.get("title"),
+                        }
+                    )
+
+        return {
+            "enabled": True,
+            "plan_summary": plan.get("plan_summary") or "已按任务读取必要上下文。",
+            "tool_calls": tool_calls,
+            "used_assets": used_assets[:8],
+            "chapter_snippets": chapter_snippets[:5],
+            "degraded": degraded,
+            "max_tool_calls": MAX_TOOL_CALLS,
+        }
+
+    def _empty_trace(self, summary: str, degraded: bool = False) -> Dict[str, Any]:
+        return {
+            "enabled": False,
+            "plan_summary": summary,
+            "tool_calls": [],
+            "used_assets": [],
+            "chapter_snippets": [],
+            "degraded": degraded,
+            "max_tool_calls": MAX_TOOL_CALLS,
+        }
