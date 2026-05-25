@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChatSidebar } from '@/components/chat/ChatSidebar';
-import { MessageList, Message } from '@/components/chat/MessageBubble';
+import { MessageList, Message, type ChapterSaveTargetOption } from '@/components/chat/MessageBubble';
 import { ChatInput } from '@/components/chat/ChatInput';
 import { ArtifactPanel } from '@/components/chat/ArtifactPanel';
 import ImportTextModal from '../components/ImportTextModal';
@@ -37,8 +37,13 @@ import {
   bindContentItemToNovel,
   isUnassignedNovelScopedContentItem,
 } from '@/lib/content-item-binding';
-import { applyChapterSaveDestinationToRequest, saveAssetRequestToContent } from '@/lib/save-asset-requests';
+import {
+  applyChapterSaveDestinationToRequest,
+  applyChapterSaveTargetToRequest,
+  saveAssetRequestToContent,
+} from '@/lib/save-asset-requests';
 import type { ChapterSaveDestination } from '@/lib/chapter-save-destinations';
+import { resolveChapterDirectoryMetadata, sortChaptersByDirectory } from '@/lib/chapter-metadata';
 import {
   resolveNovelImportCompletionAction,
 } from '@/lib/import-workflow';
@@ -260,6 +265,20 @@ export default function ChatPage() {
     setViewMode('chat');
     selectSession(id);
   }, [currentSessionId, selectSession]);
+
+  const chapterSaveTargets = useMemo<ChapterSaveTargetOption[]>(() => {
+    return sortChaptersByDirectory(projectAssets.chapters).map((chapter, index) => {
+      const metadata = resolveChapterDirectoryMetadata(chapter, index + 1);
+      return {
+        id: chapter.metadata.id,
+        title: metadata.displayTitle,
+        sourceLabel: metadata.sourceLabel,
+        saveDestinationLabel: metadata.saveDestinationLabel,
+        roleLabel: metadata.roleLabel,
+        wordCount: metadata.wordCount,
+      };
+    });
+  }, [projectAssets.chapters]);
 
   const handleCleanupEmptySessions = useCallback(async () => {
     const result = await chatService.cleanupEmptyConversations();
@@ -910,7 +929,12 @@ export default function ChatPage() {
 
       updateMessage(targetSessionId, messageId, {
         saveAssetRequests: msg!.saveAssetRequests!.map((r, i) =>
-          i === requestIndex ? { ...r, id: saveResult.contentId ?? r.id, status: 'saved' as const } : r,
+          i === requestIndex ? {
+            ...r,
+            id: saveResult.contentId ?? r.id,
+            contentId: saveResult.contentId,
+            status: 'saved' as const,
+          } : r,
         ),
       });
       addFocusedAsset(buildFocusedAssetFromArtifact({
@@ -992,6 +1016,45 @@ export default function ChatPage() {
       saveAssetRequests: msg!.saveAssetRequests!.map((item, index) =>
         index === requestIndex ? {
           ...applyChapterSaveDestinationToRequest(item, destination),
+          status: item.status,
+        } : item,
+      ),
+    });
+  }, [currentSessionId, messagesMap, updateMessage]);
+
+  const handleSelectSaveAssetTarget = useCallback((
+    messageId: string,
+    requestIndex: number,
+    targetId: string,
+  ) => {
+    let targetSessionId = currentSessionId || '';
+    let messages = targetSessionId ? (messagesMap.get(targetSessionId) ?? []) : [];
+    if (!messages.some((m) => m.id === messageId)) {
+      Array.from(messagesMap.entries()).some(([sessionId, sessionMessages]) => {
+        if (sessionMessages.some((m: Message) => m.id === messageId)) {
+          targetSessionId = sessionId;
+          messages = sessionMessages;
+          return true;
+        }
+        return false;
+      });
+    }
+
+    if (!targetSessionId) {
+      return;
+    }
+
+    const msg = messages.find((m) => m.id === messageId);
+    const request = msg?.saveAssetRequests?.[requestIndex];
+    if (!request || request.status !== 'pending') {
+      return;
+    }
+
+    const cleanTargetId = targetId.trim();
+    updateMessage(targetSessionId, messageId, {
+      saveAssetRequests: msg!.saveAssetRequests!.map((item, index) =>
+        index === requestIndex ? {
+          ...applyChapterSaveTargetToRequest(item, cleanTargetId),
           status: item.status,
         } : item,
       ),
@@ -1534,11 +1597,13 @@ export default function ChatPage() {
                 <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                   <MessageList
                     messages={currentMessages.filter(m => m.role !== 'system')}
+                    chapterSaveTargets={chapterSaveTargets}
                     onSelectAssetCandidate={handleSelectAssetCandidate}
                     onOpenArtifact={handleOpenMessageArtifact}
                     onConfirmSaveAsset={handleConfirmSaveAsset}
                     onRejectSaveAsset={handleRejectSaveAsset}
                     onChangeSaveAssetDestination={handleChangeSaveAssetDestination}
+                    onSelectSaveAssetTarget={handleSelectSaveAssetTarget}
                   />
                 {isGenerating && (
                   <div style={{ display: 'flex', alignItems: 'center', padding: '16px 40px', color: 'var(--text-muted)' }}>

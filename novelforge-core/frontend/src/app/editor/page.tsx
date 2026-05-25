@@ -6,9 +6,12 @@ import { useAppStore } from '@/lib/hooks/use-app-store';
 import { buildContentCreateRequest, getContentAssetPayload, getContentAssetText } from '@/lib/content-contract';
 import {
   buildManualChapterPayload,
+  buildPromotedAIChapterPayload,
+  buildPromotedAIChapterTags,
   buildUpdatedChapterPayload,
   findMostRecentlyUpdatedChapter,
   getNextManualChapterIndex,
+  type PromotableChapterDestination,
   resolveChapterDirectoryMetadata,
   sortChaptersByDirectory,
 } from '@/lib/chapter-metadata';
@@ -147,6 +150,14 @@ export default function NovelEditorPage() {
     [chapters, selectedChapterId]
   );
 
+  const selectedChapterMetadata = useMemo(
+    () => selectedChapter ? resolveChapterDirectoryMetadata(selectedChapter) : null,
+    [selectedChapter],
+  );
+
+  const canPromoteSelectedChapter = selectedChapterMetadata?.sourceType === 'ai_generated'
+    && (selectedChapterMetadata.saveDestination === 'ai_draft' || selectedChapterMetadata.saveDestination === 'alternate_version');
+
   useEffect(() => {
     syncChapterQueryParam(selectedChapterId);
   }, [selectedChapterId]);
@@ -283,6 +294,72 @@ export default function NovelEditorPage() {
       setIsSaving(false);
     }
   }, [currentSessionId, draftContent, draftTitle, selectedChapter]);
+
+  const handlePromoteAIChapter = useCallback(async (destination: PromotableChapterDestination) => {
+    if (!selectedChapter || !canPromoteSelectedChapter) {
+      return;
+    }
+
+    if (hasUnsavedChanges) {
+      setSaveMessage('请先保存当前正文修改，再调整章节保存位置。');
+      return;
+    }
+
+    setIsSaving(true);
+    setError(null);
+    setSaveMessage(null);
+
+    try {
+      const promotedPayload = buildPromotedAIChapterPayload({
+        item: selectedChapter,
+        destination,
+      });
+      const title = typeof promotedPayload.display_title === 'string'
+        ? promotedPayload.display_title
+        : selectedChapter.metadata.title;
+      const content = getContentAssetText(selectedChapter, promotedPayload);
+      const tags = buildPromotedAIChapterTags(selectedChapter.metadata.tags, destination);
+
+      const request = buildContentCreateRequest({
+        type: 'chapter',
+        title,
+        data: promotedPayload,
+        content,
+        status: selectedChapter.metadata.status,
+        author: selectedChapter.metadata.author,
+        sessionId: selectedChapter.metadata.session_id ?? currentSessionId ?? undefined,
+        parentId: selectedChapter.metadata.parent_id,
+        childrenIds: selectedChapter.metadata.children_ids,
+        tags,
+      });
+
+      await contentService.update(selectedChapter.metadata.id, request);
+
+      const updatedAt = new Date().toISOString();
+      setChapters((current) => sortChaptersByDirectory(current.map((chapter) =>
+        chapter.metadata.id === selectedChapter.metadata.id
+          ? {
+              ...chapter,
+              metadata: {
+                ...chapter.metadata,
+                title,
+                tags,
+                updated_at: updatedAt,
+              },
+              content,
+              extracted_data: promotedPayload,
+            }
+          : chapter
+      )));
+      setDraftTitle(title);
+      setDraftContent(content);
+      setSaveMessage('章节保存位置已更新，正文内容保持不变。');
+    } catch (promoteError) {
+      setError(promoteError instanceof Error ? promoteError.message : 'Failed to update chapter metadata');
+    } finally {
+      setIsSaving(false);
+    }
+  }, [canPromoteSelectedChapter, currentSessionId, hasUnsavedChanges, selectedChapter]);
 
   const handleCreateChapter = useCallback(async () => {
     if (hasUnsavedChanges) {
@@ -586,6 +663,39 @@ export default function NovelEditorPage() {
                       {hasUnsavedChanges ? <p className="mt-2 text-xs font-medium text-amber-300">Unsaved local edits</p> : null}
                     </div>
                   </div>
+
+                  {canPromoteSelectedChapter ? (
+                    <div className="rounded-2xl border border-violet-500/30 bg-violet-500/10 p-4">
+                      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                        <div>
+                          <p className="text-sm font-semibold text-violet-100">AI 草稿/候选版本</p>
+                          <p className="mt-1 text-xs text-violet-200/70">
+                            只调整章节保存位置和目录标签，不修改正文内容，AI 来源会继续保留。
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {[
+                            ['formal_body', '转为正式正文'],
+                            ['formal_prologue', '转为正式序章'],
+                            ['extra', '转为番外'],
+                            ['alternate_version', '保留为候选版本'],
+                          ].map(([destination, label]) => (
+                            <button
+                              key={destination}
+                              type="button"
+                              onClick={() => {
+                                void handlePromoteAIChapter(destination as PromotableChapterDestination);
+                              }}
+                              disabled={isSaving}
+                              className="rounded-xl border border-violet-400/30 bg-slate-950/70 px-3 py-2 text-xs font-semibold text-violet-100 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
 
                   <div>
                     <label className="mb-2 block text-sm font-medium text-slate-400">Body content</label>

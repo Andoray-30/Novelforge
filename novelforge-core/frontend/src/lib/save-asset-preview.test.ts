@@ -3,6 +3,7 @@ import {
   buildSaveAssetPreviewRows,
   getSaveAssetBlockingReason,
   getSaveAssetOperationLabel,
+  getSavedChapterEditorHref,
   getSaveAssetWarningLabel,
 } from '@/lib/save-asset-preview';
 
@@ -85,6 +86,23 @@ describe('save asset preview', () => {
       id: 'chapter-1',
       save_destination: 'update_existing',
       data: { content: '覆盖版本。' },
+    })).toBeNull();
+  });
+  it('builds editor links only for saved chapter cards', () => {
+    expect(getSavedChapterEditorHref({
+      type: 'chapter',
+      status: 'saved',
+      contentId: 'chapter saved/1',
+    })).toBe('/editor?chapterId=chapter%20saved%2F1');
+    expect(getSavedChapterEditorHref({
+      type: 'chapter',
+      status: 'pending',
+      contentId: 'chapter-1',
+    })).toBeNull();
+    expect(getSavedChapterEditorHref({
+      type: 'world',
+      status: 'saved',
+      contentId: 'world-1',
     })).toBeNull();
   });
 });

@@ -60,6 +60,46 @@ export function applyChapterSaveDestinationToRequest(
   };
 }
 
+export function applyChapterSaveTargetToRequest(
+  request: SaveAssetRequest,
+  targetId: string,
+): SaveAssetRequest {
+  if (request.type !== 'chapter') {
+    return request;
+  }
+
+  const cleanTargetId = targetId.trim();
+  const nextData: Record<string, unknown> = {
+    ...request.data,
+    save_destination: 'update_existing',
+    should_replace_existing: true,
+  };
+
+  if (cleanTargetId) {
+    nextData.id = cleanTargetId;
+    nextData.contentItemId = cleanTargetId;
+    nextData.content_item_id = cleanTargetId;
+    return {
+      ...request,
+      id: cleanTargetId,
+      save_destination: 'update_existing',
+      should_replace_existing: true,
+      data: nextData,
+    };
+  }
+
+  delete nextData.id;
+  delete nextData.contentItemId;
+  delete nextData.content_item_id;
+  const { id: _id, ...requestWithoutId } = request;
+  return {
+    ...requestWithoutId,
+    save_destination: 'update_existing',
+    should_replace_existing: true,
+    data: nextData,
+  };
+}
+
 export function buildSaveAssetContentRequest(params: {
   request: SaveAssetRequest;
   sessionId?: string;
@@ -159,6 +199,39 @@ function asStringArray(value: unknown): string[] {
     : [];
 }
 
+const CHAPTER_DESTINATION_MARKERS = new Set([
+  'ai_draft',
+  'alternate_version',
+  'formal_prologue',
+  'formal_body',
+  'extra',
+  'ai_update_existing',
+  'update_existing',
+]);
+
+function buildPreviousChapterSnapshot(existingItem?: ContentItem | null): Record<string, unknown> | undefined {
+  if (!existingItem) {
+    return undefined;
+  }
+
+  const existingPayload = existingItem.extracted_data && typeof existingItem.extracted_data === 'object'
+    ? existingItem.extracted_data as Record<string, unknown>
+    : {};
+  const oldBody = existingItem.content
+    || asString(existingPayload.content)
+    || asString(existingPayload.description)
+    || '';
+
+  return {
+    old_title: existingItem.metadata.title,
+    old_body: oldBody,
+    old_save_destination: asString(existingPayload.save_destination),
+    old_chapter_role: asString(existingPayload.chapter_role),
+    old_updated_at: existingItem.metadata.updated_at,
+    overwritten_at: new Date().toISOString(),
+  };
+}
+
 function shouldUpdateExistingChapter(request: SaveAssetRequest): boolean {
   const explicitDestination = normalizeChapterSaveDestination(
     request.save_destination ?? asString(request.data.save_destination),
@@ -193,13 +266,16 @@ function buildChapterSaveData(request: SaveAssetRequest, existingItem?: ContentI
     ?? asString(request.data.title)
     ?? request.title;
   const destination = resolveChapterSaveDestination(request, existingItem);
+  const previousSnapshot = destination === 'update_existing'
+    ? buildPreviousChapterSnapshot(existingItem)
+    : undefined;
   const chapterRole = request.chapter_role
     ?? asString(request.data.chapter_role)
     ?? inferChapterRoleFromTitle(title, destination);
   const wordCount = estimateChapterWordCount(content);
   const qualityFlags = Array.from(new Set([
-    ...asStringArray(existingPayload.quality_flags),
-    ...asStringArray(request.data.quality_flags),
+    ...asStringArray(existingPayload.quality_flags).filter((flag) => !CHAPTER_DESTINATION_MARKERS.has(flag)),
+    ...asStringArray(request.data.quality_flags).filter((flag) => !CHAPTER_DESTINATION_MARKERS.has(flag)),
     ...getChapterSaveDestinationFlags(destination),
     ...(wordCount > 0 && wordCount < 80 ? ['short_chapter'] : []),
   ]));
@@ -226,6 +302,10 @@ function buildChapterSaveData(request: SaveAssetRequest, existingItem?: ContentI
     quality_flags: qualityFlags,
   };
 
+  if (previousSnapshot) {
+    data.previous_snapshot = previousSnapshot;
+  }
+
   if (destination !== 'update_existing') {
     delete data.id;
     delete data.contentItemId;
@@ -246,7 +326,7 @@ function buildSaveAssetTags(
   }
 
   return Array.from(new Set([
-    ...(existingTags ?? []),
+    ...(existingTags ?? []).filter((tag) => !CHAPTER_DESTINATION_MARKERS.has(tag)),
     'ai-suggested',
     'ai-generated',
     asString(data.save_destination),

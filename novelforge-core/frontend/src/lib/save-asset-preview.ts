@@ -10,6 +10,19 @@ export type SaveAssetPreviewRow = {
   value: string;
 };
 
+export function getSavedChapterEditorHref(
+  request: Pick<SaveAssetRequest, 'type' | 'id'> & { status?: string; contentId?: string },
+): string | null {
+  if (request.type !== 'chapter' || request.status !== 'saved') {
+    return null;
+  }
+
+  const chapterId = request.contentId || request.id;
+  return typeof chapterId === 'string' && chapterId.trim().length > 0
+    ? `/editor?chapterId=${encodeURIComponent(chapterId.trim())}`
+    : null;
+}
+
 const FIELD_LABELS: Record<string, string> = {
   name: '名称',
   title: '标题',

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildManualChapterPayload,
+  buildPromotedAIChapterPayload,
+  buildPromotedAIChapterTags,
   buildUpdatedChapterPayload,
   findMostRecentlyUpdatedChapter,
   getNextManualChapterIndex,
@@ -203,5 +205,85 @@ describe('chapter metadata helper', () => {
     expect(metadata.saveDestination).toBe('ai_draft');
     expect(metadata.saveDestinationLabel).toBe('AI 草稿');
     expect(metadata.qualityFlagLabels).toContain('AI 草稿');
+  });
+  it('promotes AI draft metadata to formal body without changing content or source', () => {
+    const item = chapter({
+      id: 'ai-draft',
+      title: 'AI Draft',
+      content: 'Draft body.',
+      tags: ['ai-generated', 'ai_draft'],
+      data: {
+        title: 'AI Draft',
+        content: 'Draft body.',
+        source_type: 'ai_generated',
+        source: 'ai_save_asset',
+        save_destination: 'ai_draft',
+        chapter_role: '序章',
+        quality_flags: ['ai_draft', 'short_chapter'],
+        volume_index: 1,
+        chapter_index: 2,
+      },
+    });
+
+    const payload = buildPromotedAIChapterPayload({ item, destination: 'formal_body' });
+    const tags = buildPromotedAIChapterTags(item.metadata.tags, 'formal_body');
+
+    expect(payload).toMatchObject({
+      content: 'Draft body.',
+      source_type: 'ai_generated',
+      save_destination: 'formal_body',
+      should_replace_existing: false,
+      chapter_role: '正文',
+      quality_flags: expect.arrayContaining(['formal_body', 'short_chapter']),
+    });
+    expect(payload.quality_flags).not.toContain('ai_draft');
+    expect(tags).toEqual(expect.arrayContaining(['ai-generated', 'ai-suggested', 'formal_body']));
+    expect(tags).not.toContain('ai_draft');
+  });
+
+  it('promotes alternate version metadata to formal prologue and keeps directory order stable', () => {
+    const imported = chapter({
+      id: 'imported',
+      title: 'Chapter 1',
+      createdAt: '2026-05-24T00:00:00.000Z',
+      data: { source_type: 'imported', volume_index: 1, chapter_index: 1 },
+    });
+    const candidate = chapter({
+      id: 'candidate',
+      title: 'Candidate',
+      content: 'Candidate body.',
+      createdAt: '2026-05-24T00:01:00.000Z',
+      tags: ['ai-generated', 'alternate_version'],
+      data: {
+        title: 'Candidate',
+        content: 'Candidate body.',
+        source_type: 'ai_generated',
+        save_destination: 'alternate_version',
+        chapter_role: '正文',
+        quality_flags: ['alternate_version'],
+        volume_index: 1,
+        chapter_index: 1,
+      },
+    });
+
+    const promotedPayload = buildPromotedAIChapterPayload({ item: candidate, destination: 'formal_prologue' });
+    const promotedCandidate = chapter({
+      id: 'candidate',
+      title: 'Candidate',
+      content: 'Candidate body.',
+      createdAt: '2026-05-24T00:01:00.000Z',
+      tags: buildPromotedAIChapterTags(candidate.metadata.tags, 'formal_prologue'),
+      data: promotedPayload,
+    });
+
+    expect(promotedPayload).toMatchObject({
+      content: 'Candidate body.',
+      source_type: 'ai_generated',
+      save_destination: 'formal_prologue',
+      chapter_role: '序章',
+      quality_flags: expect.arrayContaining(['formal_prologue']),
+    });
+    expect(promotedPayload.quality_flags).not.toContain('alternate_version');
+    expect(sortChaptersByDirectory([promotedCandidate, imported]).map((item) => item.metadata.id)).toEqual(['candidate', 'imported']);
   });
 });

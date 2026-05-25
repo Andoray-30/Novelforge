@@ -5,6 +5,7 @@ import {
   buildSaveAssetPreviewRows,
   getSaveAssetBlockingReason,
   getSaveAssetOperationLabel,
+  getSavedChapterEditorHref,
   getSaveAssetWarningLabel,
 } from '@/lib/save-asset-preview';
 import {
@@ -40,6 +41,7 @@ export interface Message {
   };
   saveAssetRequests?: Array<SaveAssetRequest & {
     status?: 'pending' | 'saved' | 'rejected';
+    contentId?: string;
   }>;
   artifact?: {
     type: 'character_card' | 'world_setting' | 'timeline' | 'relationship' | 'outline' | 'chapter';
@@ -48,8 +50,18 @@ export interface Message {
   };
 }
 
+export type ChapterSaveTargetOption = {
+  id: string;
+  title: string;
+  sourceLabel: string;
+  saveDestinationLabel?: string | null;
+  roleLabel: string;
+  wordCount: number;
+};
+
 interface MessageBubbleProps {
   message: Message;
+  chapterSaveTargets?: ChapterSaveTargetOption[];
   onSelectAssetCandidate?: (
     messageId: string,
     candidate: NonNullable<Message['assetRequest']>['candidates'][number],
@@ -58,6 +70,7 @@ interface MessageBubbleProps {
   onConfirmSaveAsset?: (messageId: string, requestIndex: number) => void;
   onRejectSaveAsset?: (messageId: string, requestIndex: number) => void;
   onChangeSaveAssetDestination?: (messageId: string, requestIndex: number, destination: ChapterSaveDestination) => void;
+  onSelectSaveAssetTarget?: (messageId: string, requestIndex: number, targetId: string) => void;
 }
 
 function escapeHtml(value: string): string {
@@ -139,11 +152,13 @@ function getAssetRequestStatusText(request: NonNullable<Message['assetRequest']>
 
 export function MessageBubble({
   message,
+  chapterSaveTargets = [],
   onSelectAssetCandidate,
   onOpenArtifact,
   onConfirmSaveAsset,
   onRejectSaveAsset,
   onChangeSaveAssetDestination,
+  onSelectSaveAssetTarget,
 }: MessageBubbleProps) {
   const isUser = message.role === 'user';
 
@@ -442,6 +457,17 @@ export function MessageBubble({
               request.save_destination ?? request.data.save_destination,
               'ai_draft',
             );
+            const selectedTargetId = typeof request.id === 'string'
+              ? request.id
+              : typeof request.data.id === 'string'
+                ? request.data.id
+                : typeof request.data.contentItemId === 'string'
+                  ? request.data.contentItemId
+                  : typeof request.data.content_item_id === 'string'
+                    ? request.data.content_item_id
+                    : '';
+            const selectedTarget = chapterSaveTargets.find((target) => target.id === selectedTargetId);
+            const savedChapterEditorHref = getSavedChapterEditorHref(request);
 
             return (
             <div
@@ -557,6 +583,60 @@ export function MessageBubble({
                   </select>
                 </label>
               ) : null}
+              {request.type === 'chapter' && request.status === 'pending' && selectedDestination === 'update_existing' ? (
+                <div style={{
+                  display: 'grid',
+                  gap: 8,
+                  paddingLeft: 25,
+                }}>
+                  <label style={{
+                    display: 'grid',
+                    gridTemplateColumns: '72px minmax(0, 1fr)',
+                    gap: 8,
+                    alignItems: 'center',
+                    fontSize: 11,
+                    color: 'var(--text-muted)',
+                  }}>
+                    <span style={{ color: 'var(--text-disabled)' }}>目标章节</span>
+                    <select
+                      value={selectedTargetId}
+                      onChange={(event) => {
+                        onSelectSaveAssetTarget?.(message.id, index, event.currentTarget.value);
+                      }}
+                      style={{
+                        width: '100%',
+                        borderRadius: 8,
+                        border: '1px solid rgba(245, 158, 11, 0.35)',
+                        background: 'rgba(15, 23, 42, 0.85)',
+                        color: 'var(--text-secondary)',
+                        padding: '6px 8px',
+                        fontSize: 12,
+                        outline: 'none',
+                      }}
+                    >
+                      <option value="">请选择要覆盖的章节</option>
+                      {chapterSaveTargets.map((target) => (
+                        <option key={target.id} value={target.id}>
+                          {target.title} | {target.sourceLabel} | {target.saveDestinationLabel || '无保存目的'} | {target.roleLabel} | {target.wordCount}字
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {selectedTarget ? (
+                    <div style={{
+                      borderRadius: 8,
+                      border: '1px solid rgba(245, 158, 11, 0.28)',
+                      background: 'rgba(245, 158, 11, 0.08)',
+                      color: '#fcd34d',
+                      padding: '7px 9px',
+                      fontSize: 11,
+                      lineHeight: 1.55,
+                    }}>
+                      将覆盖：{selectedTarget.title} / {selectedTarget.sourceLabel} / {selectedTarget.saveDestinationLabel || '无保存目的'} / {selectedTarget.roleLabel} / {selectedTarget.wordCount}字
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               {previewRows.length > 0 ? (
                 <div style={{ display: 'grid', gap: 4, paddingLeft: 25 }}>
                   {previewRows.map((row) => (
@@ -595,6 +675,25 @@ export function MessageBubble({
                   {blockingReason}
                 </div>
               ) : null}
+              {savedChapterEditorHref ? (
+                <a
+                  href={savedChapterEditorHref}
+                  style={{
+                    marginLeft: 25,
+                    width: 'fit-content',
+                    borderRadius: 8,
+                    border: '1px solid rgba(99, 102, 241, 0.35)',
+                    background: 'rgba(99, 102, 241, 0.12)',
+                    color: '#c4b5fd',
+                    padding: '7px 10px',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    textDecoration: 'none',
+                  }}
+                >
+                  打开编辑器
+                </a>
+              ) : null}
             </div>
             );
           })}
@@ -620,6 +719,7 @@ export function MessageBubble({
 
 interface MessageListProps {
   messages: Message[];
+  chapterSaveTargets?: ChapterSaveTargetOption[];
   onSelectAssetCandidate?: (
     messageId: string,
     candidate: NonNullable<Message['assetRequest']>['candidates'][number],
@@ -628,15 +728,18 @@ interface MessageListProps {
   onConfirmSaveAsset?: (messageId: string, requestIndex: number) => void;
   onRejectSaveAsset?: (messageId: string, requestIndex: number) => void;
   onChangeSaveAssetDestination?: (messageId: string, requestIndex: number, destination: ChapterSaveDestination) => void;
+  onSelectSaveAssetTarget?: (messageId: string, requestIndex: number, targetId: string) => void;
 }
 
 export function MessageList({
   messages,
+  chapterSaveTargets = [],
   onSelectAssetCandidate,
   onOpenArtifact,
   onConfirmSaveAsset,
   onRejectSaveAsset,
   onChangeSaveAssetDestination,
+  onSelectSaveAssetTarget,
 }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const lastMessage = messages[messages.length - 1];
@@ -673,11 +776,13 @@ export function MessageList({
         <MessageBubble
           key={message.id}
           message={message}
+          chapterSaveTargets={chapterSaveTargets}
           onSelectAssetCandidate={onSelectAssetCandidate}
           onOpenArtifact={onOpenArtifact}
           onConfirmSaveAsset={onConfirmSaveAsset}
           onRejectSaveAsset={onRejectSaveAsset}
           onChangeSaveAssetDestination={onChangeSaveAssetDestination}
+          onSelectSaveAssetTarget={onSelectSaveAssetTarget}
         />
       ))}
     </div>

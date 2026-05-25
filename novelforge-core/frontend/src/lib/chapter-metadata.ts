@@ -1,6 +1,7 @@
 import { getContentAssetPayload, getContentAssetText } from '@/lib/content-contract';
 import {
   getChapterSaveDestinationLabel,
+  getChapterSaveDestinationFlags,
   getDestinationSortOffset,
   normalizeChapterSaveDestination,
   type ChapterSaveDestination,
@@ -8,6 +9,7 @@ import {
 import type { ContentItem } from '@/types';
 
 export type ChapterSourceType = 'imported' | 'system_split' | 'user_created' | 'ai_generated' | 'unknown';
+export type PromotableChapterDestination = Extract<ChapterSaveDestination, 'formal_body' | 'formal_prologue' | 'extra' | 'alternate_version'>;
 
 export interface ChapterDirectoryMetadata {
   displayTitle: string;
@@ -136,6 +138,30 @@ function estimateWordCount(text: string): number {
   const cjkCount = (text.match(/[\u4e00-\u9fff]/g) ?? []).length;
   const latinCount = (text.match(/[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)?/g) ?? []).length;
   return cjkCount + latinCount;
+}
+
+const AI_DESTINATION_FLAGS = new Set([
+  'ai_draft',
+  'alternate_version',
+  'formal_prologue',
+  'formal_body',
+  'extra',
+  'ai_update_existing',
+]);
+
+function chapterRoleForDestination(destination: PromotableChapterDestination, fallbackRole: string): string {
+  switch (destination) {
+    case 'formal_prologue':
+      return '序章';
+    case 'formal_body':
+      return '正文';
+    case 'extra':
+      return '番外';
+    case 'alternate_version':
+      return fallbackRole;
+    default:
+      return fallbackRole;
+  }
 }
 
 function inferRole(title: string, content: string): string {
@@ -392,4 +418,50 @@ export function buildUpdatedChapterPayload(params: {
     word_count: wordCount,
     quality_flags: nextFlags,
   };
+}
+
+export function buildPromotedAIChapterPayload(params: {
+  item: ContentItem;
+  destination: PromotableChapterDestination;
+}): Record<string, unknown> {
+  const payload = getContentAssetPayload(params.item);
+  const current = resolveChapterDirectoryMetadata(params.item);
+  const content = getContentAssetText(params.item, payload);
+  const destinationFlags = getChapterSaveDestinationFlags(params.destination);
+  const nextFlags = Array.from(new Set([
+    ...current.qualityFlags.filter((flag) => !AI_DESTINATION_FLAGS.has(flag)),
+    ...destinationFlags,
+    ...(current.wordCount > 0 && current.wordCount < 80 ? ['short_chapter'] : []),
+  ]));
+  const chapterRole = chapterRoleForDestination(params.destination, current.chapterRole);
+
+  return {
+    ...payload,
+    title: current.displayTitle,
+    chapter_title: current.displayTitle,
+    display_title: current.displayTitle,
+    original_title: asString(payload.original_title) ?? current.originalTitle,
+    content,
+    source_type: 'ai_generated',
+    source: asString(payload.source) ?? 'ai_save_asset',
+    generated_by_ai: true,
+    save_destination: params.destination,
+    should_replace_existing: false,
+    chapter_role: chapterRole,
+    volume_index: current.volumeIndex,
+    chapter_index: current.chapterIndex,
+    segment_index: current.segmentIndex,
+    is_decorative: current.isDecorative,
+    word_count: current.wordCount,
+    quality_flags: nextFlags,
+  };
+}
+
+export function buildPromotedAIChapterTags(tags: string[] | undefined, destination: PromotableChapterDestination): string[] {
+  return Array.from(new Set([
+    ...(tags ?? []).filter((tag) => !AI_DESTINATION_FLAGS.has(tag)),
+    'ai-suggested',
+    'ai-generated',
+    destination,
+  ]));
 }

@@ -3,6 +3,7 @@ import { contentService } from '@/lib/api';
 import { upsertContentAsset } from '@/lib/content-upsert';
 import {
   applyChapterSaveDestinationToRequest,
+  applyChapterSaveTargetToRequest,
   buildSaveAssetContentRequest,
   getSaveAssetRequestId,
   saveAssetRequestToContent,
@@ -258,5 +259,91 @@ describe('save asset requests', () => {
     });
     expect(request.extracted_data).not.toHaveProperty('id');
     expect(request.metadata.tags).toContain('alternate_version');
+  });
+
+  it('applies selected update target to pending chapter save requests', () => {
+    const original = {
+      type: 'chapter',
+      title: 'Candidate',
+      save_destination: 'alternate_version',
+      data: {
+        content: 'Candidate body.',
+        save_destination: 'alternate_version',
+      },
+    } as const;
+
+    const targeted = applyChapterSaveTargetToRequest(original, 'chapter-42');
+    expect(targeted.id).toBe('chapter-42');
+    expect(targeted.save_destination).toBe('update_existing');
+    expect(targeted.should_replace_existing).toBe(true);
+    expect(targeted.data).toMatchObject({
+      id: 'chapter-42',
+      contentItemId: 'chapter-42',
+      content_item_id: 'chapter-42',
+      save_destination: 'update_existing',
+      should_replace_existing: true,
+    });
+
+    const cleared = applyChapterSaveTargetToRequest(targeted, '');
+    expect(cleared.id).toBeUndefined();
+    expect(cleared.save_destination).toBe('update_existing');
+    expect(cleared.should_replace_existing).toBe(true);
+    expect(cleared.data.id).toBeUndefined();
+    expect(cleared.data.contentItemId).toBeUndefined();
+  });
+
+  it('stores a previous snapshot before overwriting an existing chapter', () => {
+    const existingChapter = createItem({
+      metadata: metadataWith({
+        id: 'chapter-1',
+        title: 'Old Chapter',
+        type: 'chapter',
+        tags: ['ai-generated', 'alternate_version'],
+        updated_at: '2026-05-05T08:00:00.000Z',
+      }),
+      content: 'Old body text.',
+      extracted_data: {
+        title: 'Old Chapter',
+        content: 'Old body text.',
+        save_destination: 'ai_draft',
+        chapter_role: '正文',
+        quality_flags: ['alternate_version', 'short_chapter'],
+      },
+    });
+
+    const request = buildSaveAssetContentRequest({
+      request: {
+        type: 'chapter',
+        title: 'New Chapter',
+        id: 'chapter-1',
+        save_destination: 'update_existing',
+        should_replace_existing: true,
+        data: {
+          content: 'New body text.',
+          save_destination: 'update_existing',
+          should_replace_existing: true,
+        },
+      },
+      sessionId: 'session-a',
+      parentId: 'novel-a',
+      existingItem: existingChapter,
+    });
+
+    expect(request.extracted_data).toMatchObject({
+      content: 'New body text.',
+      save_destination: 'update_existing',
+      quality_flags: expect.arrayContaining(['ai_update_existing', 'short_chapter']),
+      previous_snapshot: {
+        old_title: 'Old Chapter',
+        old_body: 'Old body text.',
+        old_save_destination: 'ai_draft',
+        old_chapter_role: '正文',
+        old_updated_at: '2026-05-05T08:00:00.000Z',
+        overwritten_at: expect.any(String),
+      },
+    });
+    expect(request.extracted_data?.quality_flags).not.toContain('alternate_version');
+    expect(request.metadata.tags).toContain('update_existing');
+    expect(request.metadata.tags).not.toContain('alternate_version');
   });
 });
