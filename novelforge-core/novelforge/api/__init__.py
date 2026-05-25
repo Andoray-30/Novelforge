@@ -2248,11 +2248,12 @@ async def get_user_tasks(
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
     """HTTP寮傚父澶勭悊"""
+    detail = exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail, ensure_ascii=False)
     return JSONResponse(
         status_code=exc.status_code,
         content={
-            "error": exc.detail,
-            "detail": f"HTTP {exc.status_code} 错误",
+            "error": f"HTTP {exc.status_code} 错误",
+            "detail": detail,
             "timestamp": datetime.now().isoformat()
         }
     )

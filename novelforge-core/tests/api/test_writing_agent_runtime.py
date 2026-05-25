@@ -170,6 +170,27 @@ def test_search_project_assets_falls_back_when_chinese_long_query_has_no_direct_
     assert "world-moon" in ids
 
 
+def test_agent_context_repairs_persisted_mojibake_before_model_prompt() -> None:
+    manager, storage = build_manager()
+    run(
+        manager.create_content(
+            build_item(
+                "char-mojibake",
+                title="辉夜".encode("utf-8").decode("latin1"),
+                content_type=ContentType.CHARACTER,
+                content="辉夜渴望守住月光。".encode("utf-8").decode("latin1"),
+            )
+        )
+    )
+    runtime = WritingAgentRuntime(manager, storage)
+    scope = AgentScope(session_id="session-a", selected_novel_id="novel-a")
+
+    observation = run(runtime.search_project_assets(scope, {"query": "", "types": ["character"], "limit": 1}))
+
+    assert observation.items[0]["title"] == "辉夜"
+    assert "守住月光" in observation.items[0]["summary"]
+
+
 def test_search_chapter_snippets_returns_text_and_excludes_ai_drafts_by_default() -> None:
     runtime = build_runtime()
     scope = AgentScope(session_id="session-a", selected_novel_id="novel-a")

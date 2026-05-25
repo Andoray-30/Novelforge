@@ -67,3 +67,76 @@ Current writing-quality verdict:
 3. Save the medium-length result as an AI draft and confirm editor reopen.
 4. Clean or archive legacy mock/test conversations so old previews like `Mock response` and `????` do not pollute internal test perception.
 5. Continue relationship/world topology usability work after the core closed loop is stable.
+
+## Goal 8 Medium-Length Validation Attempt
+
+Date: 2026-05-25
+
+Environment:
+
+- Backend: `http://127.0.0.1:8001`
+- Frontend: `http://localhost:3010`
+- Project used: `clean_import_20260524_111341`
+- Novel root: `novel_clean_import_20260524_111341`
+- Validation mode: backend agent API with real external provider; browser automation was not available in this tool session.
+
+Code changes verified before the live attempt:
+
+- Frontend now recognizes transient provider failures (`500/502/503/504`, timeout, connection/network errors) and shows a Chinese retry/degrade message instead of a raw/blank failure.
+- Assistant failure bubbles can show `重试本次请求`; retry is manual and bounded by user action, so it does not duplicate saves automatically.
+- Obvious legacy `agent trace` / `mock response` conversations are hidden from the main project status flow.
+- Writing-agent context now repairs common persisted UTF-8-as-Latin-1 mojibake before sending asset titles/summaries/snippets to the model. This is important because current stored sample assets still contain legacy mojibake in the raw API payload.
+- API `HTTPException` responses now put the actionable message in `detail` instead of replacing it with generic `HTTP 500 错误`.
+
+Live provider attempts:
+
+1. Pro mode:
+   - Model reported by backend: `gemini-3.1-pro-preview`
+   - Attempt 1: `HTTP 500`, `All connection attempts failed`
+   - Attempt 2: `HTTP 500`, `All connection attempts failed`
+   - Result: failed after the single safe retry.
+2. Fast degrade mode:
+   - Model reported by backend: `gemini-3.5-flash`
+   - Attempt 1: `HTTP 500`, `All connection attempts failed`
+   - Attempt 2: `HTTP 500`, `All connection attempts failed`
+   - Result: failed after the single safe retry under default sandbox network.
+3. Fast mode network recheck:
+   - Ran again with network permission.
+   - Model reported by backend: `gemini-3.5-flash`
+   - Attempt 1: success.
+   - Result: real medium-length generation succeeded.
+
+Trace/save/editor result:
+
+- Agent trace mode: `fallback`.
+- Tool calls:
+  - `get_recent_conversation`: read 6 recent messages.
+  - `search_project_assets`: found 1 project asset.
+  - `search_chapter_snippets`: found 3 chapter/source snippets.
+  - `prepare_save_asset`: prepared a save suggestion.
+  - `run_quality_check`: prepared 4 writing quality checks.
+- Used asset:
+  - `world_clean_import_20260524_111341_90b6987d`, title `世界深度设定`.
+- Used chapter snippets:
+  - `第一卷 序章`
+  - `第一卷 第二章（1）`
+  - `第一卷 第二章（2）`
+- Assistant response length: 3243 chars including notes and save tag.
+- Parsed `save_asset`: yes.
+- Saved content id: `edadc25c-a113-4fc0-a638-f228511e0efa`.
+- Saved draft body length: 1415 chars.
+- Editor UI/browser reopen: attempted with the Browser plugin on `localhost`, `127.0.0.1`, `10.90.0.10`, and `lvh.me`; all local editor URLs were blocked by the browser runtime with `net::ERR_BLOCKED_BY_CLIENT`.
+- Editor data readiness: verified through `GET /api/content/{id}` using UTF-8 decoding. The saved draft title is `Goal8 序章候选 - 完整版`, and the saved body starts with `黑暗。那是连时间都会被冻结的、绝对的黑暗。`.
+
+Writing quality verdict for Goal 8:
+
+- Correct asset use: pass at API level. The draft uses 彩叶、辉夜、八千代, `月夜见`, `原光之竹`, `2030/09/12`, and the sea-slug/moonlight myth.
+- Relationship tension: pass. The strongest tension is 彩叶 trying to find/save 辉夜 while 八千代 may be preserving or imprisoning her.
+- World rule/image: pass. The draft uses `原光之竹` as the world-maintaining mechanism and moon/date countdown as pressure.
+- Chapter/source fragment continuity: pass. The agent trace shows three imported chapter snippets, and the draft echoes the source prologue's direct call to 彩叶, battle/game imagery, and early-story surreal intrusion.
+- Emotional progression: partial-pass. It moves from mythic darkness to 彩叶's loss, then to 八千代's obsessive tenderness. It has a usable emotional arc, though the final section leans a little explicit and could be made subtler.
+- Save suitability: pass as AI draft/candidate, not as final formal prologue.
+
+Current conclusion:
+
+The product is better behaved under provider failure: users should now see a clear Chinese retry/degrade path instead of a confusing raw `HTTP 500` surface. The real medium-length generation passed after switching to Fast mode with network access, and the candidate was saved to the content library. Goal 8 still needs one final browser/editor visual verification pass for `edadc25c-a113-4fc0-a638-f228511e0efa`; the current blocker is the browser runtime blocking all local app URLs, not a missing saved draft.

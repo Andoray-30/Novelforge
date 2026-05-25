@@ -63,3 +63,16 @@ def test_chat_response_and_stored_assistant_message_include_agent_trace(monkeypa
     stored = fake_storage.data[f"conversation_{payload['conversation_id']}"]
     assistant_message = stored["messages"][-1]
     assert assistant_message["metadata"]["agent_trace"]["enabled"] is True
+
+
+def test_http_exception_detail_preserves_actionable_chinese_message(monkeypatch):
+    monkeypatch.setattr(api_module.config, "auth_required", False, raising=False)
+    monkeypatch.setattr(api_module, "storage_manager", FakeStorageManager(), raising=False)
+
+    client = TestClient(api_module.app)
+    response = client.get("/api/chat/conversation/missing-conversation")
+
+    assert response.status_code == 404
+    payload = response.json()
+    assert payload["detail"] == "Conversation not found"
+    assert payload["error"] == "HTTP 404 错误"

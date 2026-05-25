@@ -229,6 +229,28 @@ def _clip(value: str, limit: int) -> str:
     return normalized[: max(0, limit - 3)].rstrip() + "..."
 
 
+def _repair_mojibake_text(value: str) -> str:
+    """Repair common UTF-8-as-Latin-1 mojibake before sending context to models."""
+    if not value:
+        return value
+
+    mojibake_hits = len(re.findall(r"[ÃÂ]|[\u0080-\u009f]|(?:å|æ|ç|è|é|ä|ã)[\u0080-\u00ff]", value))
+    cjk_hits = len(re.findall(r"[\u4e00-\u9fff]", value))
+    if mojibake_hits == 0 or cjk_hits > mojibake_hits * 2:
+        return value
+
+    try:
+        repaired = value.encode("latin1").decode("utf-8")
+    except UnicodeError:
+        return value
+
+    repaired_cjk_hits = len(re.findall(r"[\u4e00-\u9fff]", repaired))
+    repaired_noise_hits = len(re.findall(r"[ÃÂ]|[\u0080-\u009f]", repaired))
+    if repaired_cjk_hits > cjk_hits and repaired_noise_hits < mojibake_hits:
+        return repaired
+    return value
+
+
 def _payload(item: ContentItem) -> Dict[str, Any]:
     return item.extracted_data if isinstance(item.extracted_data, dict) else {}
 
@@ -238,8 +260,8 @@ def _content_text(item: ContentItem) -> str:
     for key in ("content", "description", "summary", "text", "profile"):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
-            return value.strip()
-    return item.content or ""
+            return _repair_mojibake_text(value.strip())
+    return _repair_mojibake_text(item.content or "")
 
 
 def _title(item: ContentItem) -> str:
@@ -247,8 +269,8 @@ def _title(item: ContentItem) -> str:
     for key in ("display_title", "chapter_title", "title", "name"):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
-            return value.strip()
-    return item.metadata.title
+            return _repair_mojibake_text(value.strip())
+    return _repair_mojibake_text(item.metadata.title)
 
 
 def _type_name(value: Any) -> str:
