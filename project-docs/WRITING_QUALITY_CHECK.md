@@ -130,6 +130,12 @@ Trace/save/editor result:
   - `127.0.0.1.sslip.io` returned `ERR_CONNECTION_REFUSED`.
   - `localtest.me`, `novelforge.localhost`, and `0.0.0.0` were blocked by Browser Use URL policy after navigation resolved to a browser error data URL.
 - Editor data readiness: verified through `GET /api/content/{id}` using UTF-8 decoding. The saved draft title is `Goal8 序章候选 - 完整版`, and the saved body starts with `黑暗。那是连时间都会被冻结的、绝对的黑暗。`.
+- Final editor visual check: passed after confirming backend and frontend were actively listening.
+  - Opened `http://127.0.0.1:3010/editor?chapterId=edadc25c-a113-4fc0-a638-f228511e0efa`.
+  - The page initially selected the first imported chapter, but the Goal 8 draft was visible in the chapter list.
+  - Clicking `Goal8 序章候选 - 完整版` changed the URL to `chapterId=edadc25c-a113-4fc0-a638-f228511e0efa`.
+  - The title input showed `Goal8 序章候选 - 完整版`.
+  - The body textarea showed the saved draft beginning with `黑暗。那是连时间都会被冻结的、绝对的黑暗。`.
 
 Writing quality verdict for Goal 8:
 
@@ -142,4 +148,4 @@ Writing quality verdict for Goal 8:
 
 Current conclusion:
 
-The product is better behaved under provider failure: users should now see a clear Chinese retry/degrade path instead of a confusing raw `HTTP 500` surface. The real medium-length generation passed after switching to Fast mode with network access, and the candidate was saved to the content library. Goal 8 still needs one final browser/editor visual verification pass for `edadc25c-a113-4fc0-a638-f228511e0efa`; the current blocker is the browser runtime blocking all local app URLs, not a missing saved draft.
+The product is better behaved under provider failure: users should now see a clear Chinese retry/degrade path instead of a confusing raw `HTTP 500` surface. The real medium-length generation passed after switching to Fast mode with network access, the candidate was saved to the content library, and the editor visual check confirmed the saved draft can be opened and edited. Goal 8 is complete.
