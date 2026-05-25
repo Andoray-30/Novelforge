@@ -49,13 +49,19 @@ def seed_basic_project(manager: ContentManager) -> None:
             "char-hero",
             title="辉夜",
             content_type=ContentType.CHARACTER,
-            content="辉夜渴望证明自己不是被命运制造出来的影子。",
+            content="辉夜渴望证明自己不是被命运制造出来的影子。她害怕再度失去记忆，行动模式是在沉默中先保护他人，说话语气克制。",
+        ),
+        build_item(
+            "rel-hero-shadow",
+            title="辉夜与影子自己的关系",
+            content_type=ContentType.RELATIONSHIP,
+            content="辉夜依赖影子自己确认真实身份，却误解对方是敌人。两人有记忆亏欠和身份冲突，情绪张力推动序章悬念。",
         ),
         build_item(
             "world-moon",
             title="月轮协议",
             content_type=ContentType.WORLD,
-            content="月轮协议规定时空跳跃会剥离记忆，因此角色关系带有失而复得的痛感。",
+            content="月轮协议规定时空跳跃会剥离记忆。月光、钟声和雨夜是核心意象，违规跳跃的代价是遗忘最想守住的人。",
         ),
         build_item(
             "chapter-1",
@@ -168,6 +174,18 @@ def test_search_project_assets_falls_back_when_chinese_long_query_has_no_direct_
 
     assert "char-hero" in ids
     assert "world-moon" in ids
+
+
+def test_search_project_assets_returns_creative_diagnostics() -> None:
+    runtime = build_runtime()
+    scope = AgentScope(session_id="session-a", selected_novel_id="novel-a")
+
+    observation = run(runtime.search_project_assets(scope, {"query": "", "types": ["character"], "limit": 1}))
+    diagnostics = observation.items[0]["creative_diagnostics"]
+
+    assert "欲望" in diagnostics["usable"]
+    assert "恐惧" in diagnostics["usable"]
+    assert observation.items[0]["diagnostic_summary"].startswith("可用：")
 
 
 def test_agent_context_repairs_persisted_mojibake_before_model_prompt() -> None:
@@ -299,16 +317,21 @@ def test_model_tool_loop_can_call_multiple_tools_and_build_trace() -> None:
 
     assert preparation.trace["mode"] == "model_tool_loop"
     assert preparation.trace["stopped_reason"] == "context_sufficient"
-    assert [call["name"] for call in preparation.trace["tool_calls"]] == [
-        "get_recent_conversation",
-        "search_chapter_snippets",
-        "search_project_assets",
-    ]
+    tool_names = [call["name"] for call in preparation.trace["tool_calls"]]
+    assert tool_names[:3] == ["get_recent_conversation", "search_chapter_snippets", "search_project_assets"]
+    assert tool_names.count("search_project_assets") >= 3
+    assert "run_quality_check" in tool_names
     assert preparation.trace["tool_calls"][0]["continue_reason"] == "继续读取上下文"
     assert preparation.trace["tool_calls"][-1]["continue_reason"] == "停止：context_sufficient"
     assert preparation.trace["chapter_snippets"]
     assert any(asset["id"] == "char-hero" for asset in preparation.trace["used_assets"])
+    assert preparation.trace["retrieval_coverage"]["counts"]["characters"] >= 1
+    assert preparation.trace["retrieval_coverage"]["counts"]["relationships"] >= 1
+    assert preparation.trace["retrieval_coverage"]["counts"]["world"] >= 1
+    assert not preparation.trace["retrieval_coverage"]["issues"]
+    assert preparation.trace["creative_diagnostics"]
     assert "base prompt" in preparation.system_prompt
+    assert "序章要有动作、意象、悬念和情绪余韵" in preparation.system_prompt
 
 
 def test_model_tool_loop_falls_back_when_tool_calling_is_unavailable() -> None:
@@ -460,7 +483,7 @@ def test_model_tool_loop_stops_at_max_steps() -> None:
     assert preparation.trace["mode"] == "model_tool_loop"
     assert preparation.trace["degraded"] is True
     assert preparation.trace["stopped_reason"] == "max_tool_calls"
-    assert len(preparation.trace["tool_calls"]) == 5
+    assert len(preparation.trace["tool_calls"]) >= 11
 
 
 def test_prepare_tools_only_create_suggestions_without_writing() -> None:

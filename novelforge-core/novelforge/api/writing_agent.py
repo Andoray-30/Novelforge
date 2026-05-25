@@ -18,13 +18,13 @@ from novelforge.content.models import ContentItem, ContentSearchRequest, Content
 from novelforge.storage.storage_manager import StorageManager
 
 
-MAX_TOOL_CALLS = 5
+MAX_TOOL_CALLS = 12
 MAX_TRACE_PREVIEW = 180
 MAX_ASSET_SUMMARY = 480
 MAX_DETAIL_CHARS = 900
 MAX_SNIPPET_CHARS = 900
 MAX_AGENT_CONTEXT_CHARS = 5200
-MODEL_LOOP_MAX_STEPS = 5
+MODEL_LOOP_MAX_STEPS = 6
 
 
 WRITING_AGENT_TOOL_SCHEMAS: List[Dict[str, Any]] = [
@@ -386,6 +386,82 @@ def _snippet_mode(text: str) -> str:
     return "keyword"
 
 
+CREATIVE_SIGNAL_GROUPS: Dict[str, Dict[str, List[str]]] = {
+    "character": {
+        "欲望": ["desire", "goal", "motivation", "want", "渴望", "想要", "目标", "动机", "欲望"],
+        "伤痕": ["wound", "trauma", "loss", "past", "伤痕", "创伤", "失去", "阴影", "过去"],
+        "恐惧": ["fear", "afraid", "terror", "恐惧", "害怕", "担心", "畏惧"],
+        "行动模式": ["action", "behavior", "pattern", "choice", "行动", "选择", "习惯", "会做"],
+        "说话方式": ["voice", "dialogue", "tone", "speech", "台词", "语气", "说话", "口吻"],
+        "核心关系": ["relationship", "bond", "conflict", "关系", "羁绊", "依赖", "冲突", "亲密"],
+    },
+    "relationship": {
+        "依赖": ["depend", "need", "rely", "依赖", "需要", "托付"],
+        "误解": ["misunderstand", "misread", "误解", "错认", "隐瞒"],
+        "亏欠": ["debt", "owe", "guilt", "亏欠", "愧疚", "欠", "债"],
+        "冲突": ["conflict", "oppose", "fight", "冲突", "对立", "争执", "敌意"],
+        "情绪张力": ["tension", "emotion", "pain", "张力", "痛感", "拉扯", "暧昧"],
+        "剧情功能": ["function", "plot", "arc", "剧情", "功能", "推动", "转折"],
+    },
+    "world": {
+        "规则": ["rule", "law", "protocol", "规则", "法则", "协议", "限制"],
+        "意象": ["image", "imagery", "symbol", "意象", "月光", "钟声", "雨", "黑暗", "颜色"],
+        "代价": ["cost", "price", "sacrifice", "代价", "牺牲", "剥离", "损耗"],
+        "禁忌": ["taboo", "forbid", "禁忌", "禁止", "不可", "违背"],
+        "场景可用性": ["scene", "location", "place", "场景", "地点", "空间", "现场"],
+    },
+    "chapter": {
+        "可引用开头": ["开头", "序章", "opening", "beginning"],
+        "可引用结尾": ["结尾", "章末", "ending", "final"],
+        "关键意象": ["意象", "钟声", "雨", "月", "光", "黑暗", "门", "影子"],
+    },
+}
+
+
+def _diagnostic_source_text(item: ContentItem, text: str) -> str:
+    payload_text = json.dumps(_payload(item), ensure_ascii=False, default=str)
+    return f"{_title(item)}\n{text}\n{payload_text}"
+
+
+def _creative_diagnostics(asset_type: str, source_text: str, *, length: int = 0) -> Dict[str, Any]:
+    groups = CREATIVE_SIGNAL_GROUPS.get(asset_type)
+    if not groups:
+        return {"usable": [], "missing": [], "score": 0, "summary": "暂无创作诊断。"}
+
+    normalized = source_text.lower()
+    usable: List[str] = []
+    missing: List[str] = []
+    for label, markers in groups.items():
+        if any(marker.lower() in normalized for marker in markers):
+            usable.append(label)
+        else:
+            missing.append(label)
+
+    if asset_type == "chapter":
+        if length >= 120 and "可引用开头" not in usable:
+            usable.append("可引用开头")
+            if "可引用开头" in missing:
+                missing.remove("可引用开头")
+        if length >= 360 and "可引用结尾" not in usable:
+            usable.append("可引用结尾")
+            if "可引用结尾" in missing:
+                missing.remove("可引用结尾")
+
+    score = len(usable)
+    return {
+        "usable": usable,
+        "missing": missing,
+        "score": score,
+        "summary": _diagnostic_summary(usable, missing),
+    }
+
+
+def _diagnostic_summary(usable: Sequence[str], missing: Sequence[str]) -> str:
+    available = "、".join(usable) if usable else "暂无明显可用创作信号"
+    absent = "、".join(missing[:4]) if missing else "无明显缺口"
+    return f"可用：{available}；缺口：{absent}"
+
+
 def _extract_snippet(content: str, query: str, mode: str, limit: int = MAX_SNIPPET_CHARS) -> str:
     text = content.strip()
     if not text:
@@ -526,6 +602,14 @@ class WritingAgentRuntime:
         if calls:
             degraded = True
 
+        if plan.get("writing"):
+            observations = await self._ensure_writing_baseline_observations(
+                observations,
+                scope=scope,
+                conversation=conversation,
+                user_message=user_message,
+            )
+
         context_block = self._build_context_block(observations)
         trace = self._build_trace(
             plan,
@@ -648,6 +732,13 @@ class WritingAgentRuntime:
             degraded = True
             stopped_reason = "max_tool_calls"
 
+        observations = await self._ensure_writing_baseline_observations(
+            observations,
+            scope=scope,
+            conversation=conversation,
+            user_message=user_message,
+        )
+
         context_block = self._build_context_block(observations)
         trace = self._build_trace(
             {
@@ -681,7 +772,7 @@ class WritingAgentRuntime:
             "You are NovelForge's writing context agent. Decide which tools are needed before the writer answers.\n"
             "Rules:\n"
             "- Use manually focused_assets first when present.\n"
-            "- Use automatic project retrieval only when it helps the user's current writing task.\n"
+            "- For prologue, chapter writing, rewriting, or continuation tasks, gather at least one character, one relationship, one world/setting asset, and one imported/formal chapter snippet when available.\n"
             "- Recent conversation is only for continuing intent, not as canonical project truth.\n"
             "- Prefer imported source text and formal chapters.\n"
             "- Exclude AI drafts/candidates by default unless the user explicitly asks for draft/candidate/previous/just-now versions.\n"
@@ -705,6 +796,9 @@ class WritingAgentRuntime:
             "Use the following compressed tool observations as writing context. Do not explain tool usage in the answer. "
             "Do not reveal hidden reasoning. If you generate a savable chapter, include a valid save_asset tag so the user can confirm saving. "
             "If updating an existing chapter, produce an update suggestion and wait for user confirmation.\n"
+            "Craft requirements: 不只复述设定，要把角色欲望、伤痕、恐惧、关系张力和世界意象转化为具体场景。"
+            "序章要有动作、意象、悬念和情绪余韵，同时不要把所有设定解释完。"
+            "如果资产不足，可以说明结果更适合作为草稿，并建议补强哪些资产。\n"
             f"{context_block}"
         )
 
@@ -721,17 +815,50 @@ class WritingAgentRuntime:
         if recent or writing:
             calls.append({"name": "get_recent_conversation", "args": {"limit": 6}})
         if needs_assets:
-            calls.append(
-                {
-                    "name": "search_project_assets",
-                    "args": {
-                        "query": user_message[:120],
-                        "types": ["character", "world", "outline", "relationship", "timeline"],
-                        "limit": 5,
-                        "include_ai_versions": allow_ai,
-                    },
-                }
-            )
+            if writing:
+                calls.extend(
+                    [
+                        {
+                            "name": "search_project_assets",
+                            "args": {
+                                "query": user_message[:120],
+                                "types": ["character"],
+                                "limit": 3,
+                                "include_ai_versions": allow_ai,
+                            },
+                        },
+                        {
+                            "name": "search_project_assets",
+                            "args": {
+                                "query": user_message[:120],
+                                "types": ["relationship"],
+                                "limit": 3,
+                                "include_ai_versions": allow_ai,
+                            },
+                        },
+                        {
+                            "name": "search_project_assets",
+                            "args": {
+                                "query": user_message[:120],
+                                "types": ["world"],
+                                "limit": 3,
+                                "include_ai_versions": allow_ai,
+                            },
+                        },
+                    ]
+                )
+            else:
+                calls.append(
+                    {
+                        "name": "search_project_assets",
+                        "args": {
+                            "query": user_message[:120],
+                            "types": ["character", "world", "outline", "relationship", "timeline"],
+                            "limit": 5,
+                            "include_ai_versions": allow_ai,
+                        },
+                    }
+                )
         if needs_chapters:
             calls.append(
                 {
@@ -755,6 +882,7 @@ class WritingAgentRuntime:
                 }
             )
         elif writing:
+            calls.append({"name": "run_quality_check", "args": {"task": user_message[:160]}})
             calls.append(
                 {
                     "name": "prepare_save_asset",
@@ -765,7 +893,7 @@ class WritingAgentRuntime:
                     },
                 }
             )
-        if writing and len(calls) < MAX_TOOL_CALLS:
+        if writing and not any(call["name"] == "run_quality_check" for call in calls) and len(calls) < MAX_TOOL_CALLS:
             calls.append({"name": "run_quality_check", "args": {"task": user_message[:160]}})
 
         if not calls:
@@ -832,6 +960,81 @@ class WritingAgentRuntime:
 
         return next_calls
 
+    async def _ensure_writing_baseline_observations(
+        self,
+        observations: Sequence[ToolObservation],
+        *,
+        scope: AgentScope,
+        conversation: Optional[Conversation],
+        user_message: str,
+    ) -> List[ToolObservation]:
+        enriched = list(observations)
+        if not _mentions_writing(user_message) or len(enriched) >= MAX_TOOL_CALLS:
+            return enriched
+
+        allow_ai = _allow_ai_versions(user_message)
+
+        def has_asset_type(asset_type: str) -> bool:
+            return any(
+                observation.name == "search_project_assets"
+                and any(item.get("type") == asset_type for item in observation.items)
+                for observation in enriched
+            )
+
+        async def append_once(name: str, args: Dict[str, Any]) -> None:
+            if len(enriched) >= MAX_TOOL_CALLS:
+                return
+            try:
+                enriched.append(await self._run_tool(name, args, scope, conversation, user_message))
+            except Exception as exc:  # pragma: no cover - defensive degradation
+                enriched.append(
+                    ToolObservation(
+                        name=name,
+                        status="error",
+                        summary=f"写作兜底检索失败：{_clip(str(exc), 120)}",
+                        error=str(exc),
+                    )
+                )
+
+        baseline_calls: List[tuple[str, Dict[str, Any]]] = []
+        if not has_asset_type("character"):
+            baseline_calls.append(
+                (
+                    "search_project_assets",
+                    {"query": "", "types": ["character"], "limit": 3, "include_ai_versions": allow_ai},
+                )
+            )
+        if not has_asset_type("relationship"):
+            baseline_calls.append(
+                (
+                    "search_project_assets",
+                    {"query": "", "types": ["relationship"], "limit": 3, "include_ai_versions": allow_ai},
+                )
+            )
+        if not has_asset_type("world"):
+            baseline_calls.append(
+                (
+                    "search_project_assets",
+                    {"query": "", "types": ["world"], "limit": 3, "include_ai_versions": allow_ai},
+                )
+            )
+        if not any(observation.name == "search_chapter_snippets" and observation.items for observation in enriched):
+            baseline_calls.append(
+                (
+                    "search_chapter_snippets",
+                    {"query": "", "mode": _snippet_mode(user_message), "limit": 3, "include_ai_versions": allow_ai},
+                )
+            )
+        if not any(observation.name == "run_quality_check" for observation in enriched):
+            baseline_calls.append(("run_quality_check", {"task": user_message[:160]}))
+
+        for name, args in baseline_calls:
+            if len(enriched) >= MAX_TOOL_CALLS:
+                break
+            await append_once(name, args)
+
+        return enriched
+
     async def _run_tool(
         self,
         name: str,
@@ -883,12 +1086,20 @@ class WritingAgentRuntime:
             if item.metadata.type == ContentType.CHAPTER and not include_ai_versions and _is_ai_draft_or_candidate(item):
                 continue
             text = _content_text(item) or json.dumps(_payload(item), ensure_ascii=False)
+            item_type = _type_name(item.metadata.type)
+            diagnostics = _creative_diagnostics(
+                item_type,
+                _diagnostic_source_text(item, text),
+                length=len(text),
+            )
             items.append(
                 {
                     "id": item.metadata.id,
-                    "type": _type_name(item.metadata.type),
+                    "type": item_type,
                     "title": _title(item),
                     "summary": _clip(text, MAX_ASSET_SUMMARY),
+                    "creative_diagnostics": diagnostics,
+                    "diagnostic_summary": diagnostics["summary"],
                 }
             )
             if len(items) >= limit:
@@ -901,12 +1112,20 @@ class WritingAgentRuntime:
                 if item.metadata.type == ContentType.CHAPTER and not include_ai_versions and _is_ai_draft_or_candidate(item):
                     continue
                 text = _content_text(item) or json.dumps(_payload(item), ensure_ascii=False)
+                item_type = _type_name(item.metadata.type)
+                diagnostics = _creative_diagnostics(
+                    item_type,
+                    _diagnostic_source_text(item, text),
+                    length=len(text),
+                )
                 items.append(
                     {
                         "id": item.metadata.id,
-                        "type": _type_name(item.metadata.type),
+                        "type": item_type,
                         "title": _title(item),
                         "summary": _clip(text, MAX_ASSET_SUMMARY),
+                        "creative_diagnostics": diagnostics,
+                        "diagnostic_summary": diagnostics["summary"],
                     }
                 )
                 if len(items) >= limit:
@@ -915,7 +1134,7 @@ class WritingAgentRuntime:
         return ToolObservation(
             name="search_project_assets",
             status="ok",
-            summary=f"找到 {len(items)} 个项目资产。",
+            summary=f"找到 {len(items)} 个项目资产，已附创作可用度诊断。",
             items=items,
         )
 
@@ -928,6 +1147,12 @@ class WritingAgentRuntime:
             return ToolObservation(name="get_asset_detail", status="error", summary="资产不存在或不属于当前项目")
         max_chars = min(max(int(args.get("max_chars") or MAX_DETAIL_CHARS), 120), MAX_DETAIL_CHARS)
         text = _content_text(item) or json.dumps(_payload(item), ensure_ascii=False)
+        item_type = _type_name(item.metadata.type)
+        diagnostics = _creative_diagnostics(
+            item_type,
+            _diagnostic_source_text(item, text),
+            length=len(text),
+        )
         return ToolObservation(
             name="get_asset_detail",
             status="ok",
@@ -935,9 +1160,11 @@ class WritingAgentRuntime:
             items=[
                 {
                     "id": item.metadata.id,
-                    "type": _type_name(item.metadata.type),
+                    "type": item_type,
                     "title": _title(item),
                     "summary": _clip(text, max_chars),
+                    "creative_diagnostics": diagnostics,
+                    "diagnostic_summary": diagnostics["summary"],
                 }
             ],
         )
@@ -995,12 +1222,16 @@ class WritingAgentRuntime:
             snippet = _clip(_extract_snippet(content, query or user_message, mode), MAX_SNIPPET_CHARS)
             if not snippet:
                 continue
+            diagnostics = _creative_diagnostics("chapter", f"{_title(item)}\n{snippet}", length=len(content))
             snippets.append(
                 {
                     "id": item.metadata.id,
                     "title": _title(item),
                     "mode": mode,
                     "summary": snippet,
+                    "type": "chapter",
+                    "creative_diagnostics": diagnostics,
+                    "diagnostic_summary": diagnostics["summary"],
                 }
             )
             if len(snippets) >= limit:
@@ -1092,12 +1323,16 @@ class WritingAgentRuntime:
                 item_type = _as_str(item.get("type"))
                 mode = _as_str(item.get("mode"))
                 summary = _as_str(item.get("summary"))
+                diagnostic_summary = _as_str(item.get("diagnostic_summary"))
                 prefix = f"  * {title}"
                 if item_type:
                     prefix += f" [{item_type}]"
                 if mode:
                     prefix += f" ({mode})"
-                parts.append(f"{prefix}: {_clip(summary, 620)}")
+                detail = _clip(summary, 620)
+                if diagnostic_summary:
+                    detail = f"{detail} | 创作诊断：{diagnostic_summary}"
+                parts.append(f"{prefix}: {detail}")
 
         block = "\n".join(parts)
         return _clip(block, MAX_AGENT_CONTEXT_CHARS)
@@ -1115,6 +1350,7 @@ class WritingAgentRuntime:
         used_assets: List[Dict[str, Any]] = []
         chapter_snippets: List[Dict[str, Any]] = []
         tool_calls: List[Dict[str, Any]] = []
+        diagnostics: List[Dict[str, Any]] = []
         for step_index, observation in enumerate(observations, start=1):
             is_last_step = step_index == len(observations)
             tool_calls.append(
@@ -1137,6 +1373,7 @@ class WritingAgentRuntime:
                             "title": item.get("title"),
                             "mode": item.get("mode"),
                             "preview": _clip(_as_str(item.get("summary")), MAX_TRACE_PREVIEW),
+                            "creative_diagnostics": item.get("creative_diagnostics"),
                         }
                     )
                 elif item.get("id"):
@@ -1145,8 +1382,35 @@ class WritingAgentRuntime:
                             "id": item.get("id"),
                             "type": item.get("type"),
                             "title": item.get("title"),
+                            "creative_diagnostics": item.get("creative_diagnostics"),
                         }
                     )
+                if item.get("creative_diagnostics"):
+                    diagnostics.append(
+                        {
+                            "id": item.get("id"),
+                            "type": item.get("type") or ("chapter" if observation.name == "search_chapter_snippets" else None),
+                            "title": item.get("title"),
+                            "summary": item.get("diagnostic_summary"),
+                            "creative_diagnostics": item.get("creative_diagnostics"),
+                        }
+                    )
+
+        coverage_counts = {
+            "characters": sum(1 for item in used_assets if item.get("type") == "character"),
+            "relationships": sum(1 for item in used_assets if item.get("type") == "relationship"),
+            "world": sum(1 for item in used_assets if item.get("type") == "world"),
+            "chapter_snippets": len(chapter_snippets),
+        }
+        retrieval_issues = []
+        if coverage_counts["characters"] == 0:
+            retrieval_issues.append("未找到足够角色资产")
+        if coverage_counts["relationships"] == 0:
+            retrieval_issues.append("未找到足够关系资产")
+        if coverage_counts["world"] == 0:
+            retrieval_issues.append("未找到足够世界观资产")
+        if coverage_counts["chapter_snippets"] == 0:
+            retrieval_issues.append("未找到足够章节片段")
 
         return {
             "enabled": True,
@@ -1155,6 +1419,11 @@ class WritingAgentRuntime:
             "tool_calls": tool_calls,
             "used_assets": used_assets[:8],
             "chapter_snippets": chapter_snippets[:5],
+            "retrieval_coverage": {
+                "counts": coverage_counts,
+                "issues": retrieval_issues,
+            },
+            "creative_diagnostics": diagnostics[:12],
             "degraded": degraded,
             "fallback_reason": fallback_reason,
             "stopped_reason": stopped_reason,
@@ -1169,6 +1438,11 @@ class WritingAgentRuntime:
             "tool_calls": [],
             "used_assets": [],
             "chapter_snippets": [],
+            "retrieval_coverage": {
+                "counts": {"characters": 0, "relationships": 0, "world": 0, "chapter_snippets": 0},
+                "issues": [],
+            },
+            "creative_diagnostics": [],
             "degraded": degraded,
             "fallback_reason": None,
             "stopped_reason": None,

@@ -149,3 +149,79 @@ Writing quality verdict for Goal 8:
 Current conclusion:
 
 The product is better behaved under provider failure: users should now see a clear Chinese retry/degrade path instead of a confusing raw `HTTP 500` surface. The real medium-length generation passed after switching to Fast mode with network access, the candidate was saved to the content library, and the editor visual check confirmed the saved draft can be opened and edited. Goal 8 is complete.
+
+## Goal 9 Creative Asset Quality Validation
+
+Date: 2026-05-25
+
+Purpose:
+
+- Improve the chance that the writer produces an emotionally useful prologue, not only a technically saved draft.
+- Verify that the writing agent now retrieves characters, relationships, world facts, and chapter/source snippets before generation.
+- Record creative usability diagnostics for the assets used by the writer.
+
+Code changes verified:
+
+- Writing-agent project reads now attach lightweight creative diagnostics:
+  - Characters: desire, wound, fear, action pattern, voice, core relationships.
+  - Relationships: dependency, misunderstanding, debt, conflict, emotional tension, plot function.
+  - World: rules, imagery, costs, taboos, scene usability.
+  - Chapters: usable opening, usable ending, key imagery.
+- Writing requests now use deterministic baseline retrieval after model tool decisions:
+  - Characters.
+  - Relationships.
+  - World assets.
+  - Imported/formal chapter snippets.
+  - Quality checklist.
+- Writer prompt now explicitly asks the model to convert character desire, wounds, fears, relationship tension, and world imagery into concrete scenes with action, suspense, and emotional aftertaste.
+- Trace now includes `retrieval_coverage` and `creative_diagnostics`.
+
+Live validation:
+
+- Provider/base: configured server-side NewAPI endpoint.
+- Mode/model: Fast mode, backend reported `gemini-3.5-flash`.
+- Project used: `clean_import_20260524_111341`.
+- Novel root: `novel_clean_import_20260524_111341`.
+- Generation path: current working-tree writing agent runtime -> real external model -> saved to content library as AI draft.
+- Saved content id: `d4caaa8b-6409-43a4-a1ca-52edd09f4d2a`.
+- Saved title: `Goal9 序章候选 - 资产增强v2`.
+- Saved body length: 1334 chars.
+
+Trace summary:
+
+- Retrieval coverage:
+  - Characters: 5.
+  - Relationships: 3.
+  - World: 1.
+  - Chapter snippets: 3.
+  - Issues: none.
+- Character assets used include `辉夜`, `FUSHI`, `帝明`, `立花老师`, `彩叶的母亲`.
+- Relationship assets used include:
+  - `酒寄彩叶 -> 彩叶的母亲`
+  - `酒寄彩叶 -> 帝明`
+  - `酒寄彩叶 -> 父亲`
+- World asset used: `世界深度设定`.
+- Chapter snippets used:
+  - `第一卷 序章`
+  - `第一卷 第二章（1）`
+  - `第一卷 第二章（2）`
+- Creative diagnostics count: 12.
+
+Writing quality verdict for Goal 9:
+
+- Character use: pass. The v2 draft starts from 彩叶's emotional state, isolation, competitiveness, and family pressure instead of only reciting lore.
+- Relationship tension: partial-pass. The agent retrieves three relationship assets, but the relationship diagnostics show weak structured tension: the best signals are `冲突` and `误解`; dependency, debt, emotional tension, and plot function are often missing. This is now visible in trace instead of hidden.
+- World imagery: pass. The draft uses screen light, virtual combat, moon/otherworld pressure, and transformation signs as scene pressure rather than explaining all rules upfront.
+- Chapter continuity: pass. It anchors to the imported prologue/opening fragments and early game/surreal intrusion texture.
+- Emotional progression: partial-pass. It has clearer immediate emotion than Goal 8 and works as a candidate opening, but the emotional turn still depends more on atmosphere than a sharp relational choice.
+- Save suitability: pass as AI draft/candidate. It should not replace the formal prologue without human review.
+
+Remaining quality risks:
+
+- Relationship assets are present but creatively thin. The next useful improvement is not more retrieval; it is enriching relationship extraction/repair with dependency, debt, emotional tension, and plot function.
+- Intermediate Goal 9 validation drafts created during this run were cleaned after the final v2 save, including the one title corrupted by a PowerShell pipe encoding issue. The retained validation draft is `d4caaa8b-6409-43a4-a1ca-52edd09f4d2a`.
+- The running backend process must be restarted after code changes to expose the new trace fields through HTTP. The direct validation used current working-tree code to avoid mixing old server state with new code.
+
+Current conclusion:
+
+Goal 9's core agent improvement is working: the writer can now reliably gather characters, relationships, world assets, and chapter snippets, and the trace makes missing creative signals visible. The generated v2 prologue candidate is stronger than Goal 8 in character entry and scene immediacy, but relationship quality remains the main blocker before calling the writing output consistently strong.
