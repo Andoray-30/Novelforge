@@ -186,6 +186,7 @@ Live validation:
 - Saved content id: `d4caaa8b-6409-43a4-a1ca-52edd09f4d2a`.
 - Saved title: `Goal9 序章候选 - 资产增强v2`.
 - Saved body length: 1334 chars.
+- Editor fallback readiness: verified via content-library read after cleanup; `get_content(d4caaa8b-6409-43a4-a1ca-52edd09f4d2a)` returned the expected title and 1334-char body. Browser visual reopen was not used because the current shell runner cannot keep freshly started dev servers alive after command exit.
 
 Trace summary:
 

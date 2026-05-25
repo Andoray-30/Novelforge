@@ -4514,6 +4514,9 @@
     - world=1
     - chapter_snippets=3
     - issues=[]
+  - Editor 兜底验证：
+    - 清理中间草稿后，`get_content(d4caaa8b-6409-43a4-a1ca-52edd09f4d2a)` 返回正确标题和 1334 字正文。
+    - 当前 shell runner 无法让新启动的 dev server 在命令结束后常驻，因此本轮没有再做浏览器视觉复验；没有伪造 browser pass。
   - 中间验证草稿已清理，只保留最终 v2 验收草稿，避免污染项目资产。
 - 测试：
   - `py -m pytest -p no:cacheprovider novelforge-core\tests\api\test_writing_agent_runtime.py`
