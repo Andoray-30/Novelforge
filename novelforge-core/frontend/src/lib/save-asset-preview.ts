@@ -1,5 +1,9 @@
 import type { SaveAssetRequest } from '@/lib/chat-parser';
-import { getChapterSaveDestinationLabel, normalizeChapterSaveDestination } from '@/lib/chapter-save-destinations';
+import {
+  getChapterSaveDestinationDescription,
+  getChapterSaveDestinationLabel,
+  normalizeChapterSaveDestination,
+} from '@/lib/chapter-save-destinations';
 
 export type SaveAssetPreviewRow = {
   label: string;
@@ -52,9 +56,14 @@ export function buildSaveAssetPreviewRows(
   const used = new Set<string>();
 
   if (request.type === 'chapter') {
+    const destination = resolvePreviewDestination(request);
     rows.push({
       label: '保存位置',
-      value: getChapterSaveDestinationLabel(resolvePreviewDestination(request)),
+      value: getChapterSaveDestinationLabel(destination),
+    });
+    rows.push({
+      label: '影响',
+      value: getChapterSaveDestinationDescription(destination),
     });
   }
 
@@ -99,19 +108,40 @@ export function getSaveAssetOperationLabel(request: Pick<SaveAssetRequest, 'id' 
 }
 
 export function getSaveAssetWarningLabel(
-  request: Pick<SaveAssetRequest, 'type' | 'id' | 'data' | 'should_replace_existing'>,
+  request: Pick<SaveAssetRequest, 'type' | 'id' | 'data' | 'save_destination' | 'should_replace_existing'>,
 ): string | null {
   if (request.type !== 'chapter') {
     return null;
   }
 
   const id = request.id ?? request.data.id ?? request.data.contentItemId ?? request.data.content_item_id;
-  const shouldReplace = request.should_replace_existing === true || request.data.should_replace_existing === true;
-  if ((typeof id === 'string' && id.trim().length > 0) || shouldReplace) {
-    return '注意：这会更新已有章节，请确认你确实要覆盖原内容。';
+  const destination = resolvePreviewDestination(request);
+  if (destination === 'update_existing' && !(typeof id === 'string' && id.trim().length > 0)) {
+    return '无法保存：更新已有章节需要目标章节 id。请改存为草稿/候选版本，或先选择明确的目标章节。';
+  }
+  if (destination === 'update_existing') {
+    return '强警告：这会覆盖已有章节，请确认目标章节无误。';
   }
 
   return null;
+}
+
+export function getSaveAssetBlockingReason(
+  request: Pick<SaveAssetRequest, 'type' | 'id' | 'data' | 'save_destination' | 'should_replace_existing'>,
+): string | null {
+  if (request.type !== 'chapter') {
+    return null;
+  }
+
+  const destination = resolvePreviewDestination(request);
+  if (destination !== 'update_existing') {
+    return null;
+  }
+
+  const id = request.id ?? request.data.id ?? request.data.contentItemId ?? request.data.content_item_id;
+  return typeof id === 'string' && id.trim().length > 0
+    ? null
+    : '更新已有章节需要目标章节 id。';
 }
 
 function buildRow(field: string, value: unknown): SaveAssetPreviewRow | null {

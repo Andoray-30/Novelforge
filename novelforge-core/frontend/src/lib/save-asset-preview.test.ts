@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildSaveAssetPreviewRows, getSaveAssetOperationLabel, getSaveAssetWarningLabel } from '@/lib/save-asset-preview';
+import {
+  buildSaveAssetPreviewRows,
+  getSaveAssetBlockingReason,
+  getSaveAssetOperationLabel,
+  getSaveAssetWarningLabel,
+} from '@/lib/save-asset-preview';
 
 describe('save asset preview', () => {
   it('builds readable preview rows from primary fields', () => {
@@ -47,6 +52,11 @@ describe('save asset preview', () => {
       save_destination: 'alternate_version',
       data: { content: '候选序章。' },
     })[0]).toEqual({ label: '保存位置', value: '候选版本' });
+    expect(buildSaveAssetPreviewRows({
+      type: 'chapter',
+      save_destination: 'alternate_version',
+      data: { content: '候选序章。' },
+    })[1]).toEqual({ label: '影响', value: '会作为另一个候选版本保存，方便对比取舍。' });
 
     expect(buildSaveAssetPreviewRows({
       type: 'chapter',
@@ -56,7 +66,25 @@ describe('save asset preview', () => {
     expect(getSaveAssetWarningLabel({
       type: 'chapter',
       id: 'chapter-1',
+      save_destination: 'update_existing',
       data: { content: '覆盖版本。' },
-    })).toContain('更新已有章节');
+    })).toContain('覆盖已有章节');
+
+    expect(getSaveAssetWarningLabel({
+      type: 'chapter',
+      save_destination: 'update_existing',
+      data: { content: '覆盖版本。' },
+    })).toContain('需要目标章节 id');
+    expect(getSaveAssetBlockingReason({
+      type: 'chapter',
+      save_destination: 'update_existing',
+      data: { content: '覆盖版本。' },
+    })).toContain('目标章节 id');
+    expect(getSaveAssetBlockingReason({
+      type: 'chapter',
+      id: 'chapter-1',
+      save_destination: 'update_existing',
+      data: { content: '覆盖版本。' },
+    })).toBeNull();
   });
 });

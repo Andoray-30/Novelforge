@@ -12,12 +12,52 @@ import type { SaveAssetRequest } from '@/lib/chat-parser';
 import type { ContentItem, ContentType } from '@/types';
 
 export function getSaveAssetRequestId(request: SaveAssetRequest): string | undefined {
+  if (request.type === 'chapter' && !shouldUpdateExistingChapter(request)) {
+    return undefined;
+  }
+
   if (typeof request.id === 'string' && request.id.trim().length > 0) {
     return request.id.trim();
   }
 
   const id = request.data.id ?? request.data.contentItemId ?? request.data.content_item_id;
   return typeof id === 'string' && id.trim().length > 0 ? id.trim() : undefined;
+}
+
+export function applyChapterSaveDestinationToRequest(
+  request: SaveAssetRequest,
+  destination: ChapterSaveDestination,
+): SaveAssetRequest {
+  if (request.type !== 'chapter') {
+    return request;
+  }
+
+  const normalizedDestination = normalizeChapterSaveDestination(destination);
+  const nextData = { ...request.data };
+  nextData.save_destination = normalizedDestination;
+
+  if (normalizedDestination === 'update_existing') {
+    nextData.should_replace_existing = true;
+    return {
+      ...request,
+      save_destination: normalizedDestination,
+      should_replace_existing: true,
+      data: nextData,
+    };
+  }
+
+  delete nextData.id;
+  delete nextData.contentItemId;
+  delete nextData.content_item_id;
+  nextData.should_replace_existing = false;
+
+  const { id: _id, ...requestWithoutId } = request;
+  return {
+    ...requestWithoutId,
+    save_destination: normalizedDestination,
+    should_replace_existing: false,
+    data: nextData,
+  };
 }
 
 export function buildSaveAssetContentRequest(params: {
@@ -119,6 +159,16 @@ function asStringArray(value: unknown): string[] {
     : [];
 }
 
+function shouldUpdateExistingChapter(request: SaveAssetRequest): boolean {
+  const explicitDestination = normalizeChapterSaveDestination(
+    request.save_destination ?? asString(request.data.save_destination),
+    'ai_draft',
+  );
+  return explicitDestination === 'update_existing'
+    || request.should_replace_existing === true
+    || request.data.should_replace_existing === true;
+}
+
 function resolveChapterSaveDestination(
   request: SaveAssetRequest,
   existingItem?: ContentItem | null,
@@ -154,7 +204,7 @@ function buildChapterSaveData(request: SaveAssetRequest, existingItem?: ContentI
     ...(wordCount > 0 && wordCount < 80 ? ['short_chapter'] : []),
   ]));
 
-  return {
+  const data: Record<string, unknown> = {
     ...existingPayload,
     ...request.data,
     title,
@@ -175,6 +225,14 @@ function buildChapterSaveData(request: SaveAssetRequest, existingItem?: ContentI
     word_count: wordCount,
     quality_flags: qualityFlags,
   };
+
+  if (destination !== 'update_existing') {
+    delete data.id;
+    delete data.contentItemId;
+    delete data.content_item_id;
+  }
+
+  return data;
 }
 
 function buildSaveAssetTags(

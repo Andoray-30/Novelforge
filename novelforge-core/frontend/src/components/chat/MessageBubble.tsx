@@ -1,7 +1,17 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { buildSaveAssetPreviewRows, getSaveAssetOperationLabel, getSaveAssetWarningLabel } from '@/lib/save-asset-preview';
+import {
+  buildSaveAssetPreviewRows,
+  getSaveAssetBlockingReason,
+  getSaveAssetOperationLabel,
+  getSaveAssetWarningLabel,
+} from '@/lib/save-asset-preview';
+import {
+  CHAPTER_SAVE_DESTINATION_OPTIONS,
+  normalizeChapterSaveDestination,
+  type ChapterSaveDestination,
+} from '@/lib/chapter-save-destinations';
 import type { SaveAssetRequest } from '@/lib/chat-parser';
 
 export type MessageRole = 'user' | 'assistant' | 'system';
@@ -47,6 +57,7 @@ interface MessageBubbleProps {
   onOpenArtifact?: (artifact: NonNullable<Message['artifact']>) => void;
   onConfirmSaveAsset?: (messageId: string, requestIndex: number) => void;
   onRejectSaveAsset?: (messageId: string, requestIndex: number) => void;
+  onChangeSaveAssetDestination?: (messageId: string, requestIndex: number, destination: ChapterSaveDestination) => void;
 }
 
 function escapeHtml(value: string): string {
@@ -126,7 +137,14 @@ function getAssetRequestStatusText(request: NonNullable<Message['assetRequest']>
   return null;
 }
 
-export function MessageBubble({ message, onSelectAssetCandidate, onOpenArtifact, onConfirmSaveAsset, onRejectSaveAsset }: MessageBubbleProps) {
+export function MessageBubble({
+  message,
+  onSelectAssetCandidate,
+  onOpenArtifact,
+  onConfirmSaveAsset,
+  onRejectSaveAsset,
+  onChangeSaveAssetDestination,
+}: MessageBubbleProps) {
   const isUser = message.role === 'user';
 
   return (
@@ -419,6 +437,11 @@ export function MessageBubble({ message, onSelectAssetCandidate, onOpenArtifact,
             const previewRows = buildSaveAssetPreviewRows(request, 4);
             const operationLabel = getSaveAssetOperationLabel(request);
             const warningLabel = getSaveAssetWarningLabel(request);
+            const blockingReason = getSaveAssetBlockingReason(request);
+            const selectedDestination = normalizeChapterSaveDestination(
+              request.save_destination ?? request.data.save_destination,
+              'ai_draft',
+            );
 
             return (
             <div
@@ -461,6 +484,8 @@ export function MessageBubble({ message, onSelectAssetCandidate, onOpenArtifact,
                   <button
                     type="button"
                     onClick={() => onConfirmSaveAsset?.(message.id, index)}
+                    disabled={Boolean(blockingReason)}
+                    title={blockingReason ?? undefined}
                     style={{
                       borderRadius: 6,
                       border: '1px solid rgba(16, 185, 129, 0.4)',
@@ -469,7 +494,8 @@ export function MessageBubble({ message, onSelectAssetCandidate, onOpenArtifact,
                       padding: '4px 10px',
                       fontSize: 12,
                       fontWeight: 600,
-                      cursor: 'pointer',
+                      cursor: blockingReason ? 'not-allowed' : 'pointer',
+                      opacity: blockingReason ? 0.5 : 1,
                     }}
                   >
                     确认保存
@@ -492,6 +518,45 @@ export function MessageBubble({ message, onSelectAssetCandidate, onOpenArtifact,
                 </div>
               ) : null}
               </div>
+              {request.type === 'chapter' && request.status === 'pending' ? (
+                <label style={{
+                  display: 'grid',
+                  gridTemplateColumns: '72px minmax(0, 1fr)',
+                  gap: 8,
+                  alignItems: 'center',
+                  paddingLeft: 25,
+                  fontSize: 11,
+                  color: 'var(--text-muted)',
+                }}>
+                  <span style={{ color: 'var(--text-disabled)' }}>保存为</span>
+                  <select
+                    value={selectedDestination}
+                    onChange={(event) => {
+                      onChangeSaveAssetDestination?.(
+                        message.id,
+                        index,
+                        normalizeChapterSaveDestination(event.currentTarget.value),
+                      );
+                    }}
+                    style={{
+                      width: '100%',
+                      borderRadius: 8,
+                      border: '1px solid rgba(16, 185, 129, 0.24)',
+                      background: 'rgba(15, 23, 42, 0.85)',
+                      color: 'var(--text-secondary)',
+                      padding: '6px 8px',
+                      fontSize: 12,
+                      outline: 'none',
+                    }}
+                  >
+                    {CHAPTER_SAVE_DESTINATION_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
               {previewRows.length > 0 ? (
                 <div style={{ display: 'grid', gap: 4, paddingLeft: 25 }}>
                   {previewRows.map((row) => (
@@ -514,6 +579,20 @@ export function MessageBubble({ message, onSelectAssetCandidate, onOpenArtifact,
                   lineHeight: 1.5,
                 }}>
                   {warningLabel}
+                </div>
+              ) : null}
+              {blockingReason ? (
+                <div style={{
+                  marginLeft: 25,
+                  borderRadius: 8,
+                  border: '1px solid rgba(239, 68, 68, 0.35)',
+                  background: 'rgba(239, 68, 68, 0.12)',
+                  color: '#fca5a5',
+                  padding: '7px 9px',
+                  fontSize: 11,
+                  lineHeight: 1.5,
+                }}>
+                  {blockingReason}
                 </div>
               ) : null}
             </div>
@@ -548,6 +627,7 @@ interface MessageListProps {
   onOpenArtifact?: (artifact: NonNullable<Message['artifact']>) => void;
   onConfirmSaveAsset?: (messageId: string, requestIndex: number) => void;
   onRejectSaveAsset?: (messageId: string, requestIndex: number) => void;
+  onChangeSaveAssetDestination?: (messageId: string, requestIndex: number, destination: ChapterSaveDestination) => void;
 }
 
 export function MessageList({
@@ -556,6 +636,7 @@ export function MessageList({
   onOpenArtifact,
   onConfirmSaveAsset,
   onRejectSaveAsset,
+  onChangeSaveAssetDestination,
 }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const lastMessage = messages[messages.length - 1];
@@ -596,6 +677,7 @@ export function MessageList({
           onOpenArtifact={onOpenArtifact}
           onConfirmSaveAsset={onConfirmSaveAsset}
           onRejectSaveAsset={onRejectSaveAsset}
+          onChangeSaveAssetDestination={onChangeSaveAssetDestination}
         />
       ))}
     </div>

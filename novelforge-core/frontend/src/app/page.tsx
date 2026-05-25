@@ -37,7 +37,8 @@ import {
   bindContentItemToNovel,
   isUnassignedNovelScopedContentItem,
 } from '@/lib/content-item-binding';
-import { saveAssetRequestToContent } from '@/lib/save-asset-requests';
+import { applyChapterSaveDestinationToRequest, saveAssetRequestToContent } from '@/lib/save-asset-requests';
+import type { ChapterSaveDestination } from '@/lib/chapter-save-destinations';
 import {
   resolveNovelImportCompletionAction,
 } from '@/lib/import-workflow';
@@ -959,6 +960,44 @@ export default function ChatPage() {
     });
   }, [currentSessionId, messagesMap, updateMessage]);
 
+  const handleChangeSaveAssetDestination = useCallback((
+    messageId: string,
+    requestIndex: number,
+    destination: ChapterSaveDestination,
+  ) => {
+    let targetSessionId = currentSessionId || '';
+    let messages = targetSessionId ? (messagesMap.get(targetSessionId) ?? []) : [];
+    if (!messages.some((m) => m.id === messageId)) {
+      Array.from(messagesMap.entries()).some(([sessionId, sessionMessages]) => {
+        if (sessionMessages.some((m: Message) => m.id === messageId)) {
+          targetSessionId = sessionId;
+          messages = sessionMessages;
+          return true;
+        }
+        return false;
+      });
+    }
+
+    if (!targetSessionId) {
+      return;
+    }
+
+    const msg = messages.find((m) => m.id === messageId);
+    const request = msg?.saveAssetRequests?.[requestIndex];
+    if (!request || request.status !== 'pending') {
+      return;
+    }
+
+    updateMessage(targetSessionId, messageId, {
+      saveAssetRequests: msg!.saveAssetRequests!.map((item, index) =>
+        index === requestIndex ? {
+          ...applyChapterSaveDestinationToRequest(item, destination),
+          status: item.status,
+        } : item,
+      ),
+    });
+  }, [currentSessionId, messagesMap, updateMessage]);
+
   const resolveAssetRequestCandidatesFromProject = useCallback(async (
     request: AssetRequestDirective,
   ): Promise<FocusedAsset[]> => {
@@ -1499,6 +1538,7 @@ export default function ChatPage() {
                     onOpenArtifact={handleOpenMessageArtifact}
                     onConfirmSaveAsset={handleConfirmSaveAsset}
                     onRejectSaveAsset={handleRejectSaveAsset}
+                    onChangeSaveAssetDestination={handleChangeSaveAssetDestination}
                   />
                 {isGenerating && (
                   <div style={{ display: 'flex', alignItems: 'center', padding: '16px 40px', color: 'var(--text-muted)' }}>

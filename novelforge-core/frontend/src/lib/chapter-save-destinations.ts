@@ -6,6 +6,12 @@ export type ChapterSaveDestination =
   | 'alternate_version'
   | 'update_existing';
 
+export type ChapterSaveDestinationOption = {
+  value: ChapterSaveDestination;
+  label: string;
+  description: string;
+};
+
 const DESTINATION_LABELS: Record<ChapterSaveDestination, string> = {
   ai_draft: 'AI 草稿',
   formal_body: '正式正文',
@@ -14,6 +20,24 @@ const DESTINATION_LABELS: Record<ChapterSaveDestination, string> = {
   alternate_version: '候选版本',
   update_existing: '更新已有章节',
 };
+
+const DESTINATION_DESCRIPTIONS: Record<ChapterSaveDestination, string> = {
+  ai_draft: '不会覆盖原文正文，会作为 AI 草稿保存。',
+  alternate_version: '会作为另一个候选版本保存，方便对比取舍。',
+  formal_prologue: '会进入正式目录，作为项目的正式序章。',
+  formal_body: '会进入正式目录，作为普通正文章节。',
+  extra: '会作为番外或外传内容保存。',
+  update_existing: '会覆盖一个已有章节，必须明确目标章节。',
+};
+
+export const CHAPTER_SAVE_DESTINATION_OPTIONS: ChapterSaveDestinationOption[] = [
+  { value: 'ai_draft', label: DESTINATION_LABELS.ai_draft, description: DESTINATION_DESCRIPTIONS.ai_draft },
+  { value: 'alternate_version', label: DESTINATION_LABELS.alternate_version, description: DESTINATION_DESCRIPTIONS.alternate_version },
+  { value: 'formal_prologue', label: DESTINATION_LABELS.formal_prologue, description: DESTINATION_DESCRIPTIONS.formal_prologue },
+  { value: 'formal_body', label: DESTINATION_LABELS.formal_body, description: DESTINATION_DESCRIPTIONS.formal_body },
+  { value: 'extra', label: DESTINATION_LABELS.extra, description: DESTINATION_DESCRIPTIONS.extra },
+  { value: 'update_existing', label: DESTINATION_LABELS.update_existing, description: DESTINATION_DESCRIPTIONS.update_existing },
+];
 
 const DESTINATION_FLAGS: Record<ChapterSaveDestination, string[]> = {
   ai_draft: ['ai_draft'],
@@ -49,6 +73,10 @@ export function normalizeChapterSaveDestination(
 
 export function getChapterSaveDestinationLabel(destination: unknown): string {
   return DESTINATION_LABELS[normalizeChapterSaveDestination(destination)];
+}
+
+export function getChapterSaveDestinationDescription(destination: unknown): string {
+  return DESTINATION_DESCRIPTIONS[normalizeChapterSaveDestination(destination)];
 }
 
 export function getChapterSaveDestinationFlags(destination: ChapterSaveDestination): string[] {

@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { contentService } from '@/lib/api';
 import { upsertContentAsset } from '@/lib/content-upsert';
-import { buildSaveAssetContentRequest, getSaveAssetRequestId, saveAssetRequestToContent } from '@/lib/save-asset-requests';
+import {
+  applyChapterSaveDestinationToRequest,
+  buildSaveAssetContentRequest,
+  getSaveAssetRequestId,
+  saveAssetRequestToContent,
+} from '@/lib/save-asset-requests';
 import type { ContentItem, ContentMetadata } from '@/types';
 
 vi.mock('@/lib/api', () => ({
@@ -53,6 +58,14 @@ describe('save asset requests', () => {
     expect(getSaveAssetRequestId({ type: 'world', title: 'A', id: 'asset-1', data: {} })).toBe('asset-1');
     expect(getSaveAssetRequestId({ type: 'world', title: 'A', data: { contentItemId: 'asset-2' } })).toBe('asset-2');
     expect(getSaveAssetRequestId({ type: 'world', title: 'A', data: { content_item_id: 'asset-3' } })).toBe('asset-3');
+    expect(getSaveAssetRequestId({ type: 'chapter', title: 'A', id: 'chapter-1', data: {} })).toBeUndefined();
+    expect(getSaveAssetRequestId({
+      type: 'chapter',
+      title: 'A',
+      id: 'chapter-1',
+      save_destination: 'update_existing',
+      data: {},
+    })).toBe('chapter-1');
   });
 
   it('builds an update request preserving existing metadata', () => {
@@ -205,5 +218,45 @@ describe('save asset requests', () => {
     });
     expect(request.metadata.tags).toContain('alternate_version');
     expect(request.metadata.tags).not.toContain('imported');
+  });
+
+  it('applies user-selected chapter destination before save', () => {
+    const original = {
+      type: 'chapter',
+      title: 'Rewrite Candidate',
+      id: 'chapter-1',
+      save_destination: 'update_existing',
+      should_replace_existing: true,
+      data: {
+        id: 'chapter-1',
+        contentItemId: 'chapter-1',
+        content: '候选版本。',
+        should_replace_existing: true,
+      },
+    } as const;
+
+    const alternate = applyChapterSaveDestinationToRequest(original, 'alternate_version');
+    expect(alternate.id).toBeUndefined();
+    expect(alternate.save_destination).toBe('alternate_version');
+    expect(alternate.should_replace_existing).toBe(false);
+    expect(alternate.data).toMatchObject({
+      save_destination: 'alternate_version',
+      should_replace_existing: false,
+    });
+    expect(alternate.data.id).toBeUndefined();
+    expect(alternate.data.contentItemId).toBeUndefined();
+
+    const request = buildSaveAssetContentRequest({
+      request: alternate,
+      sessionId: 'session-a',
+      parentId: 'novel-a',
+    });
+    expect(request.extracted_data).toMatchObject({
+      save_destination: 'alternate_version',
+      should_replace_existing: false,
+      source_type: 'ai_generated',
+    });
+    expect(request.extracted_data).not.toHaveProperty('id');
+    expect(request.metadata.tags).toContain('alternate_version');
   });
 });
