@@ -22,6 +22,7 @@ interface ChatInputProps {
   openAIConfig?: OpenAIConfig;
   aiMode?: AIMode;
   onAIModeChange?: (mode: AIMode) => void;
+  prefill?: { id: string; text: string } | null;
 }
 
 export function ChatInput({
@@ -32,6 +33,7 @@ export function ChatInput({
   openAIConfig,
   aiMode = 'fast',
   onAIModeChange,
+  prefill,
 }: ChatInputProps) {
   const [input, setInput] = useState('');
   const [isFocused, setIsFocused] = useState(false);
@@ -63,6 +65,14 @@ export function ChatInput({
     textarea.style.height = 'auto';
     textarea.style.height = `${Math.min(textarea.scrollHeight, 180)}px`;
   }, [input]);
+
+  useEffect(() => {
+    if (!prefill?.text) {
+      return;
+    }
+    setInput(prefill.text);
+    window.setTimeout(() => textareaRef.current?.focus(), 0);
+  }, [prefill?.id, prefill?.text]);
 
   useEffect(() => {
     let cancelled = false;

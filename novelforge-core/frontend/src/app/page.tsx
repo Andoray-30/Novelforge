@@ -147,6 +147,7 @@ export default function ChatPage() {
 
   const [activeArtifacts, setActiveArtifacts] = useState<ArtifactData[]>([]);
   const [focusedAssets, setFocusedAssets] = useState<FocusedAsset[]>([]);
+  const [chatPrefill, setChatPrefill] = useState<{ id: string; text: string } | null>(null);
   const [assetQuickSearch, setAssetQuickSearch] = useState('');
   const [saveNotification, setSaveNotification] = useState<string | null>(null);
   const [messagesMap, setMessagesMap] = useState<Map<string, Message[]>>(new Map());
@@ -174,6 +175,38 @@ export default function ChatPage() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    const raw = window.localStorage.getItem('novelforge.editorHandoff');
+    if (!raw) {
+      return;
+    }
+
+    window.localStorage.removeItem('novelforge.editorHandoff');
+    try {
+      const handoff = JSON.parse(raw) as {
+        prompt?: unknown;
+        focusedAsset?: FocusedAsset;
+        actionLabel?: unknown;
+      };
+      if (typeof handoff.prompt === 'string' && handoff.prompt.trim().length > 0) {
+        setChatPrefill({ id: `editor-${Date.now()}`, text: handoff.prompt.trim() });
+      }
+      if (handoff.focusedAsset?.key && handoff.focusedAsset.title) {
+        setFocusedAssets((current) => {
+          if (current.some((asset) => asset.key === handoff.focusedAsset?.key)) {
+            return current;
+          }
+          return [...current, handoff.focusedAsset as FocusedAsset];
+        });
+      }
+      if (typeof handoff.actionLabel === 'string') {
+        showSaveNotification(`${handoff.actionLabel}已放入聊天输入框，请确认后发送。`);
+      }
+    } catch (error) {
+      console.warn('Failed to read editor handoff', error);
+    }
+  }, [showSaveNotification]);
 
   const worldTreeTopology = useMemo(() => ({
     nodes: topologyData.nodes.map((node): WorldTreeNode => ({
@@ -1724,6 +1757,7 @@ export default function ChatPage() {
                   openAIConfig={openAIConfig}
                   aiMode={aiMode}
                   onAIModeChange={handleAIModeChange}
+                  prefill={chatPrefill}
                 />
               </div>
             </>

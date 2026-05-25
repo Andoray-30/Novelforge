@@ -11,10 +11,21 @@ import {
   buildUpdatedChapterPayload,
   findMostRecentlyUpdatedChapter,
   getNextManualChapterIndex,
-  type PromotableChapterDestination,
   resolveChapterDirectoryMetadata,
   sortChaptersByDirectory,
 } from '@/lib/chapter-metadata';
+import {
+  buildEditorChapterArchiveRequest,
+  buildEditorChapterChatHandoff,
+  buildEditorChapterRestoreRequest,
+  EDITOR_CHAPTER_FILTERS,
+  filterEditorChapters,
+  getEditorChapterWorkflowState,
+  resolveEditorChapterSelection,
+  type EditorChapterAction,
+  type EditorChapterFilter,
+} from '@/lib/editor-chapter-workflow';
+import type { PromotableChapterDestination } from '@/lib/chapter-metadata';
 import {
   formatNovelImportStageSummary,
   parseNovelImportTaskResult,
@@ -27,7 +38,7 @@ import {
   type ProjectPreferences,
 } from '@/lib/project-preferences';
 import { useSessions } from '@/lib/hooks/use-sessions';
-import { BookOpen, FilePlus2, FileText, RefreshCw, Save, Sparkles, Trash2 } from 'lucide-react';
+import { Archive, BookOpen, FilePlus2, FileText, MessageSquareText, RefreshCw, RotateCcw, Save, Sparkles, Trash2 } from 'lucide-react';
 import type { ContentItem } from '@/types';
 
 function syncChapterQueryParam(chapterId: string | null) {
@@ -55,6 +66,7 @@ export default function NovelEditorPage() {
   const selectedNovelId = useAppStore((s) => s.selectedNovelId);
 
   const [chapters, setChapters] = useState<ContentItem[]>([]);
+  const [chapterFilter, setChapterFilter] = useState<EditorChapterFilter>('all');
   const [requestedChapterId, setRequestedChapterId] = useState<string | null>(null);
   const [selectedChapterId, setSelectedChapterId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState('');
@@ -117,18 +129,13 @@ export default function NovelEditorPage() {
 
       setSelectedChapterId((currentSelected) => {
         const preferredChapterId = options?.preferredChapterId;
-        const currentCandidate =
-          preferredChapterId && items.some((item) => item.metadata.id === preferredChapterId)
-            ? preferredChapterId
-            : options?.preferLatest && latestItem
-              ? latestItem.metadata.id
-              : currentSelected && items.some((item) => item.metadata.id === currentSelected)
-                ? currentSelected
-                : requestedChapterId && items.some((item) => item.metadata.id === requestedChapterId)
-                  ? requestedChapterId
-                  : items[0]?.metadata.id || null;
-
-        return currentCandidate;
+        return resolveEditorChapterSelection({
+          items,
+          preferredChapterId: options?.preferredChapterId,
+          preferLatestItem: options?.preferLatest ? latestItem : null,
+          currentSelectedId: currentSelected,
+          requestedChapterId,
+        });
       });
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Failed to load chapter assets');
@@ -150,13 +157,17 @@ export default function NovelEditorPage() {
     [chapters, selectedChapterId]
   );
 
-  const selectedChapterMetadata = useMemo(
-    () => selectedChapter ? resolveChapterDirectoryMetadata(selectedChapter) : null,
+  const selectedChapterWorkflow = useMemo(
+    () => selectedChapter ? getEditorChapterWorkflowState(selectedChapter) : null,
     [selectedChapter],
   );
 
-  const canPromoteSelectedChapter = selectedChapterMetadata?.sourceType === 'ai_generated'
-    && (selectedChapterMetadata.saveDestination === 'ai_draft' || selectedChapterMetadata.saveDestination === 'alternate_version');
+  const canPromoteSelectedChapter = selectedChapterWorkflow?.isCandidate ?? false;
+
+  const filteredChapters = useMemo(
+    () => filterEditorChapters(chapters, chapterFilter),
+    [chapterFilter, chapters],
+  );
 
   useEffect(() => {
     syncChapterQueryParam(selectedChapterId);
@@ -360,6 +371,117 @@ export default function NovelEditorPage() {
       setIsSaving(false);
     }
   }, [canPromoteSelectedChapter, currentSessionId, hasUnsavedChanges, selectedChapter]);
+
+  const handleArchiveSelectedChapter = useCallback(async () => {
+    if (!selectedChapter || !selectedChapterWorkflow?.isCandidate) {
+      return;
+    }
+
+    if (hasUnsavedChanges) {
+      setSaveMessage('请先保存当前正文修改，再归档候选。');
+      return;
+    }
+
+    const confirmed = window.confirm('归档后不会删除内容，只会从默认列表隐藏，可在“已归档”筛选中查看。确定归档吗？');
+    if (!confirmed) {
+      return;
+    }
+
+    setIsSaving(true);
+    setError(null);
+    setSaveMessage(null);
+
+    try {
+      const request = buildEditorChapterArchiveRequest(selectedChapter);
+      await contentService.update(selectedChapter.metadata.id, request);
+      const updatedAt = new Date().toISOString();
+      setChapters((current) => sortChaptersByDirectory(current.map((chapter) =>
+        chapter.metadata.id === selectedChapter.metadata.id
+          ? {
+              ...chapter,
+              metadata: {
+                ...chapter.metadata,
+                title: request.metadata.title,
+                tags: request.metadata.tags ?? chapter.metadata.tags,
+                status: request.metadata.status ?? 'archived',
+                updated_at: updatedAt,
+              },
+              content: request.content,
+              extracted_data: request.extracted_data,
+            }
+          : chapter
+      )));
+      setChapterFilter('archived');
+      setSaveMessage('候选已归档。内容没有删除，可在“已归档”中恢复查看。');
+    } catch (archiveError) {
+      setError(archiveError instanceof Error ? archiveError.message : 'Failed to archive chapter');
+    } finally {
+      setIsSaving(false);
+    }
+  }, [hasUnsavedChanges, selectedChapter, selectedChapterWorkflow?.isCandidate]);
+
+  const handleRestorePreviousSnapshot = useCallback(async () => {
+    if (!selectedChapter || !selectedChapterWorkflow?.hasPreviousSnapshot) {
+      return;
+    }
+
+    if (hasUnsavedChanges) {
+      setSaveMessage('请先保存或放弃当前本地修改，再恢复上一版。');
+      return;
+    }
+
+    const confirmed = window.confirm('确定恢复 previous_snapshot 吗？当前版本会被保存为 recovery_snapshot，避免丢失。');
+    if (!confirmed) {
+      return;
+    }
+
+    const request = buildEditorChapterRestoreRequest(selectedChapter);
+    if (!request) {
+      setError('当前章节没有可恢复的 previous_snapshot。');
+      return;
+    }
+
+    setIsSaving(true);
+    setError(null);
+    setSaveMessage(null);
+
+    try {
+      await contentService.update(selectedChapter.metadata.id, request);
+      const updatedAt = new Date().toISOString();
+      setChapters((current) => sortChaptersByDirectory(current.map((chapter) =>
+        chapter.metadata.id === selectedChapter.metadata.id
+          ? {
+              ...chapter,
+              metadata: {
+                ...chapter.metadata,
+                title: request.metadata.title,
+                tags: request.metadata.tags ?? chapter.metadata.tags,
+                status: request.metadata.status ?? chapter.metadata.status,
+                updated_at: updatedAt,
+              },
+              content: request.content,
+              extracted_data: request.extracted_data,
+            }
+          : chapter
+      )));
+      setDraftTitle(request.metadata.title);
+      setDraftContent(request.content);
+      setSaveMessage('已恢复上一版，并把恢复前版本保存为 recovery_snapshot。');
+    } catch (restoreError) {
+      setError(restoreError instanceof Error ? restoreError.message : 'Failed to restore previous snapshot');
+    } finally {
+      setIsSaving(false);
+    }
+  }, [hasUnsavedChanges, selectedChapter, selectedChapterWorkflow?.hasPreviousSnapshot]);
+
+  const handleChatHandoff = useCallback((action: EditorChapterAction) => {
+    if (!selectedChapter) {
+      return;
+    }
+    const handoff = buildEditorChapterChatHandoff(selectedChapter, action);
+    window.localStorage.setItem('novelforge.editorHandoff', JSON.stringify(handoff));
+    window.location.assign('/');
+  }, [selectedChapter]);
 
   const handleCreateChapter = useCallback(async () => {
     if (hasUnsavedChanges) {
@@ -578,12 +700,36 @@ export default function NovelEditorPage() {
             <aside className="rounded-3xl border border-slate-800 bg-slate-900/70 p-4">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-lg font-semibold text-white">章节列表</h2>
-                <span className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-400">{chapters.length} 章</span>
+                <span className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-400">{filteredChapters.length}/{chapters.length}</span>
               </div>
 
+              <div className="mb-4 flex flex-wrap gap-2">
+                {EDITOR_CHAPTER_FILTERS.map((filter) => (
+                  <button
+                    key={filter.value}
+                    type="button"
+                    onClick={() => setChapterFilter(filter.value)}
+                    className={[
+                      'rounded-full border px-3 py-1.5 text-xs font-semibold transition',
+                      chapterFilter === filter.value
+                        ? 'border-amber-400/50 bg-amber-400/15 text-amber-100'
+                        : 'border-slate-800 bg-slate-950/40 text-slate-400 hover:border-slate-700 hover:text-slate-200',
+                    ].join(' ')}
+                  >
+                    {filter.label}
+                  </button>
+                ))}
+              </div>
+
+                {filteredChapters.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-950/40 p-4 text-sm text-slate-500">
+                    当前筛选下没有章节。
+                  </div>
+                ) : null}
               <div className="space-y-3">
-                {chapters.map((chapter, index) => {
+                {filteredChapters.map((chapter, index) => {
                   const chapterMeta = resolveChapterDirectoryMetadata(chapter, index + 1);
+                  const workflowState = getEditorChapterWorkflowState(chapter);
                   const payload = getContentAssetPayload(chapter);
                   const preview = getContentAssetText(chapter, payload).slice(0, 90);
                   const isActive = chapter.metadata.id === selectedChapterId;
@@ -625,6 +771,12 @@ export default function NovelEditorPage() {
                               {chapterMeta.roleLabel}
                             </span>
                             <span className="rounded-full border border-slate-700 px-2 py-1 text-slate-400">{chapterMeta.wordCount} 字</span>
+                            {workflowState.isArchived ? (
+                              <span className="rounded-full border border-slate-700 bg-slate-800 px-2 py-1 text-slate-300">已归档</span>
+                            ) : null}
+                            {workflowState.hasPreviousSnapshot ? (
+                              <span className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-cyan-200">可恢复</span>
+                            ) : null}
                             {chapterMeta.qualityFlagLabels.map((flag) => (
                               <span key={flag} className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-amber-200">
                                 {flag}
@@ -664,6 +816,70 @@ export default function NovelEditorPage() {
                     </div>
                   </div>
 
+                  {selectedChapterWorkflow ? (
+                    <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-100">章节状态</p>
+                          <div className="mt-3 grid gap-2 text-xs text-slate-400 sm:grid-cols-2 lg:grid-cols-3">
+                            <span>来源：{selectedChapterWorkflow.sourceLabel}</span>
+                            <span>保存目的：{selectedChapterWorkflow.saveDestinationLabel}</span>
+                            <span>章节角色：{selectedChapterWorkflow.chapterRoleLabel}</span>
+                            <span>字数：{selectedChapterWorkflow.wordCount}</span>
+                            <span>AI 生成：{selectedChapterWorkflow.isAIGenerated ? '是' : '否'}</span>
+                            <span>候选版本：{selectedChapterWorkflow.isCandidate ? '是' : '否'}</span>
+                            <span>快照：{selectedChapterWorkflow.hasPreviousSnapshot ? '有 previous_snapshot' : '无'}</span>
+                            <span>归档：{selectedChapterWorkflow.isArchived ? '已归档' : '未归档'}</span>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {(['continue', 'rewrite', 'polish'] as EditorChapterAction[]).map((action) => (
+                            <button
+                              key={action}
+                              type="button"
+                              onClick={() => handleChatHandoff(action)}
+                              className="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:bg-slate-800"
+                            >
+                              <MessageSquareText className="mr-1.5 h-3.5 w-3.5" />
+                              {action === 'continue' ? '继续写这一章' : action === 'rewrite' ? '改写这一章' : '润色这一章'}
+                            </button>
+                          ))}
+                          {selectedChapterWorkflow.hasPreviousSnapshot ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void handleRestorePreviousSnapshot();
+                              }}
+                              disabled={isSaving}
+                              className="inline-flex items-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                              恢复上一版
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      {selectedChapterWorkflow.previousSnapshot ? (
+                        <details className="mt-4 rounded-xl border border-slate-800 bg-slate-900/70 p-3">
+                          <summary className="cursor-pointer text-xs font-semibold text-cyan-100">查看 previous_snapshot</summary>
+                          <div className="mt-3 space-y-2 text-xs text-slate-400">
+                            <p>旧标题：{selectedChapterWorkflow.previousSnapshot.oldTitle || '未记录'}</p>
+                            <p>旧更新时间：{selectedChapterWorkflow.previousSnapshot.oldUpdatedAt || '未记录'}</p>
+                            <p className="line-clamp-4 whitespace-pre-wrap">
+                              {selectedChapterWorkflow.previousSnapshot.oldContent || '没有旧正文摘要。'}
+                            </p>
+                            {selectedChapterWorkflow.previousSnapshot.oldExtractedData ? (
+                              <pre className="max-h-36 overflow-auto rounded-lg bg-slate-950 p-3 text-[11px] text-slate-500">
+                                {JSON.stringify(selectedChapterWorkflow.previousSnapshot.oldExtractedData, null, 2).slice(0, 1200)}
+                              </pre>
+                            ) : null}
+                          </div>
+                        </details>
+                      ) : null}
+                    </div>
+                  ) : null}
+
                   {canPromoteSelectedChapter ? (
                     <div className="rounded-2xl border border-violet-500/30 bg-violet-500/10 p-4">
                       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -692,6 +908,17 @@ export default function NovelEditorPage() {
                               {label}
                             </button>
                           ))}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void handleArchiveSelectedChapter();
+                            }}
+                            disabled={isSaving}
+                            className="inline-flex items-center rounded-xl border border-slate-600 bg-slate-950/70 px-3 py-2 text-xs font-semibold text-slate-100 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            <Archive className="mr-1.5 h-3.5 w-3.5" />
+                            归档候选
+                          </button>
                         </div>
                       </div>
                     </div>

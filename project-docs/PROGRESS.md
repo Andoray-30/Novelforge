@@ -11,6 +11,25 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-05-25 Goal 13 编辑器候选版本与快照恢复 v1
+### 本轮完成
+- 新增 editor 章节工作流 helper：集中处理章节筛选、AI 草稿/候选识别、转正式元数据请求、候选归档、`previous_snapshot` 恢复、`/editor?chapterId=` 选中优先级与聊天 handoff prompt。
+- Editor 左侧章节列表增加轻量筛选：全部、导入原文、AI 草稿、候选版本、正式正文、正式序章、番外、已归档；显示仍沿用目录排序。
+- Editor 选中章节后增加状态面板：来源、保存目的、章节角色、字数、AI 生成、候选版本、快照、归档状态。
+- AI 草稿/候选支持转正式正文、正式序章、番外、保留候选，以及归档候选；归档只更新 metadata/status，不物理删除正文。
+- `previous_snapshot` 支持查看摘要与确认恢复；恢复时把当前版本写入 `recovery_snapshot`，避免单次恢复造成丢失。
+- Editor 增加“继续写这一章 / 改写这一章 / 润色这一章”入口：会把当前章节作为 focused asset 带回聊天工作台，并预填 prompt，但不会自动发送。
+
+### 验证
+- `cmd /c npx vitest run src/lib/editor-chapter-workflow.test.ts src/lib/chapter-metadata.test.ts`：18 passed。
+- `cmd /c npx tsc --noEmit --incremental false`：passed。
+- `cmd /c npm test`：22 files / 93 tests passed。
+- `cmd /c npm run build`：passed。
+
+### 后续注意
+- 本轮没有重构 editor 外观，只把候选管理闭环落到稳定 helper 与轻量 UI。
+- 现有页面仍有部分历史中文乱码债务，后续应做独立编码清理，不与候选版本工作流混在一起。
+
 ## 2026-04-18 阶段审计结论
 ### 审计摘要
 - 当前系统已经从“占位页拼接阶段”进入“可用但未闭环阶段”。
