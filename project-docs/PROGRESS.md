@@ -4411,3 +4411,68 @@
 - 当前判断：
   - Goal 6 主体闭环已经落地：AI 写作前能自动查项目上下文，用户能看到它参考了什么。
   - 这仍是轻量规则 planner，不是完整多轮 agent 图；后续可以把 planner 从规则升级为模型决策，但当前不阻塞内部可用。
+
+## 2026-05-25 Goal 6B：Model-driven Writing Agent Tool Loop v1
+- 本轮目标：
+  - 将 Goal 6 的规则 planner 升级为优先使用 OpenAI-compatible tool calling 的多步写作 agent。
+  - 模型可以在一轮对话内自主选择读取最近对话、章节片段、项目资产、保存建议、覆盖建议和质量检查。
+  - 如果当前模型或供应商不支持 tool calling，自动降级到 Goal 6 的规则 planner。
+- 后端实现：
+  - `AIService` 新增 `chat_tool_decision(...)`：
+    - 调用 `/chat/completions` 的 `tools/tool_choice=auto`。
+    - 规范化返回 `content / tool_calls / finish_reason`。
+    - 无真实 API client 或供应商拒绝 tool calling 时抛出错误，由 agent fallback 接管。
+    - 新增 `NOVELFORGE_MOCK_TOOL_CALLS=false` 本地验证开关；开启时脚本化返回 `最近对话 -> 章节片段 -> 角色资产 -> stop`，只用于浏览器/自动化验收。
+  - `WritingAgentRuntime.prepare(...)` 新增 `ai_service` 参数。
+  - 新增 model-driven 主路径：
+    - `plan -> model tool decision -> run tool -> observe -> maybe continue -> final writer prompt`。
+    - 单轮最多 5 次工具调用。
+    - 工具失败、达到上限、上下文足够、或生成保存/覆盖建议需要用户确认时停止。
+  - 继续保留规则 planner：
+    - `mode=rule_planner`：未传入 tool-capable AI service 时使用。
+    - `mode=fallback`：tool calling 不可用或失败时使用。
+  - 工具约束：
+    - 所有读取工具仍限制在当前 `session_id / selected_novel_id`。
+    - `prepare_save_asset` 和 `prepare_chapter_update` 只生成建议，不直接写库。
+    - 默认排除 AI 草稿/候选；只有用户明确提到“草稿/候选/刚才/上一版”才允许读取 AI 版本。
+  - trace 扩展：
+    - `mode`
+    - `fallback_reason`
+    - `stopped_reason`
+    - 每步工具调用增加 `step`
+    - 每步工具调用增加 `continue_reason`，用于前端展示“继续读取上下文”或最终停止原因。
+- 前端实现：
+  - `agent-trace` 类型支持 `mode / fallback_reason / stopped_reason / step`。
+  - “本轮写作依据”面板显示模式、停止原因和降级原因。
+  - 仍不展示模型原始 CoT，只展示可审计工具轨迹。
+- 测试：
+  - 后端目标测试新增：
+    - 支持 tool calling 时，模型可连续调用多个工具。
+    - tool calling 不可用时降级到规则 planner。
+    - 超过 max steps 后停止并标记 degraded。
+    - 工具返回 error 时记录 degraded trace，并继续准备最终 writer prompt。
+    - 保存/覆盖工具只生成建议，不直接写库。
+  - 后端回归：
+    - `py -m pytest novelforge-core\tests\api\test_writing_agent_runtime.py novelforge-core\tests\api\test_chat_agent_trace_api.py novelforge-core\tests\services\test_chat_product_prompt.py novelforge-core\tests\api\test_auth.py`
+    - 结果：`23 passed`。
+  - 前端回归：
+    - `npm test`
+    - 结果：`20 files / 82 tests passed`。
+    - `npx tsc --noEmit --incremental false` 通过。
+  - 编译：
+    - `compileall` 覆盖 `writing_agent.py`、`api/__init__.py`、`ai_service.py` 通过。
+  - API/浏览器验证：
+    - `/api/chat/send-message` 真实调用返回 `agent_trace.mode=model_tool_loop`，并持久化到 assistant message metadata。
+    - `/api/chat/send-message-stream` 首个 SSE 事件返回 `type=agent_trace`，包含 `mode=model_tool_loop`、多步 `tool_calls`、`stopped_reason=context_sufficient`。
+    - `NOVELFORGE_MOCK_TOOL_CALLS=true` 浏览器验证：
+      - 前端在本地浏览器中可展开“本轮写作依据”。
+      - trace 面板显示 `模式：模型工具循环`。
+      - 可见多步轨迹：`读取最近对话 -> 读取章节片段 -> 检索项目资产`。
+      - 面板未展示 `<think>` 或原始思考链。
+    - 跑 `next build` 后曾导致旧 dev server 与新构建 chunk 混用的 RSC console error；已重启 3010 前端服务，问题属于开发服务热更新状态，不是本轮代码构建失败。
+    - 新增无真实 client 时跳过 tool-call 探测的保护，避免 mock/本地模式因为 provider retry 卡在“AI 正在思考”。
+    - 验证结束后已重启前端 3010 与后端 8001，恢复正常非 mock 开发运行状态。
+- 当前判断：
+  - Goal 6B 的核心后端能力已经落地：写作 agent 可以优先走模型驱动多步工具循环，并在不支持 tool calling 时自动回退。
+  - 真实浏览器里已验证 trace 面板能展开；多步 model tool loop 已通过后端 mock 单元测试和真实 API/SSE 验证。
+  - 后续还需要继续处理全局中文乱码/编码显示问题，这不是 6B 新增能力造成，但会影响产品可用感。

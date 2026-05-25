@@ -72,6 +72,10 @@ class AIService:
         """Whether the current config contains a usable upstream API key."""
         return bool(self.config.api_key and "your-api-key-here" not in self.config.api_key)
 
+    def supports_tool_calling_for_agent(self) -> bool:
+        """Whether the writing agent should attempt the tool-call loop."""
+        return bool(getattr(self.config, "mock_tool_calls", False) or self.has_real_client())
+
     def with_overrides(
         self,
         *,
@@ -413,6 +417,133 @@ class AIService:
                 raise
 
         return await retry_with_policy(_do_chat, self.retry_policy)
+
+    async def chat_tool_decision(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        temperature: Optional[float] = None,
+        max_tokens: int = 900,
+        timeout: float = 75.0,
+    ) -> dict[str, Any]:
+        """Single OpenAI-compatible tool-decision turn.
+
+        Returns a normalized dict with `content`, `tool_calls`, and `finish_reason`.
+        Providers that reject tool calling raise RuntimeError so callers can
+        degrade to a non-tool fallback path.
+        """
+        if not tools:
+            raise RuntimeError("Tool calling requested without tools.")
+
+        if getattr(self.config, "mock_tool_calls", False):
+            tool_messages = [message for message in messages if message.get("role") == "tool"]
+            step = len(tool_messages)
+            scripted_calls = [
+                {"id": "mock-call-1", "name": "get_recent_conversation", "arguments": {"limit": 4}},
+                {
+                    "id": "mock-call-2",
+                    "name": "search_chapter_snippets",
+                    "arguments": {"query": "", "mode": "end", "limit": 2},
+                },
+                {
+                    "id": "mock-call-3",
+                    "name": "search_project_assets",
+                    "arguments": {"query": "", "types": ["character"], "limit": 3},
+                },
+            ]
+            if step < len(scripted_calls):
+                return {"content": "", "tool_calls": [scripted_calls[step]], "finish_reason": "tool_calls"}
+            return {"content": "mock tool context is sufficient", "tool_calls": [], "finish_reason": "stop"}
+
+        if not self.has_real_client():
+            raise RuntimeError("Tool calling is unavailable without a real API client.")
+
+        temp = temperature if temperature is not None else self.config.extraction_temperature
+        estimated_tokens = sum(len(str(m.get("content", ""))) for m in messages) // 4 + max_tokens
+
+        async def _do_chat_tool_decision() -> dict[str, Any]:
+            await self.concurrency_controller.acquire()
+            await self.rate_limiter.acquire(estimated_tokens)
+            start_time = time.time()
+            try:
+                payload = await self._request_json(
+                    "POST",
+                    "/chat/completions",
+                    json_body={
+                        "model": self.config.model,
+                        "messages": messages,
+                        "tools": tools,
+                        "tool_choice": "auto",
+                        "temperature": temp,
+                        "max_tokens": max_tokens,
+                    },
+                    timeout=timeout,
+                )
+
+                usage = payload.get("usage")
+                if isinstance(usage, dict):
+                    total_tokens = usage.get("total_tokens")
+                    if isinstance(total_tokens, int):
+                        self.rate_limiter.record(total_tokens)
+
+                choices = payload.get("choices")
+                first_choice = choices[0] if isinstance(choices, list) and choices else {}
+                if not isinstance(first_choice, dict):
+                    first_choice = {}
+                message = first_choice.get("message")
+                if not isinstance(message, dict):
+                    message = {}
+
+                normalized_calls: list[dict[str, Any]] = []
+                for call in message.get("tool_calls") or []:
+                    if not isinstance(call, dict):
+                        continue
+                    function = call.get("function")
+                    if not isinstance(function, dict):
+                        continue
+                    name = function.get("name")
+                    if not isinstance(name, str) or not name:
+                        continue
+                    raw_arguments = function.get("arguments")
+                    arguments: dict[str, Any] = {}
+                    if isinstance(raw_arguments, str) and raw_arguments.strip():
+                        try:
+                            parsed = json.loads(raw_arguments)
+                            if isinstance(parsed, dict):
+                                arguments = parsed
+                        except json.JSONDecodeError:
+                            arguments = {"_raw": raw_arguments}
+                    elif isinstance(raw_arguments, dict):
+                        arguments = raw_arguments
+                    normalized_calls.append(
+                        {
+                            "id": str(call.get("id") or f"call_{len(normalized_calls) + 1}"),
+                            "name": name,
+                            "arguments": arguments,
+                        }
+                    )
+
+                await self.concurrency_controller.release(
+                    success=True,
+                    response_time=time.time() - start_time,
+                )
+                return {
+                    "content": self._extract_text_content(message.get("content")),
+                    "tool_calls": normalized_calls,
+                    "finish_reason": first_choice.get("finish_reason"),
+                }
+            except asyncio.TimeoutError:
+                await self.concurrency_controller.release(success=False, response_time=timeout)
+                raise TimeoutError(f"API request timed out ({timeout}s)")
+            except Exception:
+                await self.concurrency_controller.release(
+                    success=False,
+                    response_time=time.time() - start_time,
+                )
+                raise
+
+        return await retry_with_policy(_do_chat_tool_decision, self.retry_policy)
 
     async def chat_stream(
         self,

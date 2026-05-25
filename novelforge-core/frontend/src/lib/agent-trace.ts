@@ -3,6 +3,8 @@ export type AgentToolCall = {
   status: string;
   summary: string;
   item_count?: number;
+  step?: number;
+  continue_reason?: string;
 };
 
 export type AgentTraceAsset = {
@@ -20,11 +22,14 @@ export type AgentTraceSnippet = {
 
 export type AgentTrace = {
   enabled: boolean;
+  mode?: 'rule_planner' | 'model_tool_loop' | 'fallback' | 'disabled' | string;
   plan_summary: string;
   tool_calls: AgentToolCall[];
   used_assets: AgentTraceAsset[];
   chapter_snippets: AgentTraceSnippet[];
   degraded: boolean;
+  fallback_reason?: string;
+  stopped_reason?: string;
   max_tool_calls?: number;
 };
 
@@ -55,6 +60,8 @@ export function normalizeAgentTrace(value: unknown): AgentTrace | undefined {
         status: asString(item.status) || 'unknown',
         summary: asString(item.summary),
         item_count: asNumber(item.item_count),
+        step: asNumber(item.step),
+        continue_reason: asString(item.continue_reason) || undefined,
       })).filter((item) => item.name || item.summary)
     : [];
 
@@ -82,11 +89,14 @@ export function normalizeAgentTrace(value: unknown): AgentTrace | undefined {
 
   return {
     enabled: asBoolean(value.enabled),
+    mode: asString(value.mode) || undefined,
     plan_summary: planSummary,
     tool_calls: toolCalls,
     used_assets: usedAssets,
     chapter_snippets: chapterSnippets,
     degraded: asBoolean(value.degraded),
+    fallback_reason: asString(value.fallback_reason) || undefined,
+    stopped_reason: asString(value.stopped_reason) || undefined,
     max_tool_calls: asNumber(value.max_tool_calls),
   };
 }

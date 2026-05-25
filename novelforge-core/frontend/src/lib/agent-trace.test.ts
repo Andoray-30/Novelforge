@@ -16,7 +16,7 @@ describe('agent trace normalization', () => {
       chapter_snippets: [{ id: 'chapter-1', title: '第一章', mode: 'end', preview: '她在章末看见另一个自己。' }],
     });
 
-    expect(trace).toEqual({
+    expect(trace).toMatchObject({
       enabled: true,
       plan_summary: '读取最近对话和章节结尾。',
       degraded: false,

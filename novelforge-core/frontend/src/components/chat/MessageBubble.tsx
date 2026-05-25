@@ -172,6 +172,13 @@ function getSnippetModeLabel(mode?: string): string {
   return '片段';
 }
 
+function getAgentModeLabel(mode?: string): string {
+  if (mode === 'model_tool_loop') return '模型工具循环';
+  if (mode === 'rule_planner') return '规则规划';
+  if (mode === 'fallback') return '降级规划';
+  return '上下文读取';
+}
+
 function AgentTracePanel({ trace }: { trace: AgentTrace }) {
   const usedCount = trace.used_assets.length + trace.chapter_snippets.length;
   const summary = trace.plan_summary || '已按任务读取必要上下文。';
@@ -207,11 +214,17 @@ function AgentTracePanel({ trace }: { trace: AgentTrace }) {
       </summary>
       <div style={{ padding: '0 14px 12px', display: 'grid', gap: 10 }}>
         <div style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>{summary}</div>
+        <div style={{ color: 'var(--text-muted)', lineHeight: 1.5 }}>
+          模式：{getAgentModeLabel(trace.mode)}
+          {trace.stopped_reason ? <span> · 停止原因：{trace.stopped_reason}</span> : null}
+          {trace.fallback_reason ? <span> · 降级原因：{trace.fallback_reason}</span> : null}
+        </div>
 
         {trace.tool_calls.length > 0 ? (
           <div style={{ display: 'grid', gap: 6 }}>
             {trace.tool_calls.map((call, index) => (
               <div key={`${call.name}-${index}`} style={{ color: 'var(--text-muted)', lineHeight: 1.55 }}>
+                {typeof call.step === 'number' ? <span>#{call.step} </span> : null}
                 <strong style={{ color: 'var(--text-secondary)' }}>{getAgentToolLabel(call.name)}</strong>
                 <span> · {call.status}</span>
                 {typeof call.item_count === 'number' ? <span> · {call.item_count} 条</span> : null}

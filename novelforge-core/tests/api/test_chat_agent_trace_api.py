@@ -23,7 +23,7 @@ class FakeAIService:
 
 
 class FakeWritingAgent:
-    async def prepare(self, *, user_message, context, conversation, base_system_prompt):  # noqa: ANN001
+    async def prepare(self, *, user_message, context, conversation, base_system_prompt, ai_service=None):  # noqa: ANN001
         return AgentPreparation(
             system_prompt=f"{base_system_prompt}\nagent context",
             trace={

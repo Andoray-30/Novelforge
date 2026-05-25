@@ -51,6 +51,7 @@ class Config:
         if self.default_ai_mode not in {"fast", "pro"}:
             self.default_ai_mode = "fast"
         self.strict_model: bool = os.getenv("OPENAI_STRICT_MODEL", "false").lower() == "true"
+        self.mock_tool_calls: bool = os.getenv("NOVELFORGE_MOCK_TOOL_CALLS", "false").lower() == "true"
         self.fallback_models: list[str] = [
             item.strip()
             for item in os.getenv("OPENAI_FALLBACK_MODELS", "").split(",")

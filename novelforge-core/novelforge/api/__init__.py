@@ -1291,6 +1291,7 @@ async def send_message(request: ChatRequest):
            context=request.context,
            conversation=conversation,
            base_system_prompt=system_prompt,
+           ai_service=runtime_ai_service,
        )
        
        ai_response = await runtime_ai_service.chat(
@@ -1390,6 +1391,7 @@ async def send_chat_message_stream(request: ChatRequest):
         context=request.context,
         conversation=conversation,
         base_system_prompt=_build_chat_system_prompt(request.context),
+        ai_service=runtime_ai_service,
     )
 
     async def event_generator():

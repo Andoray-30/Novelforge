@@ -4,6 +4,8 @@ from novelforge.api.types import Conversation, Message
 from novelforge.api.writing_agent import AgentScope, WRITING_AGENT_TOOL_SCHEMAS, WritingAgentRuntime
 from novelforge.content.manager import ContentManager
 from novelforge.content.models import ContentItem, ContentMetadata, ContentType
+from novelforge.core.config import Config
+from novelforge.services.ai_service import AIService
 from novelforge.storage.storage_manager import StorageManager
 
 
@@ -235,3 +237,218 @@ def test_agent_prepare_degrades_gracefully_when_tool_fails() -> None:
     assert "base prompt" in preparation.system_prompt
     assert preparation.trace["degraded"] is True
     assert any(call["status"] == "error" for call in preparation.trace["tool_calls"])
+
+
+class FakeToolCallingAI:
+    def __init__(self, decisions: list[dict]):
+        self.decisions = list(decisions)
+        self.calls: list[dict] = []
+
+    async def chat_tool_decision(self, **kwargs):  # noqa: ANN003
+        self.calls.append(kwargs)
+        if self.decisions:
+            return self.decisions.pop(0)
+        return {"content": "enough", "tool_calls": [], "finish_reason": "stop"}
+
+
+def tool_call(name: str, arguments: dict, call_id: str) -> dict:
+    return {"id": call_id, "name": name, "arguments": arguments}
+
+
+def test_model_tool_loop_can_call_multiple_tools_and_build_trace() -> None:
+    runtime = build_runtime()
+    fake_ai = FakeToolCallingAI(
+        [
+            {"tool_calls": [tool_call("get_recent_conversation", {"limit": 3}, "call-1")]},
+            {"tool_calls": [tool_call("search_chapter_snippets", {"query": "", "mode": "end", "limit": 1}, "call-2")]},
+            {"tool_calls": [tool_call("search_project_assets", {"query": "", "types": ["character"], "limit": 2}, "call-3")]},
+            {"tool_calls": []},
+        ]
+    )
+
+    preparation = run(
+        runtime.prepare(
+            user_message="请续写第一章结尾，读取辉夜角色",
+            context={"session_id": "session-a", "selected_novel_id": "novel-a"},
+            conversation=Conversation(messages=[Message(role="assistant", content="上一版结尾")]),
+            base_system_prompt="base prompt",
+            ai_service=fake_ai,
+        )
+    )
+
+    assert preparation.trace["mode"] == "model_tool_loop"
+    assert preparation.trace["stopped_reason"] == "context_sufficient"
+    assert [call["name"] for call in preparation.trace["tool_calls"]] == [
+        "get_recent_conversation",
+        "search_chapter_snippets",
+        "search_project_assets",
+    ]
+    assert preparation.trace["tool_calls"][0]["continue_reason"] == "继续读取上下文"
+    assert preparation.trace["tool_calls"][-1]["continue_reason"] == "停止：context_sufficient"
+    assert preparation.trace["chapter_snippets"]
+    assert any(asset["id"] == "char-hero" for asset in preparation.trace["used_assets"])
+    assert "base prompt" in preparation.system_prompt
+
+
+def test_model_tool_loop_falls_back_when_tool_calling_is_unavailable() -> None:
+    class NoToolAI:
+        async def chat_tool_decision(self, **kwargs):  # noqa: ANN003
+            raise RuntimeError("tools unsupported")
+
+    runtime = build_runtime()
+    preparation = run(
+        runtime.prepare(
+            user_message="请根据角色写一个序章",
+            context={"session_id": "session-a", "selected_novel_id": "novel-a"},
+            conversation=Conversation(messages=[]),
+            base_system_prompt="base prompt",
+            ai_service=NoToolAI(),
+        )
+    )
+
+    assert preparation.trace["mode"] == "fallback"
+    assert preparation.trace["degraded"] is True
+    assert "tools unsupported" in preparation.trace["fallback_reason"]
+    assert preparation.trace["tool_calls"]
+
+
+def test_prepare_skips_model_loop_when_ai_service_has_no_real_client() -> None:
+    class MockOnlyAI:
+        def has_real_client(self) -> bool:
+            return False
+
+        async def chat_tool_decision(self, **kwargs):  # noqa: ANN003
+            raise AssertionError("tool loop should not be called without a real client")
+
+    runtime = build_runtime()
+    preparation = run(
+        runtime.prepare(
+            user_message="continue chapter one",
+            context={"session_id": "session-a", "selected_novel_id": "novel-a"},
+            conversation=Conversation(messages=[]),
+            base_system_prompt="base prompt",
+            ai_service=MockOnlyAI(),
+        )
+    )
+
+    assert preparation.trace["mode"] == "fallback"
+    assert preparation.trace["fallback_reason"] == "tool_calling_not_supported_or_no_real_client"
+
+
+def test_prepare_uses_tool_loop_when_service_explicitly_supports_mock_tool_calling() -> None:
+    class MockToolCallingAI(FakeToolCallingAI):
+        def has_real_client(self) -> bool:
+            return False
+
+        def supports_tool_calling_for_agent(self) -> bool:
+            return True
+
+    runtime = build_runtime()
+    fake_ai = MockToolCallingAI(
+        [
+            {"tool_calls": [tool_call("get_recent_conversation", {"limit": 2}, "mock-1")]},
+            {"tool_calls": [tool_call("search_chapter_snippets", {"query": "", "mode": "end", "limit": 1}, "mock-2")]},
+            {"tool_calls": []},
+        ]
+    )
+
+    preparation = run(
+        runtime.prepare(
+            user_message="mock browser verification",
+            context={"session_id": "session-a", "selected_novel_id": "novel-a"},
+            conversation=Conversation(messages=[Message(role="assistant", content="history")]),
+            base_system_prompt="base prompt",
+            ai_service=fake_ai,
+        )
+    )
+
+    assert preparation.trace["mode"] == "model_tool_loop"
+    assert [call["name"] for call in preparation.trace["tool_calls"]] == [
+        "get_recent_conversation",
+        "search_chapter_snippets",
+    ]
+
+
+def test_ai_service_mock_tool_calling_script(monkeypatch) -> None:
+    monkeypatch.setenv("NOVELFORGE_MOCK_TOOL_CALLS", "true")
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    service = AIService(Config())
+
+    assert service.supports_tool_calling_for_agent() is True
+
+    first = run(service.chat_tool_decision(messages=[{"role": "user", "content": "x"}], tools=[{"type": "function"}]))
+    second = run(
+        service.chat_tool_decision(
+            messages=[
+                {"role": "user", "content": "x"},
+                {"role": "tool", "tool_call_id": "mock-call-1", "content": "{}"},
+            ],
+            tools=[{"type": "function"}],
+        )
+    )
+
+    assert first["tool_calls"][0]["name"] == "get_recent_conversation"
+    assert second["tool_calls"][0]["name"] == "search_chapter_snippets"
+
+
+def test_model_tool_loop_records_tool_error_and_still_prepares_final_prompt() -> None:
+    runtime = build_runtime()
+    fake_ai = FakeToolCallingAI(
+        [
+            {"tool_calls": [tool_call("get_asset_detail", {"asset_id": "missing-asset"}, "call-1")]},
+            {"tool_calls": []},
+        ]
+    )
+
+    preparation = run(
+        runtime.prepare(
+            user_message="read a missing asset then answer",
+            context={"session_id": "session-a", "selected_novel_id": "novel-a"},
+            conversation=Conversation(messages=[]),
+            base_system_prompt="base prompt",
+            ai_service=fake_ai,
+        )
+    )
+
+    assert preparation.trace["mode"] == "model_tool_loop"
+    assert preparation.trace["degraded"] is True
+    assert preparation.trace["tool_calls"][0]["name"] == "get_asset_detail"
+    assert preparation.trace["tool_calls"][0]["status"] == "error"
+    assert "base prompt" in preparation.system_prompt
+
+
+def test_model_tool_loop_stops_at_max_steps() -> None:
+    runtime = build_runtime()
+    fake_ai = FakeToolCallingAI(
+        [
+            {"tool_calls": [tool_call("get_recent_conversation", {"limit": (index % 8) + 1}, f"call-{index}")]}
+            for index in range(10)
+        ]
+    )
+
+    preparation = run(
+        runtime.prepare(
+            user_message="请继续写",
+            context={"session_id": "session-a", "selected_novel_id": "novel-a"},
+            conversation=Conversation(messages=[Message(role="assistant", content="历史")]),
+            base_system_prompt="base prompt",
+            ai_service=fake_ai,
+        )
+    )
+
+    assert preparation.trace["mode"] == "model_tool_loop"
+    assert preparation.trace["degraded"] is True
+    assert preparation.trace["stopped_reason"] == "max_tool_calls"
+    assert len(preparation.trace["tool_calls"]) == 5
+
+
+def test_prepare_tools_only_create_suggestions_without_writing() -> None:
+    runtime = build_runtime()
+
+    save_observation = runtime.prepare_save_asset({"asset_type": "chapter", "title": "候选序章"})
+    update_observation = runtime.prepare_chapter_update({"target_hint": "第一章"})
+
+    assert save_observation.status == "ok"
+    assert update_observation.status == "ok"
+    assert "候选序章" in save_observation.items[0]["title"]
+    assert "第一章" in update_observation.items[0]["title"]

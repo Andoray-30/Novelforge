@@ -24,6 +24,7 @@ MAX_ASSET_SUMMARY = 480
 MAX_DETAIL_CHARS = 900
 MAX_SNIPPET_CHARS = 900
 MAX_AGENT_CONTEXT_CHARS = 5200
+MODEL_LOOP_MAX_STEPS = 5
 
 
 WRITING_AGENT_TOOL_SCHEMAS: List[Dict[str, Any]] = [
@@ -78,6 +79,120 @@ WRITING_AGENT_TOOL_SCHEMAS: List[Dict[str, Any]] = [
         "purpose": "Return a compact writing checklist for the current task.",
         "schema": {"task": "string"},
         "output_limit": "<= 8 checklist bullets",
+    },
+]
+
+
+WRITING_AGENT_OPENAI_TOOLS: List[Dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "search_project_assets",
+            "description": "Search bounded current-project assets such as characters, world facts, timelines, relationships, outlines, and chapters.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Short search query, max 120 chars."},
+                    "types": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": ["character", "world", "timeline", "relationship", "outline", "chapter", "novel"],
+                        },
+                    },
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 8},
+                    "include_ai_versions": {"type": "boolean", "default": False},
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_asset_detail",
+            "description": "Load one current-project asset by id after session and selected novel scope validation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "asset_id": {"type": "string"},
+                    "max_chars": {"type": "integer", "minimum": 120, "maximum": MAX_DETAIL_CHARS},
+                },
+                "required": ["asset_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_chapter_snippets",
+            "description": "Return bounded chapter text snippets from imported or formal chapters in the current project.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Short title/content keyword, max 120 chars."},
+                    "mode": {"type": "string", "enum": ["start", "end", "keyword", "auto"]},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 5},
+                    "include_ai_versions": {"type": "boolean", "default": False},
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_recent_conversation",
+            "description": "Return recent messages from the current conversation to continue the user's intent.",
+            "parameters": {
+                "type": "object",
+                "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 8}},
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "prepare_save_asset",
+            "description": "Prepare a save suggestion shape for final answer. This never writes to storage.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "asset_type": {"type": "string", "enum": ["chapter", "character", "world", "timeline", "relationship", "outline"]},
+                    "title": {"type": "string"},
+                    "reason": {"type": "string"},
+                },
+                "required": ["asset_type", "title"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "prepare_chapter_update",
+            "description": "Prepare an update-existing suggestion for a chapter. This never writes to storage and must wait for user confirmation.",
+            "parameters": {
+                "type": "object",
+                "properties": {"target_hint": {"type": "string"}, "reason": {"type": "string"}},
+                "required": ["target_hint"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_quality_check",
+            "description": "Return a compact writing checklist for this task.",
+            "parameters": {
+                "type": "object",
+                "properties": {"task": {"type": "string"}},
+                "additionalProperties": False,
+            },
+        },
     },
 ]
 
@@ -289,6 +404,7 @@ class WritingAgentRuntime:
         context: Optional[Dict[str, Any]],
         conversation: Optional[Conversation],
         base_system_prompt: str,
+        ai_service: Optional[Any] = None,
     ) -> AgentPreparation:
         scope = self._scope_from_context(context)
         if not scope:
@@ -297,9 +413,59 @@ class WritingAgentRuntime:
                 trace=self._empty_trace("缺少 session_id，已使用普通单轮上下文。", degraded=True),
             )
 
-        plan = self._plan(user_message, context or {})
+        supports_tool_calling = getattr(ai_service, "supports_tool_calling_for_agent", None)
+        has_real_client = getattr(ai_service, "has_real_client", None)
+        tool_loop_available = (
+            ai_service is not None
+            and hasattr(ai_service, "chat_tool_decision")
+            and (
+                bool(supports_tool_calling()) if callable(supports_tool_calling)
+                else (not callable(has_real_client) or bool(has_real_client()))
+            )
+        )
+
+        if tool_loop_available:
+            try:
+                return await self._prepare_model_tool_loop(
+                    user_message=user_message,
+                    context=context or {},
+                    conversation=conversation,
+                    base_system_prompt=base_system_prompt,
+                    scope=scope,
+                    ai_service=ai_service,
+                )
+            except Exception as exc:
+                return await self._prepare_rule(
+                    user_message=user_message,
+                    context=context or {},
+                    conversation=conversation,
+                    base_system_prompt=base_system_prompt,
+                    scope=scope,
+                    fallback_reason=f"model_tool_loop_unavailable: {_clip(str(exc), 120)}",
+                )
+
+        return await self._prepare_rule(
+            user_message=user_message,
+            context=context or {},
+            conversation=conversation,
+            base_system_prompt=base_system_prompt,
+            scope=scope,
+            fallback_reason="tool_calling_not_supported_or_no_real_client",
+        )
+
+    async def _prepare_rule(
+        self,
+        *,
+        user_message: str,
+        context: Dict[str, Any],
+        conversation: Optional[Conversation],
+        base_system_prompt: str,
+        scope: AgentScope,
+        fallback_reason: Optional[str] = None,
+    ) -> AgentPreparation:
+        plan = self._plan(user_message, context)
         observations: List[ToolObservation] = []
-        degraded = False
+        degraded = bool(fallback_reason)
         seen_call_keys: set[str] = set()
 
         calls = list(plan["calls"])
@@ -339,7 +505,14 @@ class WritingAgentRuntime:
             degraded = True
 
         context_block = self._build_context_block(observations)
-        trace = self._build_trace(plan, observations, degraded)
+        trace = self._build_trace(
+            plan,
+            observations,
+            degraded,
+            mode="fallback" if fallback_reason else "rule_planner",
+            fallback_reason=fallback_reason,
+            stopped_reason="planned_tools_exhausted" if not calls else "max_tool_calls",
+        )
         if context_block:
             system_prompt = (
                 f"{base_system_prompt}\n\n"
@@ -352,6 +525,121 @@ class WritingAgentRuntime:
 
         return AgentPreparation(system_prompt=system_prompt, trace=trace)
 
+    async def _prepare_model_tool_loop(
+        self,
+        *,
+        user_message: str,
+        context: Dict[str, Any],
+        conversation: Optional[Conversation],
+        base_system_prompt: str,
+        scope: AgentScope,
+        ai_service: Any,
+    ) -> AgentPreparation:
+        observations: List[ToolObservation] = []
+        degraded = False
+        stopped_reason = "model_completed"
+        tool_messages = self._build_model_loop_messages(user_message, context)
+        seen_call_keys: set[str] = set()
+
+        for step in range(1, MODEL_LOOP_MAX_STEPS + 1):
+            decision = await ai_service.chat_tool_decision(
+                messages=tool_messages,
+                tools=WRITING_AGENT_OPENAI_TOOLS,
+                max_tokens=900,
+                timeout=75.0,
+            )
+            calls = decision.get("tool_calls") if isinstance(decision, dict) else []
+            if not calls:
+                stopped_reason = "context_sufficient"
+                break
+
+            assistant_tool_calls: List[Dict[str, Any]] = []
+            for raw_call in calls:
+                if len(observations) >= MODEL_LOOP_MAX_STEPS:
+                    degraded = True
+                    stopped_reason = "max_tool_calls"
+                    break
+                if not isinstance(raw_call, dict):
+                    continue
+                name = _as_str(raw_call.get("name"))
+                args = raw_call.get("arguments") if isinstance(raw_call.get("arguments"), dict) else {}
+                call_id = _as_str(raw_call.get("id")) or f"call_{step}_{len(assistant_tool_calls) + 1}"
+                call_key = json.dumps({"name": name, "args": args}, ensure_ascii=False, sort_keys=True)
+                if not name or call_key in seen_call_keys:
+                    continue
+                seen_call_keys.add(call_key)
+                assistant_tool_calls.append(
+                    {
+                        "id": call_id,
+                        "type": "function",
+                        "function": {"name": name, "arguments": json.dumps(args, ensure_ascii=False)},
+                    }
+                )
+
+                try:
+                    observation = await self._run_tool(name, args, scope, conversation, user_message)
+                except Exception as exc:  # pragma: no cover - defensive degradation
+                    degraded = True
+                    observation = ToolObservation(
+                        name=name,
+                        status="error",
+                        summary=f"工具失败，已保留降级上下文：{_clip(str(exc), 120)}",
+                        error=str(exc),
+                    )
+                if observation.status == "error":
+                    degraded = True
+                observation_items = observation.items[:6]
+                observations.append(observation)
+                tool_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": json.dumps(
+                            {
+                                "name": observation.name,
+                                "status": observation.status,
+                                "summary": observation.summary,
+                                "items": observation_items,
+                            },
+                            ensure_ascii=False,
+                        ),
+                    }
+                )
+
+                if name in {"prepare_save_asset", "prepare_chapter_update"}:
+                    stopped_reason = "awaiting_user_confirmation"
+                    break
+
+            if assistant_tool_calls:
+                tool_messages.insert(
+                    max(1, len(tool_messages) - len(assistant_tool_calls)),
+                    {
+                        "role": "assistant",
+                        "content": decision.get("content") or "",
+                        "tool_calls": assistant_tool_calls,
+                    },
+                )
+
+            if stopped_reason in {"awaiting_user_confirmation", "max_tool_calls"}:
+                break
+        else:
+            degraded = True
+            stopped_reason = "max_tool_calls"
+
+        context_block = self._build_context_block(observations)
+        trace = self._build_trace(
+            {
+                "plan_summary": "模型已按本轮写作目标自主选择项目读取工具；最终回答只使用压缩后的可审计依据。",
+            },
+            observations,
+            degraded,
+            mode="model_tool_loop",
+            fallback_reason=None,
+            stopped_reason=stopped_reason,
+        )
+        system_prompt = self._build_writer_prompt(base_system_prompt, context_block, mode="model_tool_loop")
+        return AgentPreparation(system_prompt=system_prompt, trace=trace)
+
     def _scope_from_context(self, context: Optional[Dict[str, Any]]) -> Optional[AgentScope]:
         if not isinstance(context, dict):
             return None
@@ -360,6 +648,43 @@ class WritingAgentRuntime:
             return None
         selected_novel_id = _as_str(context.get("selected_novel_id") or context.get("selectedNovelId")) or None
         return AgentScope(session_id=session_id, selected_novel_id=selected_novel_id)
+
+    def _build_model_loop_messages(self, user_message: str, context: Dict[str, Any]) -> List[Dict[str, Any]]:
+        focused_assets = context.get("focused_assets")
+        focused_summary = ""
+        if isinstance(focused_assets, list) and focused_assets:
+            focused_summary = _clip(json.dumps(focused_assets[:8], ensure_ascii=False), 1000)
+
+        instructions = (
+            "You are NovelForge's writing context agent. Decide which tools are needed before the writer answers.\n"
+            "Rules:\n"
+            "- Use manually focused_assets first when present.\n"
+            "- Use automatic project retrieval only when it helps the user's current writing task.\n"
+            "- Recent conversation is only for continuing intent, not as canonical project truth.\n"
+            "- Prefer imported source text and formal chapters.\n"
+            "- Exclude AI drafts/candidates by default unless the user explicitly asks for draft/candidate/previous/just-now versions.\n"
+            "- If the user wants to overwrite or replace an existing chapter, call prepare_chapter_update and stop for user confirmation.\n"
+            "- Never write to storage. prepare_save_asset and prepare_chapter_update only create suggestions.\n"
+            "- Keep tool calls minimal and stop once the context is enough."
+        )
+        if focused_summary:
+            instructions += f"\nFocused assets provided by UI: {focused_summary}"
+        return [
+            {"role": "system", "content": instructions},
+            {"role": "user", "content": user_message},
+        ]
+
+    def _build_writer_prompt(self, base_system_prompt: str, context_block: str, mode: str) -> str:
+        if not context_block:
+            return base_system_prompt
+        return (
+            f"{base_system_prompt}\n\n"
+            f"Writing agent mode: {mode}.\n"
+            "Use the following compressed tool observations as writing context. Do not explain tool usage in the answer. "
+            "Do not reveal hidden reasoning. If you generate a savable chapter, include a valid save_asset tag so the user can confirm saving. "
+            "If updating an existing chapter, produce an update suggestion and wait for user confirmation.\n"
+            f"{context_block}"
+        )
 
     def _plan(self, user_message: str, context: Dict[str, Any]) -> Dict[str, Any]:
         focused_assets = context.get("focused_assets")
@@ -760,17 +1085,26 @@ class WritingAgentRuntime:
         plan: Dict[str, Any],
         observations: Sequence[ToolObservation],
         degraded: bool,
+        *,
+        mode: str = "rule_planner",
+        fallback_reason: Optional[str] = None,
+        stopped_reason: Optional[str] = None,
     ) -> Dict[str, Any]:
         used_assets: List[Dict[str, Any]] = []
         chapter_snippets: List[Dict[str, Any]] = []
         tool_calls: List[Dict[str, Any]] = []
-        for observation in observations:
+        for step_index, observation in enumerate(observations, start=1):
+            is_last_step = step_index == len(observations)
             tool_calls.append(
                 {
                     "name": observation.name,
                     "status": observation.status,
                     "summary": observation.summary,
                     "item_count": len(observation.items),
+                    "step": step_index,
+                    "continue_reason": (
+                        f"停止：{stopped_reason}" if is_last_step and stopped_reason else "继续读取上下文"
+                    ),
                 }
             )
             for item in observation.items:
@@ -794,21 +1128,27 @@ class WritingAgentRuntime:
 
         return {
             "enabled": True,
+            "mode": mode,
             "plan_summary": plan.get("plan_summary") or "已按任务读取必要上下文。",
             "tool_calls": tool_calls,
             "used_assets": used_assets[:8],
             "chapter_snippets": chapter_snippets[:5],
             "degraded": degraded,
+            "fallback_reason": fallback_reason,
+            "stopped_reason": stopped_reason,
             "max_tool_calls": MAX_TOOL_CALLS,
         }
 
     def _empty_trace(self, summary: str, degraded: bool = False) -> Dict[str, Any]:
         return {
             "enabled": False,
+            "mode": "disabled",
             "plan_summary": summary,
             "tool_calls": [],
             "used_assets": [],
             "chapter_snippets": [],
             "degraded": degraded,
+            "fallback_reason": None,
+            "stopped_reason": None,
             "max_tool_calls": MAX_TOOL_CALLS,
         }
