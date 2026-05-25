@@ -1,22 +1,29 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Session } from '@/types';
 import { chatService, isAPIError } from '@/lib/api';
+import { formatDisplayTitle, looksLikeBrokenDisplayText } from '@/lib/asset-normalization';
 import { storage } from '@/lib/utils';
 import { useAppStore } from './use-app-store';
 
 const STORAGE_KEY = 'novelforge_current_session';
 
+function sanitizePreview(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  return looksLikeBrokenDisplayText(trimmed) ? '' : trimmed;
+}
+
 function toSession(input: any): Session {
   const messageCount = Array.isArray(input.messages) ? input.messages.length : 0;
-  const preview =
+  const rawPreview =
     messageCount > 0
       ? String(input.messages[input.messages.length - 1]?.content || '').slice(0, 40)
       : String(input.preview || '');
 
   return {
     id: String(input.id),
-    title: String(input.title || '新对话'),
-    preview,
+    title: formatDisplayTitle(String(input.title || ''), '新对话'),
+    preview: sanitizePreview(rawPreview),
     time: String(input.updated_at || input.created_at || input.time || new Date().toISOString()),
     metadata: input.metadata && typeof input.metadata === 'object' ? input.metadata : undefined,
     messageCount,
@@ -63,7 +70,7 @@ export function useSessions() {
       const created = await chatService.startConversation(title);
       const session: Session = {
         id: created.id,
-        title: title || created.title || '新对话',
+        title: formatDisplayTitle(title || created.title || '', '新对话'),
         preview: '',
         time: String(created.updated_at || created.created_at || new Date().toISOString()),
         metadata: created.metadata,

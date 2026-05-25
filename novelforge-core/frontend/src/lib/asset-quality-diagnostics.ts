@@ -43,7 +43,7 @@ function decodeBasicEntities(value: string): string {
 export function looksLikeMojibake(value: string): boolean {
   if (!value) return false;
   const text = decodeBasicEntities(value);
-  if (text.includes('�') || text.includes('????')) return true;
+  if (text.includes(String.fromCharCode(0xfffd)) || text.includes('????')) return true;
   const suspiciousFragments = ['Ã', 'Â', 'ä¸', 'äº', 'è§', 'ç»', 'å°', 'é—', 'è¶', 'æ', 'ç©', '锟', '鐢', '绋', '璧'];
   return suspiciousFragments.some((fragment) => text.includes(fragment));
 }

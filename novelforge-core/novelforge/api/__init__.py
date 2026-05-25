@@ -925,7 +925,7 @@ async def generate_story_outline(params: StoryOutlineParams):
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"鏁呬簨鏋舵瀯鐢熸垚澶辫触: {str(e)}"
+            detail=f"故事架构生成失败: {str(e)}"
         )
 
 @app.post("/api/ai/design-characters", response_model=List[CharacterDesign])
@@ -941,7 +941,7 @@ async def design_characters(request: CharacterDesignRequest):
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"瑙掕壊璁捐澶辫触: {str(e)}"
+            detail=f"角色设计失败: {str(e)}"
         )
 
 @app.post("/api/ai/build-world-setting", response_model=WorldSetting)
@@ -957,7 +957,7 @@ async def build_world_setting(request: WorldBuildingRequest):
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"涓栫晫鏋勫缓澶辫触: {str(e)}"
+            detail=f"世界构建失败: {str(e)}"
         )
 
 # 宸ヤ綔娴佺鐞嗙鐐?
@@ -971,12 +971,12 @@ async def start_workflow_process(ai_plan: dict, source_text: Optional[str] = Non
         return {
             "taskId": task_id,
             "status": "started",
-            "message": "宸ヤ綔娴佸凡鍚姩"
+            "message": "工作流已启动"
         }
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"宸ヤ綔娴佸惎鍔ㄥけ璐? {str(e)}"
+            detail=f"工作流启动失败: {str(e)}"
         )
 
 
@@ -990,12 +990,12 @@ async def get_workflow_status(task_id: str):
             "status": "completed",  # 鎴?"running", "error"
             "progress": 100,
             "result": {},
-            "message": "宸ヤ綔娴佸凡瀹屾垚"
+            "message": "工作流已完成"
         }
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"鑾峰彇宸ヤ綔娴佺姸鎬佸け璐? {str(e)}"
+            detail=f"获取工作流状态失败: {str(e)}"
         )
 
 
@@ -1010,7 +1010,7 @@ async def extract_from_text(request: ExtractionRequest):
        if not text:
            raise HTTPException(
                status_code=status.HTTP_400_BAD_REQUEST,
-               detail="鏂囨湰鍐呭涓嶈兘涓虹┖"
+                detail="文本内容不能为空"
            )
        
        # 浣跨敤鎻愬彇鏈嶅姟杩涜鎻愬彇锛岃繑鍥炵粺涓€鐨?dict 缁撴瀯
@@ -1052,7 +1052,7 @@ async def extract_from_text(request: ExtractionRequest):
    except Exception as e:
        raise HTTPException(
            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-           detail=f"鏂囨湰鎻愬彇澶辫触: {str(e)}"
+            detail=f"文本提取失败: {str(e)}"
        )
 
 @app.post("/api/extract/file", response_model=ExtractionResult)
@@ -1068,7 +1068,7 @@ async def extract_from_file(
        if not filename.lower().endswith(('.txt', '.md', '.text')):
            raise HTTPException(
                status_code=status.HTTP_400_BAD_REQUEST,
-               detail="鍙敮鎸佹枃鏈枃浠?.txt, .md, .text)"
+                detail="只支持文本文件 (.txt, .md, .text)"
            )
        
        # 璇诲彇鏂囦欢鍐呭
@@ -1112,7 +1112,7 @@ async def extract_from_file(
    except Exception as e:
        raise HTTPException(
            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-           detail=f"鏂囦欢鎻愬彇澶辫触: {str(e)}"
+            detail=f"文件提取失败: {str(e)}"
        )
 
 
@@ -1125,7 +1125,7 @@ async def extract_characters(request: ExtractionRequest):
       if not text:
           raise HTTPException(
               status_code=status.HTTP_400_BAD_REQUEST,
-              detail="鏂囨湰鍐呭涓嶈兘涓虹┖"
+               detail="文本内容不能为空"
           )
       
       runtime_extraction_service = _resolve_runtime_extraction_service(
@@ -1138,7 +1138,7 @@ async def extract_characters(request: ExtractionRequest):
   except Exception as e:
       raise HTTPException(
           status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-          detail=f"瑙掕壊鎻愬彇澶辫触: {str(e)}"
+           detail=f"角色提取失败: {str(e)}"
       )
 
 
@@ -1150,7 +1150,7 @@ async def extract_world_setting(request: ExtractionRequest):
       if not text:
           raise HTTPException(
               status_code=status.HTTP_400_BAD_REQUEST,
-              detail="鏂囨湰鍐呭涓嶈兘涓虹┖"
+               detail="文本内容不能为空"
           )
       
       runtime_extraction_service = _resolve_runtime_extraction_service(
@@ -1163,7 +1163,7 @@ async def extract_world_setting(request: ExtractionRequest):
   except Exception as e:
       raise HTTPException(
           status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-          detail=f"涓栫晫璁惧畾鎻愬彇澶辫触: {str(e)}"
+           detail=f"世界设定提取失败: {str(e)}"
       )
 
 
@@ -1175,7 +1175,7 @@ async def extract_timeline(request: ExtractionRequest):
       if not text:
           raise HTTPException(
               status_code=status.HTTP_400_BAD_REQUEST,
-              detail="鏂囨湰鍐呭涓嶈兘涓虹┖"
+               detail="文本内容不能为空"
           )
       
       runtime_extraction_service = _resolve_runtime_extraction_service(
@@ -1188,7 +1188,7 @@ async def extract_timeline(request: ExtractionRequest):
   except Exception as e:
       raise HTTPException(
           status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-          detail=f"鏃堕棿绾挎彁鍙栧け璐? {str(e)}"
+           detail=f"时间线提取失败: {str(e)}"
       )
 
 
@@ -1200,7 +1200,7 @@ async def extract_relationships(request: ExtractionRequest):
       if not text:
           raise HTTPException(
               status_code=status.HTTP_400_BAD_REQUEST,
-              detail="鏂囨湰鍐呭涓嶈兘涓虹┖"
+               detail="文本内容不能为空"
           )
       
       runtime_extraction_service = _resolve_runtime_extraction_service(
@@ -1213,7 +1213,7 @@ async def extract_relationships(request: ExtractionRequest):
   except Exception as e:
       raise HTTPException(
           status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-          detail=f"鍏崇郴缃戠粶鎻愬彇澶辫触: {str(e)}"
+           detail=f"关系网络提取失败: {str(e)}"
       )
 
 
@@ -1236,12 +1236,12 @@ async def start_conversation(request: Optional[StartConversationRequest] = None)
            storage_type=CHAT_STORAGE_TYPE,
        )
        if not saved:
-           raise RuntimeError("瀵硅瘽淇濆瓨澶辫触")
+            raise RuntimeError("对话保存失败")
        return conversation
    except Exception as e:
        raise HTTPException(
            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-           detail=f"寮€濮嬪璇濆け璐? {str(e)}"
+            detail=f"开始对话失败: {str(e)}"
        )
 
 
@@ -1317,7 +1317,7 @@ async def send_message(request: ChatRequest):
            storage_type=CHAT_STORAGE_TYPE,
        )
        if not saved:
-           raise RuntimeError("瀵硅瘽鏇存柊澶辫触")
+            raise RuntimeError("对话更新失败")
        
        # 鐢熸垚寤鸿鍥炲
        suggestions = []
@@ -1342,7 +1342,7 @@ async def send_message(request: ChatRequest):
    except Exception as e:
        raise HTTPException(
            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-           detail=f"鍙戦€佹秷鎭け璐? {str(e)}"
+            detail=f"发送消息失败: {str(e)}"
        )
 
 
@@ -1362,7 +1362,7 @@ async def get_conversation(conversation_id: str):
    except Exception as e:
        raise HTTPException(
            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-           detail=f"閼惧嘲褰囩€电鐦芥径杈Е: {str(e)}"
+            detail=f"获取对话失败: {str(e)}"
        )
 
 
@@ -1458,7 +1458,7 @@ async def get_conversations():
    except Exception as e:
        raise HTTPException(
            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-           detail=f"鑾峰彇瀵硅瘽鍒楄〃澶辫触: {str(e)}"
+            detail=f"获取对话列表失败: {str(e)}"
        )
 
 
@@ -1514,14 +1514,14 @@ async def delete_conversation(conversation_id: str):
        await content_manager.delete_by_session(conversation_id)
        return {
            "success": True,
-           "message": "瀵硅瘽鍒犻櫎鎴愬姛"
+            "message": "对话删除成功"
        }
    except HTTPException:
        raise
    except Exception as e:
        raise HTTPException(
            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-           detail=f"鍒犻櫎瀵硅瘽澶辫触: {str(e)}"
+            detail=f"删除对话失败: {str(e)}"
        )
 
 
@@ -1547,7 +1547,7 @@ async def list_openai_models(payload: Optional[dict] = None):
    except Exception as e:
        raise HTTPException(
            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-           detail=f"鑾峰彇妯″瀷鍒楄〃澶辫触: {str(e)}"
+            detail=f"获取模型列表失败: {str(e)}"
        )
 
 
@@ -1557,18 +1557,18 @@ async def generate_novel_content(request: NovelGenerationRequest):
    try:
        # 鏋勫缓鐢熸垚鎻愮ず
        story_context = request.story_context
-       context_info = f"鏁呬簨涓婁笅鏂? {story_context}"
+       context_info = f"故事上下文: {story_context}"
        
        prompt_parts = []
        prompt_parts.append(context_info)
-       prompt_parts.append(f"鐢熸垚绫诲瀷: {request.generation_type}")
+       prompt_parts.append(f"生成类型: {request.generation_type}")
        prompt_parts.append(f"目标长度: {request.target_length} 字")
        
        if request.focus_on:
-           prompt_parts.append(f"閲嶇偣鍏虫敞: {', '.join(request.focus_on)}")
+           prompt_parts.append(f"重点关注: {', '.join(request.focus_on)}")
        
        if request.exclude_elements:
-           prompt_parts.append(f"鎺掗櫎鍏冪礌: {', '.join(request.exclude_elements)}")
+           prompt_parts.append(f"排除元素: {', '.join(request.exclude_elements)}")
        
        prompt_parts.append("请生成高质量小说内容，确保情节连贯、人物生动并符合上下文。")
        
@@ -1599,7 +1599,7 @@ async def generate_novel_content(request: NovelGenerationRequest):
    except Exception as e:
        raise HTTPException(
            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-           detail=f"灏忚鍐呭鐢熸垚澶辫触: {str(e)}"
+            detail=f"小说内容生成失败: {str(e)}"
        )
 
 
@@ -1727,7 +1727,7 @@ async def execute_task(task_id: str):
        task.result = result.model_dump() if hasattr(result, 'model_dump') else result
        await storage_manager.save(f"task_{task_id}", task.model_dump())
        
-       return {"message": "浠诲姟鎵ц瀹屾垚", "task_id": task_id}
+       return {"message": "任务执行完成", "task_id": task_id}
    except Exception as e:
        # 鏇存柊浠诲姟鐘舵€佷负澶辫触
        try:
@@ -1743,7 +1743,7 @@ async def execute_task(task_id: str):
        
        raise HTTPException(
            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-           detail=f"浠诲姟鎵ц澶辫触: {str(e)}"
+           detail=f"任务执行失败: {str(e)}"
        )
 
 
@@ -1758,12 +1758,12 @@ async def create_content(request: ContentCreateRequest):
        return {
            "success": True,
            "content_id": content_id,
-           "message": "鍐呭鍒涘缓鎴愬姛"
+            "message": "内容创建成功"
        }
    except Exception as e:
        raise HTTPException(
            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-           detail=f"鍐呭鍒涘缓澶辫触: {str(e)}"
+            detail=f"内容创建失败: {str(e)}"
        )
 
 
@@ -1776,7 +1776,7 @@ async def search_content(request: ContentSearchRequest):
    except Exception as e:
        raise HTTPException(
            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-           detail=f"鍐呭鎼滅储澶辫触: {str(e)}"
+            detail=f"内容搜索失败: {str(e)}"
        )
 
 
@@ -1856,7 +1856,7 @@ async def export_content(request: ContentExportRequest):
    except Exception as e:
        raise HTTPException(
            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-           detail=f"鍐呭瀵煎嚭澶辫触: {str(e)}"
+            detail=f"内容导出失败: {str(e)}"
        )
 
 
@@ -1870,7 +1870,7 @@ async def get_content_stats():
        
        raise HTTPException(
            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-           detail=f"鑾峰彇鍐呭缁熻澶辫触: {str(e)}"
+            detail=f"获取内容统计失败: {str(e)}"
        )
 
 
@@ -2000,7 +2000,7 @@ async def list_content_by_type(
    except Exception as e:
        raise HTTPException(
            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-           detail=f"鑾峰彇鍐呭鍒楄〃澶辫触: {str(e)}"
+            detail=f"获取内容列表失败: {str(e)}"
        )
 
 
@@ -2027,7 +2027,7 @@ async def get_content(content_id: str):
        
        raise HTTPException(
            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-           detail=f"鑾峰彇鍐呭澶辫触: {str(e)}"
+            detail=f"获取内容失败: {str(e)}"
        )
 
 
@@ -2053,14 +2053,14 @@ async def update_content(content_id: str, request: ContentUpdateRequest):
            )
        return {
            "success": True,
-           "message": "鍐呭鏇存柊鎴愬姛"
+            "message": "内容更新成功"
        }
    except HTTPException:
        raise
    except Exception as e:
        raise HTTPException(
            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-           detail=f"鍐呭鏇存柊澶辫触: {str(e)}"
+            detail=f"内容更新失败: {str(e)}"
        )
 
 
@@ -2077,14 +2077,14 @@ async def delete_content(content_id: str):
            )
        return {
            "success": True,
-           "message": "鍐呭鍒犻櫎鎴愬姛"
+            "message": "内容删除成功"
        }
    except HTTPException:
        raise
    except Exception as e:
        raise HTTPException(
            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-           detail=f"鍐呭鍒犻櫎澶辫触: {str(e)}"
+            detail=f"内容删除失败: {str(e)}"
        )
 
 
@@ -2209,7 +2209,7 @@ async def get_recent_tasks_by_session(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"鑾峰彇璋冨害鍣ㄧ粺璁″け璐? {str(e)}"
+            detail=f"获取调度器统计失败: {str(e)}"
         )
 
 
@@ -2240,7 +2240,7 @@ async def get_user_tasks(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"鑾峰彇鐢ㄦ埛浠诲姟澶辫触: {str(e)}"
+            detail=f"获取用户任务失败: {str(e)}"
         )
 
 
@@ -2252,7 +2252,7 @@ async def http_exception_handler(request, exc):
         status_code=exc.status_code,
         content={
             "error": exc.detail,
-            "detail": f"HTTP {exc.status_code} 閿欒",
+            "detail": f"HTTP {exc.status_code} 错误",
             "timestamp": datetime.now().isoformat()
         }
     )

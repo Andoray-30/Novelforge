@@ -47,7 +47,7 @@ import { resolveChapterDirectoryMetadata, sortChaptersByDirectory } from '@/lib/
 import {
   resolveNovelImportCompletionAction,
 } from '@/lib/import-workflow';
-import { decodeAssetTitle } from '@/lib/asset-normalization';
+import { decodeAssetTitle, formatDisplayTitle } from '@/lib/asset-normalization';
 import { useSessionTaskEvents } from '@/lib/hooks/use-session-task-events';
 import { useSessions } from '@/lib/hooks/use-sessions';
 import { useAppStore } from '@/lib/hooks/use-app-store';
@@ -174,7 +174,7 @@ export default function ChatPage() {
   const worldTreeTopology = useMemo(() => ({
     nodes: topologyData.nodes.map((node): WorldTreeNode => ({
       id: node.id,
-      label: decodeAssetTitle(node.title),
+      label: formatDisplayTitle(node.title, '未命名节点'),
       type: String(node.type),
       importance: String(node.metadata?.importance || 'medium'),
       metadata: node.metadata || {},
@@ -1730,7 +1730,7 @@ export default function ChatPage() {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                           {projectAssets.chapters.map((chap) => {
                             const parsedChapData = getContentAssetPayload(chap);
-                            const chapterTitle = getContentAssetTitle(chap, parsedChapData);
+                            const chapterTitle = formatDisplayTitle(getContentAssetTitle(chap, parsedChapData), '未命名章节');
                             const chapText = getContentAssetText(chap, parsedChapData);
                             const canBindToCurrentNovel = Boolean(selectedNovelId && isUnassignedNovelScopedContentItem(chap));
                             return (
@@ -1777,12 +1777,13 @@ export default function ChatPage() {
                           projectAssets.characters.map((char) => {
                             const charData = getContentAssetPayload(char);
                             const role = readString(charData.role) ?? '设定';
+                            const characterTitle = formatDisplayTitle(char.metadata.title, '未命名角色');
                             const canBindToCurrentNovel = Boolean(selectedNovelId && isUnassignedNovelScopedContentItem(char));
                             return (
                               <div key={char.metadata.id} onClick={() => openContentItem(char)} style={assetMiniCardStyle}>
-                                <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(59, 130, 246, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#60a5fa', fontSize: 16, fontWeight: 700, flexShrink: 0 }}>{char.metadata.title[0]}</div>
+                                <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(59, 130, 246, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#60a5fa', fontSize: 16, fontWeight: 700, flexShrink: 0 }}>{characterTitle[0]}</div>
                                 <div style={{ flex: 1, minWidth: 0 }}>
-                                  <div style={{ fontWeight: 600, fontSize: 14 }}>{char.metadata.title}</div>
+                                  <div style={{ fontWeight: 600, fontSize: 14 }}>{characterTitle}</div>
                                   <div style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{role}</div>
                                   {canBindToCurrentNovel && (
                                     <button
@@ -1837,7 +1838,7 @@ export default function ChatPage() {
                                   {item.metadata.type === 'world' ? '世' : item.metadata.type === 'timeline' ? '时' : '关'}
                                 </div>
                                 <div style={{ flex: 1, minWidth: 0 }}>
-                                  <div style={{ fontWeight: 600, fontSize: 14 }}>{getContentAssetTitle(item, payload)}</div>
+                                  <div style={{ fontWeight: 600, fontSize: 14 }}>{formatDisplayTitle(getContentAssetTitle(item, payload), '未命名资产')}</div>
                                   <div style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                     {formatContentTypeLabel(item.metadata.type)} · {subtitle}
                                   </div>
@@ -1972,7 +1973,7 @@ function formatContentTypeLabel(type: ContentType | string): string {
 
 function buildFocusedAssetFromContentItem(item: ContentItem): FocusedAsset {
   const payload = getContentAssetPayload(item);
-  const title = getContentAssetTitle(item, payload);
+  const title = formatDisplayTitle(getContentAssetTitle(item, payload), '未命名资产');
   const text = getContentAssetText(item, payload);
   const summarySeed = text || JSON.stringify(payload);
 
@@ -2201,7 +2202,7 @@ function rankAssetRequestCandidateItems(
     .filter((item) => requestedTypes.length === 0 || requestedTypes.includes(item.metadata.type))
     .map((item) => {
       const payload = getContentAssetPayload(item);
-      const title = getContentAssetTitle(item, payload);
+      const title = formatDisplayTitle(getContentAssetTitle(item, payload), '未命名资产');
       const text = getContentAssetText(item, payload);
       const relationText = JSON.stringify(item.relations ?? {});
       const lookupTerms = collectAssetLookupTerms(item, payload);
@@ -2312,7 +2313,7 @@ function resolveRankedAssetRequestCandidates(
 function summarizeAssetTitles(items: ContentItem[], limit: number): string {
   const titles = items
     .slice(0, limit)
-    .map((item) => getContentAssetTitle(item))
+    .map((item) => formatDisplayTitle(getContentAssetTitle(item), '未命名资产'))
     .filter((title) => typeof title === 'string' && title.trim().length > 0);
 
   if (titles.length === 0) {
@@ -2327,7 +2328,7 @@ function summarizeAssetTexts(items: ContentItem[], limit: number, maxLength = 22
   const snippets = items
     .slice(0, limit)
     .map((item) => {
-      const title = getContentAssetTitle(item);
+      const title = formatDisplayTitle(getContentAssetTitle(item), '未命名资产');
       const text = getContentAssetText(item, getContentAssetPayload(item)).replace(/\s+/g, ' ').trim();
       if (!text) {
         return undefined;
@@ -2344,7 +2345,7 @@ function summarizeAssetTexts(items: ContentItem[], limit: number, maxLength = 22
 function buildProjectChatSummary(sessionTitle: string | null, assets: ProjectAssets, selectedNovelId: string | null): string {
   const activeOutline = assets.outlines.find((item) => item.metadata.id === selectedNovelId);
   const activeNovelTitle = selectedNovelId
-    ? activeOutline?.metadata.title ?? activeOutline?.metadata.id ?? selectedNovelId
+    ? formatDisplayTitle(activeOutline?.metadata.title ?? activeOutline?.metadata.id ?? selectedNovelId, '未命名小说')
     : null;
   const lines = [
     `项目名称：${sessionTitle ?? '未命名项目'}`,

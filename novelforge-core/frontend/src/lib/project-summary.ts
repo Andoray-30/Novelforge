@@ -1,3 +1,4 @@
+import { formatDisplayTitle } from '@/lib/asset-normalization';
 import type { Session } from '@/types';
 
 export type ProjectStatus =
@@ -47,16 +48,8 @@ export const EMPTY_PROJECT_STATS: ProjectAssetStats = {
 };
 
 export function hasEffectiveAssets(stats?: ProjectAssetStats): boolean {
-  if (!stats) {
-    return false;
-  }
-  return (
-    stats.chapters > 0 ||
-    stats.characters > 0 ||
-    stats.worlds > 0 ||
-    stats.timelines > 0 ||
-    stats.relationships > 0
-  );
+  if (!stats) return false;
+  return stats.chapters > 0 || stats.characters > 0 || stats.worlds > 0 || stats.timelines > 0 || stats.relationships > 0;
 }
 
 export function isNovelContainerOnly(stats?: ProjectAssetStats): boolean {
@@ -64,9 +57,7 @@ export function isNovelContainerOnly(stats?: ProjectAssetStats): boolean {
 }
 
 export function buildProjectStatsLabel(stats?: ProjectAssetStats): string {
-  if (!stats) {
-    return '检查中';
-  }
+  if (!stats) return '检查中';
 
   const parts: string[] = [];
   if (stats.novels > 0) parts.push(`${stats.novels} 本`);
@@ -84,22 +75,12 @@ export function resolveProjectStatus(
   session: Pick<Session, 'preview' | 'messageCount' | 'metadata'>,
   stats?: ProjectAssetStats,
 ): ProjectStatus {
-  if (session.metadata?.hidden_by_default === true || session.metadata?.archived === true) {
-    return 'archived';
-  }
+  if (session.metadata?.hidden_by_default === true || session.metadata?.archived === true) return 'archived';
   const source = String(session.metadata?.source || session.metadata?.type || '').toLowerCase();
-  if (source.includes('smoke') || source.includes('test')) {
-    return 'archived';
-  }
-  if (hasEffectiveAssets(stats)) {
-    return 'usable_assets';
-  }
-  if (isNovelContainerOnly(stats)) {
-    return 'novel_container';
-  }
-  if ((session.messageCount ?? 0) > 0 || session.preview.trim().length > 0) {
-    return 'creative_chat';
-  }
+  if (source.includes('smoke') || source.includes('test')) return 'archived';
+  if (hasEffectiveAssets(stats)) return 'usable_assets';
+  if (isNovelContainerOnly(stats)) return 'novel_container';
+  if ((session.messageCount ?? 0) > 0 || session.preview.trim().length > 0) return 'creative_chat';
   return 'empty';
 }
 
@@ -136,15 +117,16 @@ function getSortRank(status: ProjectStatus): number {
 }
 
 export function formatProjectOptionTitle(title: string, time: string, id: string, duplicateCount: number): string {
-  if (duplicateCount <= 1 && title !== '新创作对话' && title !== '新对话') {
-    return title;
+  const safeTitle = formatDisplayTitle(title, '未命名项目');
+  if (duplicateCount <= 1 && safeTitle !== '新创作对话' && safeTitle !== '新对话') {
+    return safeTitle;
   }
 
   const date = new Date(time);
   const timeLabel = Number.isNaN(date.getTime())
     ? id.slice(0, 6)
     : `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-  return `${title} · ${timeLabel} · ${id.slice(0, 6)}`;
+  return `${safeTitle} · ${timeLabel} · ${id.slice(0, 6)}`;
 }
 
 export function buildProjectSummary(
@@ -153,13 +135,14 @@ export function buildProjectSummary(
   duplicateCount: number,
 ): ProjectSummary {
   const status = resolveProjectStatus(session, stats);
-  const displayTitle = formatProjectOptionTitle(session.title || '未命名项目', session.time, session.id, duplicateCount);
+  const safeTitle = formatDisplayTitle(session.title || '', '未命名项目');
+  const displayTitle = formatProjectOptionTitle(safeTitle, session.time, session.id, duplicateCount);
   const statsLabel = buildProjectStatsLabel(stats);
   const hiddenByDefault = status === 'empty' || status === 'novel_container' || status === 'archived';
 
   return {
     id: session.id,
-    title: session.title,
+    title: safeTitle,
     displayTitle,
     status,
     statusLabel: getStatusLabel(status),
@@ -176,14 +159,15 @@ export function buildVisibleProjectSummaries(
   showHidden = false,
 ): ProjectSummary[] {
   const titleCounts = sessions.reduce<Record<string, number>>((counts, session) => {
-    const title = session.title || '未命名项目';
+    const title = formatDisplayTitle(session.title || '', '未命名项目');
     counts[title] = (counts[title] || 0) + 1;
     return counts;
   }, {});
 
-  const summaries = sessions.map((session) =>
-    buildProjectSummary(session, statsBySessionId[session.id], titleCounts[session.title || '未命名项目'] || 0),
-  );
+  const summaries = sessions.map((session) => {
+    const title = formatDisplayTitle(session.title || '', '未命名项目');
+    return buildProjectSummary(session, statsBySessionId[session.id], titleCounts[title] || 0);
+  });
 
   const visible = summaries.filter((summary) => showHidden || !summary.hiddenByDefault || summary.id === currentSessionId);
 

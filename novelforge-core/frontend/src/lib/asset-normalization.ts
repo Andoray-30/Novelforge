@@ -39,6 +39,20 @@ export function decodeAssetTitle(value: string): string {
     .trim();
 }
 
+export function looksLikeBrokenDisplayText(value: string): boolean {
+  const text = decodeAssetTitle(value).trim();
+  if (!text) return true;
+  if (text.length >= 2 && text.split('?').join('').length === 0) return true;
+  if (text.includes(String.fromCharCode(0xfffd)) || text.includes('???')) return true;
+  const suspiciousFragments = ['锟', '閿', '鐢', '绋', '璧', 'Ã', 'Â', 'ä¸', 'äº', 'è§', 'ç»'];
+  return suspiciousFragments.some((fragment) => text.includes(fragment));
+}
+
+export function formatDisplayTitle(value: string | undefined | null, fallback = '未命名资产'): string {
+  const decoded = decodeAssetTitle(value || '').trim();
+  return looksLikeBrokenDisplayText(decoded) ? fallback : decoded;
+}
+
 export function normalizeRelationshipType(value: unknown): RelationshipType {
   const raw = asString(value).replace(/^RelationshipType\./i, '').toLowerCase();
   switch (raw) {
