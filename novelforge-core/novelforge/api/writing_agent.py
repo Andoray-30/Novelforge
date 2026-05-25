@@ -18,7 +18,7 @@ from novelforge.content.models import ContentItem, ContentSearchRequest, Content
 from novelforge.storage.storage_manager import StorageManager
 
 
-MAX_TOOL_CALLS = 12
+MAX_TOOL_CALLS = 16
 MAX_TRACE_PREVIEW = 180
 MAX_ASSET_SUMMARY = 480
 MAX_DETAIL_CHARS = 900
@@ -396,12 +396,16 @@ CREATIVE_SIGNAL_GROUPS: Dict[str, Dict[str, List[str]]] = {
         "核心关系": ["relationship", "bond", "conflict", "关系", "羁绊", "依赖", "冲突", "亲密"],
     },
     "relationship": {
-        "依赖": ["depend", "need", "rely", "依赖", "需要", "托付"],
-        "误解": ["misunderstand", "misread", "误解", "错认", "隐瞒"],
-        "亏欠": ["debt", "owe", "guilt", "亏欠", "愧疚", "欠", "债"],
-        "冲突": ["conflict", "oppose", "fight", "冲突", "对立", "争执", "敌意"],
-        "情绪张力": ["tension", "emotion", "pain", "张力", "痛感", "拉扯", "暧昧"],
-        "剧情功能": ["function", "plot", "arc", "剧情", "功能", "推动", "转折"],
+        "依赖": ["dependency", "depend", "need", "rely", "依赖", "需要", "托付", "离不开"],
+        "误解": ["misunderstanding", "misunderstand", "misread", "误解", "错认", "隐瞒", "误会"],
+        "亏欠": ["debt", "owe", "guilt", "亏欠", "愧疚", "欠", "债", "补偿"],
+        "冲突": ["conflict", "oppose", "fight", "冲突", "对立", "争执", "敌意", "矛盾"],
+        "情绪张力": ["emotional_tension", "tension", "emotion", "pain", "张力", "痛感", "拉扯", "暧昧", "舍不得"],
+        "权力差/控制": ["power_dynamic", "control", "authority", "权力", "控制", "支配", "压迫", "保护欲"],
+        "亲密度": ["intimacy", "trust", "closeness", "亲密", "信任", "熟悉", "依恋"],
+        "关系变化": ["arc", "evolution", "change", "变化", "转变", "演变", "破裂", "和解"],
+        "剧情功能": ["plot_function", "function", "plot", "剧情", "功能", "推动", "转折", "伏笔"],
+        "可写场景": ["scene_potential", "scene", "场景", "可写", "对话", "选择", "爆发"],
     },
     "world": {
         "规则": ["rule", "law", "protocol", "规则", "法则", "协议", "限制"],
@@ -448,18 +452,118 @@ def _creative_diagnostics(asset_type: str, source_text: str, *, length: int = 0)
                 missing.remove("可引用结尾")
 
     score = len(usable)
-    return {
+    diagnostics = {
         "usable": usable,
         "missing": missing,
+        "missing_signals": missing,
         "score": score,
         "summary": _diagnostic_summary(usable, missing),
     }
+    if asset_type == "relationship":
+        diagnostics["relationship_creative_readiness"] = _relationship_readiness(usable, missing)
+    return diagnostics
+
+
+def _relationship_readiness(usable: Sequence[str], missing: Sequence[str]) -> str:
+    key_signals = {"依赖", "误解", "亏欠", "冲突", "情绪张力", "剧情功能"}
+    present = key_signals.intersection(set(usable))
+    if len(present) >= 4 and "情绪张力" in present:
+        return "strong"
+    if len(present) >= 2:
+        return "usable"
+    return "thin"
 
 
 def _diagnostic_summary(usable: Sequence[str], missing: Sequence[str]) -> str:
     available = "、".join(usable) if usable else "暂无明显可用创作信号"
     absent = "、".join(missing[:4]) if missing else "无明显缺口"
     return f"可用：{available}；缺口：{absent}"
+
+
+def _relationship_parties(item: ContentItem) -> tuple[str, str]:
+    payload = _payload(item)
+    source = _as_str(payload.get("source") or payload.get("from") or payload.get("character_a"))
+    target = _as_str(payload.get("target") or payload.get("to") or payload.get("character_b"))
+    if not source and item.relations:
+        relation_source = item.relations.get("source") or []
+        if relation_source:
+            source = _as_str(relation_source[0])
+    if not target and item.relations:
+        relation_target = item.relations.get("target") or []
+        if relation_target:
+            target = _as_str(relation_target[0])
+    return source, target
+
+
+def _relationship_repair_suggestion(item: ContentItem, diagnostics: Dict[str, Any]) -> Dict[str, Any]:
+    source, target = _relationship_parties(item)
+    title = _title(item)
+    if not source or not target:
+        names = re.split(r"\s*(?:->|与|和|/|-)\s*", title)
+        if len(names) >= 2:
+            source = source or names[0].strip()
+            target = target or names[1].strip()
+    source = source or "角色A"
+    target = target or "角色B"
+    missing = diagnostics.get("missing_signals") or diagnostics.get("missing") or []
+    usable = diagnostics.get("usable") or []
+    weak_spots = "、".join(missing[:5]) if missing else "无明显缺口"
+    available = "、".join(usable) if usable else "现有关系类型/证据"
+    core = f"{source} 与 {target} 的关系需要从“{available}”推进到可制造选择和代价的张力结构。"
+    return {
+        "type": "relationship_repair_suggestion",
+        "title": f"{title} - 关系补强建议",
+        "source": source,
+        "target": target,
+        "core": core,
+        "current_state": _clip(_content_text(item) or json.dumps(_payload(item), ensure_ascii=False), 220),
+        "dependency": "明确谁在情感、身份、资源或安全感上离不开谁。",
+        "misunderstanding": "补一处双方认知不一致、隐瞒或错认，形成场景里的误判。",
+        "debt": "补一笔亏欠、救赎或必须偿还的情感债。",
+        "conflict": "把价值观或目标冲突落到一次不可回避的选择。",
+        "emotional_tension": "写清靠近会痛、离开也会痛的拉扯。",
+        "arc": "定义从疏离到信任、从依赖到背叛、或从误解到共同承担的变化方向。",
+        "scene_potential": [
+            f"{source} 为了保护 {target} 隐瞒事实，反而让 {target} 做出错误选择。",
+            f"{target} 要求 {source} 付出代价，迫使两人说出一直回避的亏欠。",
+        ],
+        "writing_advice": "用于序章时，优先把关系张力写成一次行动选择，而不是人物旁白解释。",
+        "missing_signals": missing,
+        "usable_signals": usable,
+        "weak_spots": weak_spots,
+    }
+
+
+def _relationship_quality_report(relationship_assets: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    total = len(relationship_assets)
+    tension_count = 0
+    low_info_count = 0
+    missing_plot_function_count = 0
+    missing_signals: Dict[str, int] = {}
+    for asset in relationship_assets:
+        diagnostics = asset.get("creative_diagnostics") if isinstance(asset, dict) else None
+        if not isinstance(diagnostics, dict):
+            low_info_count += 1
+            continue
+        usable = set(diagnostics.get("usable") or [])
+        missing = list(diagnostics.get("missing_signals") or diagnostics.get("missing") or [])
+        readiness = _as_str(diagnostics.get("relationship_creative_readiness"))
+        if "情绪张力" in usable or readiness == "strong":
+            tension_count += 1
+        if readiness == "thin" or int(diagnostics.get("score") or 0) <= 2:
+            low_info_count += 1
+        if "剧情功能" in missing:
+            missing_plot_function_count += 1
+        for signal in missing:
+            missing_signals[signal] = missing_signals.get(signal, 0) + 1
+    return {
+        "total_relationships": total,
+        "tension_relationships": tension_count,
+        "low_information_relationships": low_info_count,
+        "missing_plot_function_relationships": missing_plot_function_count,
+        "missing_signals": missing_signals,
+        "status": "thin" if total and low_info_count >= max(1, total // 2) else ("empty" if total == 0 else "usable"),
+    }
 
 
 def _extract_snippet(content: str, query: str, mode: str, limit: int = MAX_SNIPPET_CHARS) -> str:
@@ -797,6 +901,8 @@ class WritingAgentRuntime:
             "Do not reveal hidden reasoning. If you generate a savable chapter, include a valid save_asset tag so the user can confirm saving. "
             "If updating an existing chapter, produce an update suggestion and wait for user confirmation.\n"
             "Craft requirements: 不只复述设定，要把角色欲望、伤痕、恐惧、关系张力和世界意象转化为具体场景。"
+            "如果关系资产包含依赖、误解、亏欠、冲突、情绪张力、权力差、亲密度、关系变化或剧情功能，必须把它转化为具体场景冲突或人物选择。"
+            "如果 trace 显示关系资产薄弱，请把结果定位为草稿，并建议补强关系资产。"
             "序章要有动作、意象、悬念和情绪余韵，同时不要把所有设定解释完。"
             "如果资产不足，可以说明结果更适合作为草稿，并建议补强哪些资产。\n"
             f"{context_block}"
@@ -1059,6 +1165,64 @@ class WritingAgentRuntime:
             return self.run_quality_check(args)
         return ToolObservation(name=name, status="error", summary="未知工具")
 
+    async def build_relationship_repair_suggestion(
+        self,
+        scope: AgentScope,
+        relationship_id: str,
+        *,
+        user_message: str = "",
+    ) -> Dict[str, Any]:
+        item = await self.content_manager.get_content(relationship_id)
+        if not item or not _item_in_scope(item, scope) or item.metadata.type != ContentType.RELATIONSHIP:
+            return {"status": "error", "summary": "关系资产不存在或不属于当前项目"}
+
+        text = _content_text(item) or json.dumps(_payload(item), ensure_ascii=False)
+        diagnostics = _creative_diagnostics("relationship", _diagnostic_source_text(item, text), length=len(text))
+        suggestion = _relationship_repair_suggestion(item, diagnostics)
+        source, target = suggestion["source"], suggestion["target"]
+
+        related_characters: List[Dict[str, Any]] = []
+        for name in [source, target]:
+            if name in {"角色A", "角色B"}:
+                continue
+            observation = await self.search_project_assets(
+                scope,
+                {"query": name, "types": ["character"], "limit": 1, "include_ai_versions": False},
+            )
+            related_characters.extend(observation.items[:1])
+
+        snippet_query = " ".join([value for value in [source, target] if value not in {"角色A", "角色B"}])
+        snippets = await self.search_chapter_snippets(
+            scope,
+            {"query": snippet_query, "mode": "keyword", "limit": 2, "include_ai_versions": False},
+            user_message or snippet_query,
+        )
+
+        suggestion["related_characters"] = [
+            {"id": character.get("id"), "title": character.get("title"), "summary": character.get("summary")}
+            for character in related_characters[:2]
+        ]
+        suggestion["supporting_chapter_snippets"] = [
+            {"id": snippet.get("id"), "title": snippet.get("title"), "preview": snippet.get("summary")}
+            for snippet in snippets.items[:2]
+        ]
+        suggestion["enriched_relationship_draft"] = {
+            "source": source,
+            "target": target,
+            "core": suggestion["core"],
+            "current_state": suggestion["current_state"],
+            "dependency": suggestion["dependency"],
+            "misunderstanding": suggestion["misunderstanding"],
+            "debt": suggestion["debt"],
+            "conflict": suggestion["conflict"],
+            "emotional_tension": suggestion["emotional_tension"],
+            "arc": suggestion["arc"],
+            "scene_potential": suggestion["scene_potential"],
+            "writing_advice": suggestion["writing_advice"],
+            "missing_signals": suggestion["missing_signals"],
+        }
+        return {"status": "ok", "summary": "已生成关系补强建议，未写回原关系资产。", "suggestion": suggestion}
+
     async def search_project_assets(self, scope: AgentScope, args: Dict[str, Any]) -> ToolObservation:
         query = _clip(_as_str(args.get("query")), 120)
         limit = min(max(int(args.get("limit") or 5), 1), 8)
@@ -1092,6 +1256,11 @@ class WritingAgentRuntime:
                 _diagnostic_source_text(item, text),
                 length=len(text),
             )
+            repair_suggestion = (
+                _relationship_repair_suggestion(item, diagnostics)
+                if item_type == "relationship" and diagnostics.get("relationship_creative_readiness") != "strong"
+                else None
+            )
             items.append(
                 {
                     "id": item.metadata.id,
@@ -1100,6 +1269,7 @@ class WritingAgentRuntime:
                     "summary": _clip(text, MAX_ASSET_SUMMARY),
                     "creative_diagnostics": diagnostics,
                     "diagnostic_summary": diagnostics["summary"],
+                    **({"repair_suggestion": repair_suggestion} if repair_suggestion else {}),
                 }
             )
             if len(items) >= limit:
@@ -1118,6 +1288,11 @@ class WritingAgentRuntime:
                     _diagnostic_source_text(item, text),
                     length=len(text),
                 )
+                repair_suggestion = (
+                    _relationship_repair_suggestion(item, diagnostics)
+                    if item_type == "relationship" and diagnostics.get("relationship_creative_readiness") != "strong"
+                    else None
+                )
                 items.append(
                     {
                         "id": item.metadata.id,
@@ -1126,6 +1301,7 @@ class WritingAgentRuntime:
                         "summary": _clip(text, MAX_ASSET_SUMMARY),
                         "creative_diagnostics": diagnostics,
                         "diagnostic_summary": diagnostics["summary"],
+                        **({"repair_suggestion": repair_suggestion} if repair_suggestion else {}),
                     }
                 )
                 if len(items) >= limit:
@@ -1153,6 +1329,11 @@ class WritingAgentRuntime:
             _diagnostic_source_text(item, text),
             length=len(text),
         )
+        repair_suggestion = (
+            _relationship_repair_suggestion(item, diagnostics)
+            if item_type == "relationship" and diagnostics.get("relationship_creative_readiness") != "strong"
+            else None
+        )
         return ToolObservation(
             name="get_asset_detail",
             status="ok",
@@ -1165,6 +1346,7 @@ class WritingAgentRuntime:
                     "summary": _clip(text, max_chars),
                     "creative_diagnostics": diagnostics,
                     "diagnostic_summary": diagnostics["summary"],
+                    **({"repair_suggestion": repair_suggestion} if repair_suggestion else {}),
                 }
             ],
         )
@@ -1332,6 +1514,13 @@ class WritingAgentRuntime:
                 detail = _clip(summary, 620)
                 if diagnostic_summary:
                     detail = f"{detail} | 创作诊断：{diagnostic_summary}"
+                repair = item.get("repair_suggestion")
+                if isinstance(repair, dict):
+                    detail = (
+                        f"{detail} | 关系补强建议：{_clip(_as_str(repair.get('core')), 180)}；"
+                        f"缺口：{_clip(_as_str(repair.get('weak_spots')), 80)}；"
+                        f"写作建议：{_clip(_as_str(repair.get('writing_advice')), 120)}"
+                    )
                 parts.append(f"{prefix}: {detail}")
 
         block = "\n".join(parts)
@@ -1351,6 +1540,7 @@ class WritingAgentRuntime:
         chapter_snippets: List[Dict[str, Any]] = []
         tool_calls: List[Dict[str, Any]] = []
         diagnostics: List[Dict[str, Any]] = []
+        relationship_repair_suggestions: List[Dict[str, Any]] = []
         for step_index, observation in enumerate(observations, start=1):
             is_last_step = step_index == len(observations)
             tool_calls.append(
@@ -1383,6 +1573,7 @@ class WritingAgentRuntime:
                             "type": item.get("type"),
                             "title": item.get("title"),
                             "creative_diagnostics": item.get("creative_diagnostics"),
+                            "repair_suggestion": item.get("repair_suggestion"),
                         }
                     )
                 if item.get("creative_diagnostics"):
@@ -1395,6 +1586,8 @@ class WritingAgentRuntime:
                             "creative_diagnostics": item.get("creative_diagnostics"),
                         }
                     )
+                if item.get("type") == "relationship" and item.get("repair_suggestion"):
+                    relationship_repair_suggestions.append(item["repair_suggestion"])
 
         coverage_counts = {
             "characters": sum(1 for item in used_assets if item.get("type") == "character"),
@@ -1402,11 +1595,15 @@ class WritingAgentRuntime:
             "world": sum(1 for item in used_assets if item.get("type") == "world"),
             "chapter_snippets": len(chapter_snippets),
         }
+        relationship_assets = [item for item in used_assets if item.get("type") == "relationship"]
+        relationship_quality_report = _relationship_quality_report(relationship_assets)
         retrieval_issues = []
         if coverage_counts["characters"] == 0:
             retrieval_issues.append("未找到足够角色资产")
         if coverage_counts["relationships"] == 0:
             retrieval_issues.append("未找到足够关系资产")
+        elif relationship_quality_report["low_information_relationships"] > 0:
+            retrieval_issues.append("关系资产薄弱：缺少依赖/亏欠/情绪张力/剧情功能等可写信号")
         if coverage_counts["world"] == 0:
             retrieval_issues.append("未找到足够世界观资产")
         if coverage_counts["chapter_snippets"] == 0:
@@ -1424,6 +1621,8 @@ class WritingAgentRuntime:
                 "issues": retrieval_issues,
             },
             "creative_diagnostics": diagnostics[:12],
+            "relationship_quality_report": relationship_quality_report,
+            "relationship_repair_suggestions": relationship_repair_suggestions[:5],
             "degraded": degraded,
             "fallback_reason": fallback_reason,
             "stopped_reason": stopped_reason,
@@ -1443,6 +1642,8 @@ class WritingAgentRuntime:
                 "issues": [],
             },
             "creative_diagnostics": [],
+            "relationship_quality_report": _relationship_quality_report([]),
+            "relationship_repair_suggestions": [],
             "degraded": degraded,
             "fallback_reason": None,
             "stopped_reason": None,

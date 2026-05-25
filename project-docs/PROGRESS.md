@@ -4528,3 +4528,69 @@
   - Goal 9 的核心 agent 改进已生效：写作前能稳定拿到角色、关系、世界观和章节片段，并把缺失信号写进 trace。
   - 真实 v2 序章候选比 Goal 8 更聚焦人物入场和场景即时性。
   - 关系资产仍偏薄，尤其依赖、亏欠、情绪张力、剧情功能不足；下一轮若继续提高“动人”程度，应优先做关系资产修复/增强，而不是继续扩大检索。
+
+## 2026-05-25 Goal 10：关系资产增强/修复 v1
+- 本轮目标：
+  - 不重写提取器，不新增 agent 工具数量，不引入向量数据库。
+  - 把 relationship 从“有边/有类型”推进到“可支撑小说创作的张力结构”。
+- 后端实现：
+  - relationship 创作诊断扩展为 10 个信号：
+    - dependency / 依赖
+    - misunderstanding / 误解
+    - debt / 亏欠
+    - conflict / 冲突
+    - emotional_tension / 情绪张力
+    - power_dynamic / 权力差/控制
+    - intimacy / 亲密度
+    - arc / 关系变化
+    - plot_function / 剧情功能
+    - scene_potential / 可写场景
+  - 诊断结果增加：
+    - `missing_signals`
+    - `relationship_creative_readiness`
+  - 低信息关系生成 `repair_suggestion`：
+    - 关系一句话核心
+    - 当前状态
+    - 依赖/误解/亏欠/冲突
+    - 情绪张力
+    - 关系变化方向
+    - 可制造剧情场景
+    - 序章/章节写作建议
+  - 新增内部 helper：
+    - `build_relationship_repair_suggestion(...)`
+    - 可读取原关系、相关角色资产和章节片段，返回 enriched relationship draft。
+    - 不自动覆盖原关系资产。
+  - agent trace 增加：
+    - `relationship_quality_report`
+    - `relationship_repair_suggestions`
+  - writer prompt 增强：
+    - 如果关系包含 dependency/debt/misunderstanding/emotional_tension/plot_function 等信号，必须转化为具体场景冲突或人物选择。
+    - 如果 trace 显示关系资产薄弱，生成结果应定位为草稿，并建议补强关系资产。
+- 真实模型复验：
+  - 模式/模型：Fast mode，后端报告 `gemini-3.5-flash`。
+  - 项目：`clean_import_20260524_111341`。
+  - 保存结果：`Goal10 关系驱动序章候选v1`。
+  - 保存内容 ID：`9d802163-efe2-49b6-bf30-03e2c020f365`。
+  - 字数：1510 chars。
+  - trace 覆盖：
+    - characters=8
+    - relationships=5
+    - world=1
+    - chapter_snippets=3
+  - relationship quality report：
+    - total_relationships=5
+    - tension_relationships=1
+    - low_information_relationships=5
+    - missing_plot_function_relationships=5
+    - status=thin
+  - 质量判断：
+    - 新草稿把八千代的选择写成“保护辉夜并因此可能失去自己 / 继续守护彩叶承诺”的关系驱动决断。
+    - 相比 Goal 9，更少只靠氛围推进；但底层关系资产仍需要正式补强。
+- 测试：
+  - 写作 agent 单测：
+    - `20 passed`
+  - 后端相关回归：
+    - `29 passed`
+- 当前判断：
+  - Goal 10 已把关系薄弱问题从“隐性质量问题”变成“trace 和 repair suggestion 中可见、可处理的问题”。
+  - 下一步更适合做用户可确认的关系修复写回入口，或在导入修复任务中接入这些 enriched relationship draft。

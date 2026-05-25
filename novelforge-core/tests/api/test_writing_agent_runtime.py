@@ -188,6 +188,105 @@ def test_search_project_assets_returns_creative_diagnostics() -> None:
     assert observation.items[0]["diagnostic_summary"].startswith("可用：")
 
 
+def test_relationship_diagnostics_report_missing_signals_and_repair_suggestion() -> None:
+    runtime = build_runtime()
+    scope = AgentScope(session_id="session-a", selected_novel_id="novel-a")
+
+    observation = run(runtime.search_project_assets(scope, {"query": "", "types": ["relationship"], "limit": 1}))
+    item = observation.items[0]
+    diagnostics = item["creative_diagnostics"]
+
+    assert diagnostics["relationship_creative_readiness"] == "strong"
+    assert "依赖" in diagnostics["usable"]
+    assert "情绪张力" in diagnostics["usable"]
+    assert "剧情功能" not in diagnostics["missing_signals"]
+    assert "repair_suggestion" not in item
+
+
+def test_thin_relationship_gets_repair_suggestion() -> None:
+    manager, storage = build_manager()
+    run(
+        manager.create_content(
+            build_item(
+                "rel-thin",
+                title="林墨 -> 周岚",
+                content_type=ContentType.RELATIONSHIP,
+                content="旧友。",
+                extracted_data={"source": "林墨", "target": "周岚", "relationship_type": "friendship"},
+            )
+        )
+    )
+    runtime = WritingAgentRuntime(manager, storage)
+    scope = AgentScope(session_id="session-a", selected_novel_id="novel-a")
+
+    observation = run(runtime.search_project_assets(scope, {"query": "", "types": ["relationship"], "limit": 1}))
+    item = observation.items[0]
+
+    assert item["creative_diagnostics"]["relationship_creative_readiness"] == "thin"
+    assert "剧情功能" in item["creative_diagnostics"]["missing_signals"]
+    assert item["repair_suggestion"]["source"] == "林墨"
+    assert item["repair_suggestion"]["target"] == "周岚"
+    assert "scene_potential" in item["repair_suggestion"]
+
+
+def test_relationship_repair_helper_uses_related_characters_and_chapter_snippets() -> None:
+    manager, storage = build_manager()
+    run(
+        manager.create_content(
+            build_item(
+                "char-lin",
+                title="林墨",
+                content_type=ContentType.CHARACTER,
+                content="林墨渴望保护周岚，却害怕旧事重演。",
+            )
+        )
+    )
+    run(
+        manager.create_content(
+            build_item(
+                "char-zhou",
+                title="周岚",
+                content_type=ContentType.CHARACTER,
+                content="周岚想要知道真相，说话方式直接。",
+            )
+        )
+    )
+    run(
+        manager.create_content(
+            build_item(
+                "rel-thin",
+                title="林墨 -> 周岚",
+                content_type=ContentType.RELATIONSHIP,
+                content="旧友。",
+                extracted_data={"source": "林墨", "target": "周岚", "relationship_type": "friendship"},
+            )
+        )
+    )
+    run(
+        manager.create_content(
+            build_item(
+                "chapter-rel",
+                title="关系场景",
+                content_type=ContentType.CHAPTER,
+                content="林墨在雨夜拦住周岚，周岚质问他为什么隐瞒旧案。",
+                extracted_data={"source_type": "imported", "order": 2},
+                tags=["imported"],
+            )
+        )
+    )
+    runtime = WritingAgentRuntime(manager, storage)
+    scope = AgentScope(session_id="session-a", selected_novel_id="novel-a")
+
+    result = run(runtime.build_relationship_repair_suggestion(scope, "rel-thin", user_message="补强林墨和周岚"))
+    suggestion = result["suggestion"]
+
+    assert result["status"] == "ok"
+    assert suggestion["enriched_relationship_draft"]["source"] == "林墨"
+    assert suggestion["enriched_relationship_draft"]["target"] == "周岚"
+    assert suggestion["related_characters"]
+    assert any(snippet["id"] == "chapter-rel" for snippet in suggestion["supporting_chapter_snippets"])
+
+
 def test_agent_context_repairs_persisted_mojibake_before_model_prompt() -> None:
     manager, storage = build_manager()
     run(
@@ -330,8 +429,11 @@ def test_model_tool_loop_can_call_multiple_tools_and_build_trace() -> None:
     assert preparation.trace["retrieval_coverage"]["counts"]["world"] >= 1
     assert not preparation.trace["retrieval_coverage"]["issues"]
     assert preparation.trace["creative_diagnostics"]
+    assert preparation.trace["relationship_quality_report"]["total_relationships"] >= 1
+    assert preparation.trace["relationship_quality_report"]["tension_relationships"] >= 1
     assert "base prompt" in preparation.system_prompt
     assert "序章要有动作、意象、悬念和情绪余韵" in preparation.system_prompt
+    assert "关系资产薄弱" in preparation.system_prompt
 
 
 def test_model_tool_loop_falls_back_when_tool_calling_is_unavailable() -> None:

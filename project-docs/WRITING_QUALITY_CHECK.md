@@ -226,3 +226,86 @@ Remaining quality risks:
 Current conclusion:
 
 Goal 9's core agent improvement is working: the writer can now reliably gather characters, relationships, world assets, and chapter snippets, and the trace makes missing creative signals visible. The generated v2 prologue candidate is stronger than Goal 8 in character entry and scene immediacy, but relationship quality remains the main blocker before calling the writing output consistently strong.
+
+## Goal 10 Relationship Asset Repair Validation
+
+Date: 2026-05-25
+
+Purpose:
+
+- Move relationship assets from simple graph edges toward writing-usable tension structures.
+- Verify that weak relationship assets expose missing signals instead of silently passing as usable context.
+- Generate a real prologue candidate that uses relationship pressure as a concrete choice.
+
+Code changes verified:
+
+- Relationship creative diagnostics now check:
+  - dependency
+  - misunderstanding
+  - debt
+  - conflict
+  - emotional_tension
+  - power_dynamic
+  - intimacy
+  - arc
+  - plot_function
+  - scene_potential
+- Relationship diagnostics expose `missing_signals` and `relationship_creative_readiness`.
+- Thin relationships get a `repair_suggestion` draft, without overwriting the original relationship asset.
+- The repair helper can load the relationship, related character assets, and supporting chapter snippets, then return an enriched relationship draft for user review.
+- Agent trace now includes:
+  - `relationship_quality_report`
+  - `relationship_repair_suggestions`
+- Writer prompt now asks the model to convert dependency, debt, misunderstanding, emotional tension, power dynamic, intimacy, arc, and plot function into concrete scene conflict or character choice.
+
+Live validation:
+
+- Provider/base: configured server-side NewAPI endpoint.
+- Mode/model: Fast mode, backend reported `gemini-3.5-flash`.
+- Project used: `clean_import_20260524_111341`.
+- Novel root: `novel_clean_import_20260524_111341`.
+- Saved content id: `9d802163-efe2-49b6-bf30-03e2c020f365`.
+- Saved title: `Goal10 关系驱动序章候选v1`.
+- Saved body length: 1510 chars.
+
+Trace summary:
+
+- Retrieval coverage:
+  - Characters: 8.
+  - Relationships: 5.
+  - World: 1.
+  - Chapter snippets: 3.
+- Relationship quality report:
+  - Total relationships: 5.
+  - Tension relationships: 1.
+  - Low-information relationships: 5.
+  - Missing plot function relationships: 5.
+  - Status: `thin`.
+- Most common missing signals:
+  - dependency: 5.
+  - debt: 5.
+  - plot_function: 5.
+  - emotional_tension: 4.
+  - conflict: 4.
+  - power_dynamic: 4.
+- Repair suggestions were generated for weak relationships, including:
+  - `酒寄彩叶 -> 彩叶的母亲`
+  - `酒寄彩叶 -> 帝明`
+  - `酒寄彩叶 -> 父亲`
+
+Before/after relationship behavior:
+
+- Before Goal 10: relationship assets could be retrieved, but the trace only showed broad creative diagnostics. It was easy for writing to fall back to atmosphere and world lore.
+- After Goal 10: the trace explicitly says the relationship set is thin and shows which signals are missing. The writer prompt receives repair advice such as turning relationship tension into a character choice rather than exposition.
+
+Writing quality verdict for Goal 10:
+
+- Character choice: pass. The draft gives 八千代 a concrete choice: erase 辉夜's detection signal and disappear, or preserve herself and risk 辉夜 being taken back.
+- Relationship-driven turn: pass. The strongest emotional turn comes from 八千代's promised care for 彩叶 colliding with her need to protect 辉夜. This is more relationship-driven than the Goal 9 draft.
+- Reduced pure atmosphere: pass. The opening still uses mythic imagery, but the center of the scene is a decision with cost.
+- Relationship asset quality: fail/diagnostic-pass. The generated text improves because the prompt forces relationship use, but the underlying extracted relationships remain thin: all five retrieved relationships lack plot function, and most lack dependency/debt/tension fields.
+- Save suitability: pass as AI draft/candidate, not as final formal prologue.
+
+Current conclusion:
+
+Goal 10 improves diagnosis and repairability of relationship assets. The system now clearly reports when the relationship network is not strong enough for emotionally precise writing, and the real validation draft shows a better relationship-driven choice. The next product step is to let users review/apply relationship repair suggestions, or to feed these suggestions into a relationship repair task before final writing.
