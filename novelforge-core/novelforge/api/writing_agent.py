@@ -25,6 +25,8 @@ MAX_DETAIL_CHARS = 900
 MAX_SNIPPET_CHARS = 900
 MAX_AGENT_CONTEXT_CHARS = 5200
 MODEL_LOOP_MAX_STEPS = 6
+WRITING_CANDIDATE_MIN_CHARS = 800
+WRITING_CANDIDATE_MAX_CHARS = 1500
 
 
 WRITING_AGENT_TOOL_SCHEMAS: List[Dict[str, Any]] = [
@@ -611,6 +613,62 @@ def _relationship_queue_score(item: ContentItem, diagnostics: Dict[str, Any]) ->
     if not reasons:
         reasons.append("关系信息较薄，适合人工复核")
     return score, reasons
+
+
+def evaluate_relationship_driven_candidate(
+    text: str,
+    required_terms: Sequence[str],
+    *,
+    min_chars: int = WRITING_CANDIDATE_MIN_CHARS,
+    max_chars: int = WRITING_CANDIDATE_MAX_CHARS,
+) -> Dict[str, Any]:
+    content = re.sub(r"<save_asset[\s\S]*?</save_asset>", "", text or "").strip()
+    matched_terms = [term for term in required_terms if term and term in content]
+    preface_markers = [
+        "以下是",
+        "这是一份",
+        "为您创作",
+        "写作策略",
+        "关系补强草稿",
+        "###",
+        "```",
+    ]
+    relation_markers = ["选择", "决定", "亏欠", "误解", "隐瞒", "冲突", "拉扯", "痛", "守护", "离开", "靠近"]
+    issues: List[str] = []
+    if len(content) < min_chars:
+        issues.append(f"字数不足：{len(content)} < {min_chars}")
+    if len(content) > max_chars:
+        issues.append(f"字数过长：{len(content)} > {max_chars}")
+    if len(matched_terms) < min(3, len([term for term in required_terms if term])):
+        issues.append("关系端点/别名命中不足")
+    if any(marker in content[:160] for marker in preface_markers):
+        issues.append("包含说明性前言或标题")
+    if not any(marker in content for marker in relation_markers):
+        issues.append("缺少关系驱动的选择/亏欠/误解/情绪转折信号")
+    return {
+        "passed": not issues,
+        "issues": issues,
+        "char_count": len(content),
+        "matched_terms": matched_terms,
+        "required_terms": [term for term in required_terms if term],
+    }
+
+
+def build_relationship_candidate_rewrite_prompt(
+    candidate_text: str,
+    evaluation: Dict[str, Any],
+    required_terms: Sequence[str],
+) -> str:
+    terms = "、".join([term for term in required_terms if term])
+    issues = "；".join(evaluation.get("issues") or [])
+    return (
+        "请把下面候选改写成可保存的小说序章正文，只输出正文，不要标题、说明或列表。\n"
+        f"硬性要求：{WRITING_CANDIDATE_MIN_CHARS}-{WRITING_CANDIDATE_MAX_CHARS} 个中文字符；"
+        f"必须自然使用这些关系端点/别名：{terms}；"
+        "至少写出一次人物行动选择、一次亏欠或误解、一次情绪转折。\n"
+        f"当前不达标原因：{issues}\n\n"
+        f"候选正文：\n{_clip(candidate_text, 2600)}"
+    )
 
 
 def _is_enriched_relationship(item: ContentItem) -> bool:

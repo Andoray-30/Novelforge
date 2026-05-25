@@ -1,7 +1,13 @@
 import asyncio
 
 from novelforge.api.types import Conversation, Message
-from novelforge.api.writing_agent import AgentScope, WRITING_AGENT_TOOL_SCHEMAS, WritingAgentRuntime
+from novelforge.api.writing_agent import (
+    AgentScope,
+    WRITING_AGENT_TOOL_SCHEMAS,
+    WritingAgentRuntime,
+    build_relationship_candidate_rewrite_prompt,
+    evaluate_relationship_driven_candidate,
+)
 from novelforge.content.manager import ContentManager
 from novelforge.content.models import ContentItem, ContentMetadata, ContentType
 from novelforge.core.config import Config
@@ -364,6 +370,34 @@ def test_relationship_repair_queue_is_exposed_in_trace_without_duplicate_suggest
     assert trace["relationship_repair_queue"][0]["relationship_id"] == "rel-thin"
     assert trace["relationship_repair_queue"][0]["queue_rank"] == 1
     assert trace["relationship_repair_suggestions"] == []
+
+
+def test_relationship_candidate_gate_accepts_multi_relationship_prologue() -> None:
+    text = (
+        "母亲的脚步停在门外时，彩叶把车票攥进掌心。她知道离开会让母亲更恨她，"
+        "可留下只会继续把两个人都困在误解里。芦花和真实的未读消息一条接一条跳出来，"
+        "她们没有责备，只说会在车站等她。那种温柔让彩叶胸口发疼，像欠下了一笔终于不能再逃的债。"
+        "八千代发来的短句只有一句：如果想看见月亮，就先走出这间屋子。彩叶关掉屏幕，"
+        "把钥匙放在桌上，第一次没有回头。"
+    ) * 6
+
+    result = evaluate_relationship_driven_candidate(text, ["母亲", "芦花", "真实", "八千代"])
+
+    assert result["passed"] is True
+    assert set(result["matched_terms"]) == {"母亲", "芦花", "真实", "八千代"}
+
+
+def test_relationship_candidate_gate_rejects_preface_and_missing_relationships() -> None:
+    text = "以下是为您创作的序章。\n\n彩叶看见流星坠落，空气里满是神秘的光。"
+
+    result = evaluate_relationship_driven_candidate(text, ["母亲", "芦花", "真实", "八千代"])
+    rewrite = build_relationship_candidate_rewrite_prompt(text, result, ["母亲", "芦花", "真实", "八千代"])
+
+    assert result["passed"] is False
+    assert "字数不足" in "；".join(result["issues"])
+    assert "关系端点/别名命中不足" in result["issues"]
+    assert "包含说明性前言或标题" in result["issues"]
+    assert "母亲、芦花、真实、八千代" in rewrite
 
 
 def test_relationship_repair_helper_uses_related_characters_and_chapter_snippets() -> None:

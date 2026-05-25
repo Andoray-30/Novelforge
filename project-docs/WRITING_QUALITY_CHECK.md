@@ -491,34 +491,36 @@ Agent usage:
 
 Writing validation:
 
-- Multiple live candidates were generated and saved:
-  - `Goal12 核心关系队列序章候选v1`
-  - `Goal12 核心关系队列序章候选v2`
-  - `Goal12 核心关系队列序章候选v3`
-  - `Goal12 核心关系队列序章候选v4`
-  - `Goal12 核心关系队列序章候选v5`
-  - `Goal12 核心关系队列序章候选v6`
-- Best length candidates:
-  - v3: 1201 chars.
-  - v6: 1226 chars.
-- Current writing verdict:
-  - Relationship network improvement: pass.
-  - Queue writeback loop: pass.
-  - Agent enriched relationship retrieval: pass.
-  - Final multi-relationship prologue candidate: not yet pass.
+- Added a writing candidate gate:
+  - char count must be between 800 and 1500.
+  - no explanatory preface or markdown heading.
+  - must mention or clearly use the required relationship endpoints.
+  - must contain relationship-driven choice / debt / misunderstanding / emotional turn signals.
+- Added a rewrite prompt helper for failed candidates.
+- Failed live candidates from earlier attempts were removed from the content library to avoid polluting user-visible assets.
 
-Why the final writing candidate is not yet pass:
+Final saved candidate:
 
-- Some candidates exceeded the 800-1500 char target.
-- Some candidates used only one or two repaired relationships instead of all three.
-- When raw repair drafts were passed as context, the model sometimes repeated the relationship draft structure instead of writing prose.
-- This shows the next blocker is a writing-candidate validator/retry loop, not the relationship queue itself.
+- `goal12_chapter_fae41a717f59`
+- `Goal12 核心关系队列序章候选final`
+- Length: 1018 chars.
+- Gate result: pass.
+- Required relationship terms matched:
+  - `母亲`
+  - `芦花`
+  - `真实`
+  - `八千代`
+- Relationship quality report at final validation:
+  - total_relationships=8
+  - tension_relationships=7
+  - low_information_relationships=3
+  - missing_plot_function_relationships=4
+  - status=`usable`
 
-Next validation requirement:
+Current writing verdict:
 
-- Add a writing candidate gate before saving:
-  - char count between 800 and 1500
-  - no explanatory preface
-  - must mention or clearly use at least 2-3 enhanced relationships
-  - must contain concrete choice / debt / misunderstanding / emotional turn
-- If the gate fails, ask the model to rewrite with a focused repair instruction before allowing save.
+- Relationship network improvement: pass.
+- Queue writeback loop: pass.
+- Agent enriched relationship retrieval: pass.
+- Final multi-relationship prologue candidate: pass as AI draft/candidate.
+- Remaining editorial note: the final candidate is structurally valid and relationship-driven, but still needs human literary polish before being promoted to a formal canonical prologue.
