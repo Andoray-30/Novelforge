@@ -4687,3 +4687,101 @@
   - Goal 11 打通了第一版“诊断 -> 建议 -> 预览 -> 用户确认 -> 写回 -> agent 优先读取增强关系”的关系修复闭环。
   - 单条关系补强已经能让生成链路的 relationship report 从 thin 局部改善到 usable。
   - 但整个关系网络仍偏薄，内测前建议继续做 2-3 条核心关系的批量/半自动补强，或提供“核心关系一键补强队列”。
+
+## 2026-05-25 Goal 12：核心关系补强队列 v1（进行中）
+- 本轮目标：
+  - 将 Goal 11 的单条关系修复扩展为 2-3 条核心薄弱关系队列。
+  - 优先提升全局关系网络质量，而不是每次只修一条。
+- 后端实现：
+  - 新增核心关系队列评分：
+    - 低信息程度
+    - 缺失信号数量
+    - evidence 数
+    - chapter_references 覆盖
+    - strength
+    - 是否已有冲突 / 误解 / 关系变化可扩展
+    - confirmed / enriched 关系默认后置
+  - 新增 `build_relationship_repair_queue(...)`：
+    - 只扫描当前 `session_id / selected_novel_id`。
+    - 返回最多 2-3 条可修复关系。
+    - 每条包含 `repair_suggestion / enriched_relationship_draft`、`queue_rank`、`queue_score`、`queue_reasons`、`queue_status`。
+  - 写作 baseline 会自动附加关系补强队列 observation，trace 增加：
+    - `relationship_repair_queue`
+  - agent 仍优先读取 `relationship_enriched` / `repair_status=confirmed` 的关系资产。
+- 前端实现：
+  - `agent-trace` 类型和 normalize 支持：
+    - `relationship_repair_queue`
+    - `queue_rank`
+    - `queue_score`
+    - `queue_reasons`
+    - `queue_status`
+    - `relationship_enriched`
+  - MessageBubble 的“本轮写作依据”增加“核心关系补强队列”卡片。
+  - 每条队列项可独立：
+    - 保存草稿
+    - 更新原关系
+    - 跳过
+  - 卡片本地显示状态：
+    - 待处理
+    - 已保存
+    - 已更新
+    - 已跳过
+- 测试：
+  - writing agent 相关：
+    - `23 passed`
+  - 后端相关回归：
+    - `32 passed`
+  - 前端 Vitest：
+    - `21 files / 86 tests passed`
+  - TypeScript：
+    - passed
+  - 前端 build：
+    - passed
+- 真实队列复验：
+  - 项目：`clean_import_20260524_111341`
+  - 队列选出 3 条关系：
+    - `酒寄彩叶 -> 彩叶的母亲`
+    - `酒寄彩叶 -> 芦花与真实`
+    - `酒寄彩叶 -> 八千代`
+  - 保存关系补强草稿：
+    - `goal12_repair_3290a9ce01c0`
+    - `goal12_repair_8d46bdfd0792`
+    - `goal12_repair_a4295a05740e`
+  - 修复前 relationship report：
+    - total_relationships=8
+    - tension_relationships=4
+    - low_information_relationships=6
+    - missing_plot_function_relationships=7
+    - status=thin
+  - 批量保存补强草稿后：
+    - total_relationships=8
+    - tension_relationships=7
+    - low_information_relationships=3
+    - missing_plot_function_relationships=4
+    - status=usable
+  - 后续 agent 写作 trace：
+    - confirmed/enriched 关系被优先读取。
+    - 多次复验中 `trace_used_enriched_relationship_count` 最高达到 7。
+- 真实写作复验状态：
+  - 已保存多版候选：
+    - `Goal12 核心关系队列序章候选v1`
+    - `Goal12 核心关系队列序章候选v2`
+    - `Goal12 核心关系队列序章候选v3`
+    - `Goal12 核心关系队列序章候选v4`
+    - `Goal12 核心关系队列序章候选v5`
+    - `Goal12 核心关系队列序章候选v6`
+  - 当前最佳长度候选：
+    - v3：1201 chars，但主要使用母亲 / 芦花与真实关系，八千代转折不足。
+    - v6：1226 chars，但仍偏单线，没有真正同时使用三条核心关系。
+  - 不合格候选暴露的问题：
+    - 结构化关系草稿直接塞给模型时，模型容易复述“关系补强草稿”而不是写小说正文。
+    - 写作 prompt 即使要求 900-1300 字，模型仍可能输出 1800+ 字。
+    - 多关系同时使用需要更强的写作编排器或后处理检查，不能只靠自然语言要求。
+- 当前判断：
+  - Goal 12 的“队列生成 / 批量保存草稿 / 全局关系质量改善 / agent 优先读取增强关系”已经完成并验证。
+  - Goal 12 的“真实 800-1500 字多关系序章候选完全达标”尚未完成。
+  - 下一步应补一个写作候选验收器：
+    - 字数必须在 800-1500。
+    - 必须命中队列关系端点或别名。
+    - 必须至少使用 2-3 条增强关系。
+    - 不达标时自动要求模型“压缩/补关系/去说明文字”重写，而不是直接保存。

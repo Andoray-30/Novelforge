@@ -427,3 +427,98 @@ Writing quality verdict:
 Current conclusion:
 
 Goal 11 closes the first practical relationship repair loop: diagnosis -> suggestion -> user-visible preview -> draft/confirmed writeback -> enriched relationship retrieved by the agent -> improved relationship quality report during writing. The project is now closer to internal testing because relationship weakness is no longer just a hidden extraction defect; it can be surfaced and repaired into the project memory library.
+
+## Goal 12 Core Relationship Repair Queue Validation
+
+Date: 2026-05-25
+
+Scope:
+
+- Goal: expand single relationship repair into a 2-3 item core relationship repair queue.
+- Project used: `clean_import_20260524_111341`.
+- Novel root: `novel_clean_import_20260524_111341`.
+
+Implemented behavior:
+
+- Backend ranks weak relationship candidates using:
+  - missing creative signal count
+  - readiness / low-information status
+  - evidence count
+  - chapter reference coverage
+  - relationship strength
+  - existing conflict / misunderstanding / arc signals
+  - enriched / confirmed status as a default penalty
+- Trace now exposes `relationship_repair_queue`.
+- Frontend displays a "core relationship repair queue" with queue rank, score, reasons, and per-card state.
+- Each queue item can be saved as a repair draft, confirmed into the original relationship, or skipped.
+
+Queue selected in live validation:
+
+- `酒寄彩叶 -> 彩叶的母亲`
+- `酒寄彩叶 -> 芦花与真实`
+- `酒寄彩叶 -> 八千代`
+
+Saved repair drafts:
+
+- `goal12_repair_3290a9ce01c0`
+  - `Goal12 关系补强草稿1：酒寄彩叶与彩叶的母亲`
+- `goal12_repair_8d46bdfd0792`
+  - `Goal12 关系补强草稿2：酒寄彩叶与芦花与真实`
+- `goal12_repair_a4295a05740e`
+  - `Goal12 关系补强草稿3：酒寄彩叶与八千代`
+
+Before queue repair:
+
+- Total relationships: 8.
+- Tension relationships: 4.
+- Low-information relationships: 6.
+- Missing plot function relationships: 7.
+- Status: `thin`.
+
+After saving three repair drafts:
+
+- Total relationships: 8.
+- Tension relationships: 7.
+- Low-information relationships: 3.
+- Missing plot function relationships: 4.
+- Status: `usable`.
+
+Agent usage:
+
+- Subsequent writing traces prioritized enriched relationships.
+- In live validation, enriched relationship usage reached 7 trace entries in the generation context.
+- This proves the queue repair drafts are not only stored; they are retrieved back into the writing context.
+
+Writing validation:
+
+- Multiple live candidates were generated and saved:
+  - `Goal12 核心关系队列序章候选v1`
+  - `Goal12 核心关系队列序章候选v2`
+  - `Goal12 核心关系队列序章候选v3`
+  - `Goal12 核心关系队列序章候选v4`
+  - `Goal12 核心关系队列序章候选v5`
+  - `Goal12 核心关系队列序章候选v6`
+- Best length candidates:
+  - v3: 1201 chars.
+  - v6: 1226 chars.
+- Current writing verdict:
+  - Relationship network improvement: pass.
+  - Queue writeback loop: pass.
+  - Agent enriched relationship retrieval: pass.
+  - Final multi-relationship prologue candidate: not yet pass.
+
+Why the final writing candidate is not yet pass:
+
+- Some candidates exceeded the 800-1500 char target.
+- Some candidates used only one or two repaired relationships instead of all three.
+- When raw repair drafts were passed as context, the model sometimes repeated the relationship draft structure instead of writing prose.
+- This shows the next blocker is a writing-candidate validator/retry loop, not the relationship queue itself.
+
+Next validation requirement:
+
+- Add a writing candidate gate before saving:
+  - char count between 800 and 1500
+  - no explanatory preface
+  - must mention or clearly use at least 2-3 enhanced relationships
+  - must contain concrete choice / debt / misunderstanding / emotional turn
+- If the gate fails, ask the model to rewrite with a focused repair instruction before allowing save.

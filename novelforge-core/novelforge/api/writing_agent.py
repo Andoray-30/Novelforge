@@ -567,6 +567,52 @@ def _relationship_quality_report(relationship_assets: Sequence[Dict[str, Any]]) 
     }
 
 
+def _relationship_queue_score(item: ContentItem, diagnostics: Dict[str, Any]) -> tuple[int, List[str]]:
+    payload = _payload(item)
+    missing = list(diagnostics.get("missing_signals") or diagnostics.get("missing") or [])
+    usable = set(diagnostics.get("usable") or [])
+    readiness = _as_str(diagnostics.get("relationship_creative_readiness"))
+    evidence = payload.get("evidence") if isinstance(payload.get("evidence"), list) else []
+    chapter_refs = payload.get("chapter_references") if isinstance(payload.get("chapter_references"), list) else []
+    strength = payload.get("strength")
+    try:
+        strength_score = int(strength or 0)
+    except (TypeError, ValueError):
+        strength_score = 0
+
+    score = len(missing) * 10
+    reasons: List[str] = []
+    if readiness == "thin":
+        score += 30
+        reasons.append("低信息关系")
+    elif readiness == "usable":
+        score += 12
+        reasons.append("可用但仍可补强")
+    if missing:
+        reasons.append(f"缺失 {len(missing)} 个创作信号")
+    if evidence:
+        score += min(len(evidence), 8) * 3
+        reasons.append(f"有 {len(evidence)} 条证据可扩写")
+    if chapter_refs:
+        score += min(len(chapter_refs), 6) * 4
+        reasons.append(f"覆盖 {len(chapter_refs)} 个章节")
+    if strength_score >= 8:
+        score += 18
+        reasons.append("关系强度高")
+    elif strength_score >= 5:
+        score += 8
+        reasons.append("关系强度中等")
+    if {"冲突", "误解", "关系变化"}.intersection(usable):
+        score += 14
+        reasons.append("已有冲突/误解/变化可扩展")
+    if _is_enriched_relationship(item):
+        score -= 80
+        reasons.append("已补强，默认后置")
+    if not reasons:
+        reasons.append("关系信息较薄，适合人工复核")
+    return score, reasons
+
+
 def _is_enriched_relationship(item: ContentItem) -> bool:
     if item.metadata.type != ContentType.RELATIONSHIP:
         return False
@@ -1144,6 +1190,8 @@ class WritingAgentRuntime:
             )
         if not any(observation.name == "run_quality_check" for observation in enriched):
             baseline_calls.append(("run_quality_check", {"task": user_message[:160]}))
+        if not any(observation.name == "build_relationship_repair_queue" for observation in enriched):
+            baseline_calls.append(("build_relationship_repair_queue", {"limit": 3}))
 
         for name, args in baseline_calls:
             if len(enriched) >= MAX_TOOL_CALLS:
@@ -1174,6 +1222,8 @@ class WritingAgentRuntime:
             return self.prepare_chapter_update(args)
         if name == "run_quality_check":
             return self.run_quality_check(args)
+        if name == "build_relationship_repair_queue":
+            return await self.build_relationship_repair_queue(scope, args)
         return ToolObservation(name=name, status="error", summary="未知工具")
 
     async def build_relationship_repair_suggestion(
@@ -1233,6 +1283,68 @@ class WritingAgentRuntime:
             "missing_signals": suggestion["missing_signals"],
         }
         return {"status": "ok", "summary": "已生成关系补强建议，未写回原关系资产。", "suggestion": suggestion}
+
+    async def build_relationship_repair_queue(self, scope: AgentScope, args: Dict[str, Any]) -> ToolObservation:
+        limit = min(max(int(args.get("limit") or 3), 1), 5)
+        include_enriched = bool(args.get("include_enriched"))
+        result = await self.content_manager.search_content(
+            ContentSearchRequest(
+                query="",
+                content_types=[ContentType.RELATIONSHIP],
+                session_id=scope.session_id,
+                limit=50,
+                include_content=True,
+            )
+        )
+        ranked: List[Dict[str, Any]] = []
+        for item in result.items:
+            if not _item_in_scope(item, scope):
+                continue
+            enriched = _is_enriched_relationship(item)
+            if enriched and not include_enriched:
+                continue
+            text = _content_text(item) or json.dumps(_payload(item), ensure_ascii=False)
+            diagnostics = _creative_diagnostics("relationship", _diagnostic_source_text(item, text), length=len(text))
+            if diagnostics.get("relationship_creative_readiness") == "strong" and not include_enriched:
+                continue
+            score, reasons = _relationship_queue_score(item, diagnostics)
+            suggestion = _relationship_repair_suggestion(item, diagnostics)
+            suggestion.update(
+                {
+                    "queue_score": score,
+                    "queue_reasons": reasons,
+                    "queue_status": "pending",
+                    "relationship_enriched": enriched,
+                }
+            )
+            ranked.append(
+                {
+                    "id": item.metadata.id,
+                    "type": "relationship",
+                    "title": _title(item),
+                    "summary": _clip(text, MAX_ASSET_SUMMARY),
+                    "creative_diagnostics": diagnostics,
+                    "diagnostic_summary": diagnostics["summary"],
+                    "relationship_enriched": enriched,
+                    "queue_score": score,
+                    "queue_reasons": reasons,
+                    "repair_suggestion": suggestion,
+                }
+            )
+
+        ranked.sort(key=lambda row: int(row.get("queue_score") or 0), reverse=True)
+        queue_items = ranked[:limit]
+        for index, row in enumerate(queue_items, start=1):
+            row["queue_rank"] = index
+            if isinstance(row.get("repair_suggestion"), dict):
+                row["repair_suggestion"]["queue_rank"] = index
+
+        return ToolObservation(
+            name="build_relationship_repair_queue",
+            status="ok",
+            summary=f"已生成 {len(queue_items)} 条核心关系补强队列。",
+            items=queue_items,
+        )
 
     async def search_project_assets(self, scope: AgentScope, args: Dict[str, Any]) -> ToolObservation:
         query = _clip(_as_str(args.get("query")), 120)
@@ -1575,6 +1687,7 @@ class WritingAgentRuntime:
         tool_calls: List[Dict[str, Any]] = []
         diagnostics: List[Dict[str, Any]] = []
         relationship_repair_suggestions: List[Dict[str, Any]] = []
+        relationship_repair_queue: List[Dict[str, Any]] = []
         for step_index, observation in enumerate(observations, start=1):
             is_last_step = step_index == len(observations)
             tool_calls.append(
@@ -1590,6 +1703,21 @@ class WritingAgentRuntime:
                 }
             )
             for item in observation.items:
+                if observation.name == "build_relationship_repair_queue":
+                    repair = item.get("repair_suggestion")
+                    if isinstance(repair, dict):
+                        relationship_repair_queue.append(repair)
+                    if item.get("creative_diagnostics"):
+                        diagnostics.append(
+                            {
+                                "id": item.get("id"),
+                                "type": item.get("type"),
+                                "title": item.get("title"),
+                                "summary": item.get("diagnostic_summary"),
+                                "creative_diagnostics": item.get("creative_diagnostics"),
+                            }
+                        )
+                    continue
                 if observation.name == "search_chapter_snippets":
                     chapter_snippets.append(
                         {
@@ -1622,7 +1750,11 @@ class WritingAgentRuntime:
                         }
                     )
                 if item.get("type") == "relationship" and item.get("repair_suggestion"):
-                    relationship_repair_suggestions.append(item["repair_suggestion"])
+                    relationship_id = item["repair_suggestion"].get("relationship_id")
+                    if not relationship_id or not any(
+                        existing.get("relationship_id") == relationship_id for existing in relationship_repair_suggestions
+                    ):
+                        relationship_repair_suggestions.append(item["repair_suggestion"])
 
         coverage_counts = {
             "characters": sum(1 for item in used_assets if item.get("type") == "character"),
@@ -1657,6 +1789,7 @@ class WritingAgentRuntime:
             },
             "creative_diagnostics": diagnostics[:12],
             "relationship_quality_report": relationship_quality_report,
+            "relationship_repair_queue": relationship_repair_queue[:3],
             "relationship_repair_suggestions": relationship_repair_suggestions[:5],
             "degraded": degraded,
             "fallback_reason": fallback_reason,
@@ -1678,6 +1811,7 @@ class WritingAgentRuntime:
             },
             "creative_diagnostics": [],
             "relationship_quality_report": _relationship_quality_report([]),
+            "relationship_repair_queue": [],
             "relationship_repair_suggestions": [],
             "degraded": degraded,
             "fallback_reason": None,

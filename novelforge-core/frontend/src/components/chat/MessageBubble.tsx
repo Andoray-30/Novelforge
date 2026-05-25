@@ -63,6 +63,13 @@ export type ChapterSaveTargetOption = {
   wordCount: number;
 };
 
+type RelationshipRepairSource = 'suggestions' | 'queue';
+type RelationshipRepairAction = (
+  messageId: string,
+  suggestionIndex: number,
+  source?: RelationshipRepairSource,
+) => void | boolean | Promise<void | boolean>;
+
 interface MessageBubbleProps {
   message: Message;
   chapterSaveTargets?: ChapterSaveTargetOption[];
@@ -75,8 +82,8 @@ interface MessageBubbleProps {
   onRejectSaveAsset?: (messageId: string, requestIndex: number) => void;
   onChangeSaveAssetDestination?: (messageId: string, requestIndex: number, destination: ChapterSaveDestination) => void;
   onSelectSaveAssetTarget?: (messageId: string, requestIndex: number, targetId: string) => void;
-  onSaveRelationshipRepairDraft?: (messageId: string, suggestionIndex: number) => void;
-  onUpdateRelationshipRepair?: (messageId: string, suggestionIndex: number) => void;
+  onSaveRelationshipRepairDraft?: RelationshipRepairAction;
+  onUpdateRelationshipRepair?: RelationshipRepairAction;
   onRetryMessage?: (messageId: string, retryText: string) => void;
 }
 
@@ -166,6 +173,7 @@ function getAgentToolLabel(name: string): string {
     prepare_save_asset: '准备保存建议',
     prepare_chapter_update: '准备章节更新',
     run_quality_check: '写作质量检查',
+    build_relationship_repair_queue: '生成关系补强队列',
   };
   return labels[name] ?? name;
 }
@@ -195,19 +203,31 @@ function RepairSuggestionCard({
   suggestion,
   index,
   messageId,
+  source = 'suggestions',
   onSaveRelationshipRepairDraft,
   onUpdateRelationshipRepair,
 }: {
   suggestion: AgentRelationshipRepairSuggestion;
   index: number;
   messageId: string;
-  onSaveRelationshipRepairDraft?: (messageId: string, suggestionIndex: number) => void;
-  onUpdateRelationshipRepair?: (messageId: string, suggestionIndex: number) => void;
+  source?: RelationshipRepairSource;
+  onSaveRelationshipRepairDraft?: RelationshipRepairAction;
+  onUpdateRelationshipRepair?: RelationshipRepairAction;
 }) {
-  const [skipped, setSkipped] = useState(false);
-  if (skipped) {
-    return null;
-  }
+  const [status, setStatus] = useState<'pending' | 'saved' | 'updated' | 'skipped'>(
+    suggestion.queue_status === 'saved' || suggestion.queue_status === 'updated' || suggestion.queue_status === 'skipped'
+      ? suggestion.queue_status
+      : 'pending',
+  );
+
+  const runAction = async (action: 'save' | 'update') => {
+    const handler = action === 'save' ? onSaveRelationshipRepairDraft : onUpdateRelationshipRepair;
+    if (!handler || status !== 'pending') return;
+    const result = await handler(messageId, index, source);
+    if (result !== false) {
+      setStatus(action === 'save' ? 'saved' : 'updated');
+    }
+  };
 
   return (
     <div style={{
@@ -221,16 +241,20 @@ function RepairSuggestionCard({
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ color: '#fcd34d', fontWeight: 700, fontSize: 12 }}>
+            {typeof suggestion.queue_rank === 'number' ? `#${suggestion.queue_rank} ` : ''}
             {suggestion.title || `${suggestion.source ?? '角色A'} -> ${suggestion.target ?? '角色B'}`}
           </div>
           <div style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 2 }}>
             {suggestion.source || '角色A'} / {suggestion.target || '角色B'}
+            {typeof suggestion.queue_score === 'number' ? <span> · 队列分 {suggestion.queue_score}</span> : null}
+            <span> · {status === 'pending' ? '待处理' : status === 'saved' ? '已保存' : status === 'updated' ? '已更新' : '已跳过'}</span>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
           <button
             type="button"
-            onClick={() => onSaveRelationshipRepairDraft?.(messageId, index)}
+            onClick={() => runAction('save')}
+            disabled={status !== 'pending'}
             style={{
               borderRadius: 6,
               border: '1px solid rgba(16, 185, 129, 0.4)',
@@ -238,7 +262,8 @@ function RepairSuggestionCard({
               color: '#86efac',
               padding: '4px 8px',
               fontSize: 11,
-              cursor: onSaveRelationshipRepairDraft ? 'pointer' : 'default',
+              cursor: onSaveRelationshipRepairDraft && status === 'pending' ? 'pointer' : 'default',
+              opacity: status === 'pending' ? 1 : 0.6,
             }}
           >
             保存草稿
@@ -247,10 +272,10 @@ function RepairSuggestionCard({
             type="button"
             onClick={() => {
               if (window.confirm('确认更新原关系资产？系统会保留 previous_snapshot，可回溯旧内容。')) {
-                onUpdateRelationshipRepair?.(messageId, index);
+                runAction('update');
               }
             }}
-            disabled={!suggestion.relationship_id}
+            disabled={!suggestion.relationship_id || status !== 'pending'}
             title={suggestion.relationship_id ? undefined : '缺少原关系 ID，无法更新原资产'}
             style={{
               borderRadius: 6,
@@ -259,15 +284,16 @@ function RepairSuggestionCard({
               color: '#fcd34d',
               padding: '4px 8px',
               fontSize: 11,
-              cursor: suggestion.relationship_id && onUpdateRelationshipRepair ? 'pointer' : 'not-allowed',
-              opacity: suggestion.relationship_id ? 1 : 0.55,
+              cursor: suggestion.relationship_id && onUpdateRelationshipRepair && status === 'pending' ? 'pointer' : 'not-allowed',
+              opacity: suggestion.relationship_id && status === 'pending' ? 1 : 0.55,
             }}
           >
             更新原关系
           </button>
           <button
             type="button"
-            onClick={() => setSkipped(true)}
+            onClick={() => setStatus('skipped')}
+            disabled={status !== 'pending'}
             style={{
               borderRadius: 6,
               border: '1px solid rgba(148, 163, 184, 0.28)',
@@ -275,7 +301,8 @@ function RepairSuggestionCard({
               color: 'var(--text-muted)',
               padding: '4px 8px',
               fontSize: 11,
-              cursor: 'pointer',
+              cursor: status === 'pending' ? 'pointer' : 'default',
+              opacity: status === 'pending' ? 1 : 0.6,
             }}
           >
             跳过
@@ -286,6 +313,11 @@ function RepairSuggestionCard({
       <div style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.55 }}>
         {suggestion.core}
       </div>
+      {(suggestion.queue_reasons?.length ?? 0) > 0 ? (
+        <div style={{ color: '#fcd34d', fontSize: 11, lineHeight: 1.5 }}>
+          入队原因：{suggestion.queue_reasons?.join('；')}
+        </div>
+      ) : null}
       <div style={{ display: 'grid', gap: 4, color: 'var(--text-muted)', fontSize: 11, lineHeight: 1.5 }}>
         {suggestion.missing_signals.length > 0 ? <div>缺失信号：{suggestion.missing_signals.join('、')}</div> : null}
         {suggestion.dependency ? <div>依赖：{suggestion.dependency}</div> : null}
@@ -309,8 +341,8 @@ function AgentTracePanel({
 }: {
   trace: AgentTrace;
   messageId: string;
-  onSaveRelationshipRepairDraft?: (messageId: string, suggestionIndex: number) => void;
-  onUpdateRelationshipRepair?: (messageId: string, suggestionIndex: number) => void;
+  onSaveRelationshipRepairDraft?: RelationshipRepairAction;
+  onUpdateRelationshipRepair?: RelationshipRepairAction;
 }) {
   const usedCount = trace.used_assets.length + trace.chapter_snippets.length;
   const summary = trace.plan_summary || '已按任务读取必要上下文。';
@@ -429,6 +461,33 @@ function AgentTracePanel({
                 </div>
                 {snippet.preview ? <div>{snippet.preview}</div> : null}
               </div>
+            ))}
+          </div>
+        ) : null}
+
+        {trace.relationship_repair_queue.length > 0 ? (
+          <div style={{ display: 'grid', gap: 8 }}>
+            <div style={{ color: '#fcd34d', fontWeight: 700 }}>
+              核心关系补强队列
+              <span style={{ marginLeft: 8, color: 'var(--text-muted)', fontWeight: 500 }}>
+                {trace.relationship_repair_queue.length} 条待处理
+              </span>
+            </div>
+            {relationshipReport?.status === 'thin' ? (
+              <div style={{ color: 'var(--text-muted)', fontSize: 11, lineHeight: 1.5 }}>
+                全局关系网络仍偏薄，优先补齐：{topMissingSignals(relationshipReport.missing_signals)}
+              </div>
+            ) : null}
+            {trace.relationship_repair_queue.map((suggestion, index) => (
+              <RepairSuggestionCard
+                key={`queue-${suggestion.relationship_id ?? suggestion.title}-${index}`}
+                suggestion={suggestion}
+                index={index}
+                source="queue"
+                messageId={messageId}
+                onSaveRelationshipRepairDraft={onSaveRelationshipRepairDraft}
+                onUpdateRelationshipRepair={onUpdateRelationshipRepair}
+              />
             ))}
           </div>
         ) : null}
@@ -1043,8 +1102,8 @@ interface MessageListProps {
   onRejectSaveAsset?: (messageId: string, requestIndex: number) => void;
   onChangeSaveAssetDestination?: (messageId: string, requestIndex: number, destination: ChapterSaveDestination) => void;
   onSelectSaveAssetTarget?: (messageId: string, requestIndex: number, targetId: string) => void;
-  onSaveRelationshipRepairDraft?: (messageId: string, suggestionIndex: number) => void;
-  onUpdateRelationshipRepair?: (messageId: string, suggestionIndex: number) => void;
+  onSaveRelationshipRepairDraft?: RelationshipRepairAction;
+  onUpdateRelationshipRepair?: RelationshipRepairAction;
   onRetryMessage?: (messageId: string, retryText: string) => void;
 }
 

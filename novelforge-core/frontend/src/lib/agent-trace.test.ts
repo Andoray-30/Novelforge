@@ -78,6 +78,23 @@ describe('agent trace normalization', () => {
           enriched_relationship_draft: { conflict: 'truth versus safety' },
         },
       ],
+      relationship_repair_queue: [
+        {
+          relationship_id: 'rel-queue',
+          title: 'A/C repair',
+          source: 'A',
+          target: 'C',
+          core: 'turn the weak bond into a costly plot choice',
+          scene_potential: ['C demands a price'],
+          missing_signals: ['dependency', 'plot_function'],
+          usable_signals: ['conflict'],
+          queue_rank: 1,
+          queue_score: 88,
+          queue_reasons: ['低信息关系', '覆盖 3 个章节'],
+          queue_status: 'pending',
+          relationship_enriched: false,
+        },
+      ],
     });
 
     expect(trace?.used_assets[0]).toMatchObject({
@@ -96,6 +113,14 @@ describe('agent trace normalization', () => {
       target: 'B',
       missing_signals: ['emotional_tension'],
       enriched_relationship_draft: { conflict: 'truth versus safety' },
+    });
+    expect(trace?.relationship_repair_queue[0]).toMatchObject({
+      relationship_id: 'rel-queue',
+      queue_rank: 1,
+      queue_score: 88,
+      queue_reasons: ['低信息关系', '覆盖 3 个章节'],
+      queue_status: 'pending',
+      relationship_enriched: false,
     });
   });
 });

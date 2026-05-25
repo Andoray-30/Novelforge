@@ -68,6 +68,11 @@ export type AgentRelationshipRepairSuggestion = {
   usable_signals: string[];
   weak_spots?: string;
   enriched_relationship_draft?: Record<string, unknown>;
+  queue_rank?: number;
+  queue_score?: number;
+  queue_reasons?: string[];
+  queue_status?: 'pending' | 'saved' | 'updated' | 'skipped' | string;
+  relationship_enriched?: boolean;
 };
 
 export type AgentTrace = {
@@ -86,6 +91,7 @@ export type AgentTrace = {
     creative_diagnostics?: AgentCreativeDiagnostics;
   }>;
   relationship_quality_report?: AgentRelationshipQualityReport;
+  relationship_repair_queue: AgentRelationshipRepairSuggestion[];
   relationship_repair_suggestions: AgentRelationshipRepairSuggestion[];
   degraded: boolean;
   fallback_reason?: string;
@@ -180,6 +186,11 @@ function normalizeRelationshipRepairSuggestion(value: unknown): AgentRelationshi
     usable_signals: asStringArray(value.usable_signals),
     weak_spots: asString(value.weak_spots) || undefined,
     enriched_relationship_draft: enrichedDraft,
+    queue_rank: asNumber(value.queue_rank),
+    queue_score: asNumber(value.queue_score),
+    queue_reasons: asStringArray(value.queue_reasons),
+    queue_status: asString(value.queue_status) || undefined,
+    relationship_enriched: asBoolean(value.relationship_enriched),
   };
   return suggestion.title || suggestion.source || suggestion.target || suggestion.core ? suggestion : undefined;
 }
@@ -243,6 +254,11 @@ export function normalizeAgentTrace(value: unknown): AgentTrace | undefined {
         .map(normalizeRelationshipRepairSuggestion)
         .filter((item): item is AgentRelationshipRepairSuggestion => Boolean(item))
     : [];
+  const relationshipRepairQueue = Array.isArray(value.relationship_repair_queue)
+    ? value.relationship_repair_queue
+        .map(normalizeRelationshipRepairSuggestion)
+        .filter((item): item is AgentRelationshipRepairSuggestion => Boolean(item))
+    : [];
 
   const planSummary = asString(value.plan_summary);
   if (!planSummary && toolCalls.length === 0 && usedAssets.length === 0 && chapterSnippets.length === 0) {
@@ -259,6 +275,7 @@ export function normalizeAgentTrace(value: unknown): AgentTrace | undefined {
     retrieval_coverage: retrievalCoverage,
     creative_diagnostics: creativeDiagnostics,
     relationship_quality_report: normalizeRelationshipQualityReport(value.relationship_quality_report),
+    relationship_repair_queue: relationshipRepairQueue,
     relationship_repair_suggestions: relationshipRepairSuggestions,
     degraded: asBoolean(value.degraded),
     fallback_reason: asString(value.fallback_reason) || undefined,

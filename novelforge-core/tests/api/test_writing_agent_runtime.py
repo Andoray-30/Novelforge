@@ -289,6 +289,83 @@ def test_enriched_relationships_are_prioritized_and_marked_in_trace() -> None:
     assert trace["relationship_repair_suggestions"][0]["relationship_id"] == "rel-thin"
 
 
+def test_relationship_repair_queue_ranks_core_thin_relationships() -> None:
+    manager, storage = build_manager()
+    relationships = [
+        build_item(
+            "rel-core",
+            title="主角 -> 宿敌",
+            content_type=ContentType.RELATIONSHIP,
+            content="主角和宿敌互相隐瞒真相，冲突不断。",
+            extracted_data={
+                "source": "主角",
+                "target": "宿敌",
+                "strength": 10,
+                "evidence": ["冲突证据"] * 5,
+                "chapter_references": ["第一章", "第二章", "第三章"],
+            },
+        ),
+        build_item(
+            "rel-side",
+            title="路人甲 -> 路人乙",
+            content_type=ContentType.RELATIONSHIP,
+            content="旧识。",
+            extracted_data={"source": "路人甲", "target": "路人乙", "strength": 2},
+        ),
+        build_item(
+            "rel-enriched",
+            title="已补强关系",
+            content_type=ContentType.RELATIONSHIP,
+            content="dependency conflict emotional_tension plot_function scene_potential",
+            extracted_data={
+                "source": "A",
+                "target": "B",
+                "quality_flags": ["relationship_enriched"],
+                "repair_status": "confirmed",
+            },
+        ),
+    ]
+    for item in relationships:
+        run(manager.create_content(item))
+    runtime = WritingAgentRuntime(manager, storage)
+    scope = AgentScope(session_id="session-a", selected_novel_id="novel-a")
+
+    observation = run(runtime.build_relationship_repair_queue(scope, {"limit": 2}))
+
+    ids = [item["id"] for item in observation.items]
+    assert ids[0] == "rel-core"
+    assert "rel-enriched" not in ids
+    assert observation.items[0]["repair_suggestion"]["queue_rank"] == 1
+    assert observation.items[0]["repair_suggestion"]["queue_score"] > observation.items[1]["repair_suggestion"]["queue_score"]
+    assert observation.items[0]["repair_suggestion"]["queue_reasons"]
+    assert observation.items[0]["repair_suggestion"]["queue_status"] == "pending"
+
+
+def test_relationship_repair_queue_is_exposed_in_trace_without_duplicate_suggestion_list() -> None:
+    manager, storage = build_manager()
+    run(
+        manager.create_content(
+            build_item(
+                "rel-thin",
+                title="A -> B",
+                content_type=ContentType.RELATIONSHIP,
+                content="old friends",
+                extracted_data={"source": "A", "target": "B", "strength": 8, "evidence": ["one", "two"]},
+            )
+        )
+    )
+    runtime = WritingAgentRuntime(manager, storage)
+    scope = AgentScope(session_id="session-a", selected_novel_id="novel-a")
+    observation = run(runtime.build_relationship_repair_queue(scope, {"limit": 3}))
+
+    trace = runtime._build_trace({"plan_summary": "test"}, [observation], degraded=False)
+
+    assert trace["relationship_repair_queue"]
+    assert trace["relationship_repair_queue"][0]["relationship_id"] == "rel-thin"
+    assert trace["relationship_repair_queue"][0]["queue_rank"] == 1
+    assert trace["relationship_repair_suggestions"] == []
+
+
 def test_relationship_repair_helper_uses_related_characters_and_chapter_snippets() -> None:
     manager, storage = build_manager()
     run(

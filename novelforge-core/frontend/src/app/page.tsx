@@ -1067,7 +1067,11 @@ export default function ChatPage() {
     });
   }, [currentSessionId, messagesMap, updateMessage]);
 
-  const findRelationshipRepairSuggestion = useCallback((messageId: string, suggestionIndex: number) => {
+  const findRelationshipRepairSuggestion = useCallback((
+    messageId: string,
+    suggestionIndex: number,
+    source: 'suggestions' | 'queue' = 'suggestions',
+  ) => {
     let targetSessionId = currentSessionId || '';
     let messages = targetSessionId ? (messagesMap.get(targetSessionId) ?? []) : [];
     if (!messages.some((m) => m.id === messageId)) {
@@ -1081,15 +1085,21 @@ export default function ChatPage() {
       });
     }
     const msg = messages.find((m) => m.id === messageId);
-    const suggestion = msg?.agentTrace?.relationship_repair_suggestions?.[suggestionIndex];
+    const suggestion = source === 'queue'
+      ? msg?.agentTrace?.relationship_repair_queue?.[suggestionIndex]
+      : msg?.agentTrace?.relationship_repair_suggestions?.[suggestionIndex];
     return { targetSessionId, suggestion };
   }, [currentSessionId, messagesMap]);
 
-  const handleSaveRelationshipRepairDraft = useCallback(async (messageId: string, suggestionIndex: number) => {
-    const { targetSessionId, suggestion } = findRelationshipRepairSuggestion(messageId, suggestionIndex);
+  const handleSaveRelationshipRepairDraft = useCallback(async (
+    messageId: string,
+    suggestionIndex: number,
+    source: 'suggestions' | 'queue' = 'suggestions',
+  ) => {
+    const { targetSessionId, suggestion } = findRelationshipRepairSuggestion(messageId, suggestionIndex, source);
     if (!targetSessionId || !suggestion) {
       showSaveNotification('保存失败：没有找到关系修复建议', 3200);
-      return;
+      return false;
     }
     try {
       const result = await saveRelationshipRepairDraft({
@@ -1099,17 +1109,23 @@ export default function ChatPage() {
       });
       showSaveNotification(`已保存关系补强草稿：${result.contentId}`, 3200);
       refreshProjectAssets();
+      return true;
     } catch (err) {
       console.error('保存关系补强草稿失败:', err);
       showSaveNotification('保存关系补强草稿失败，请稍后重试', 3200);
+      return false;
     }
   }, [currentNovelParentId, findRelationshipRepairSuggestion, refreshProjectAssets, showSaveNotification]);
 
-  const handleUpdateRelationshipRepair = useCallback(async (messageId: string, suggestionIndex: number) => {
-    const { targetSessionId, suggestion } = findRelationshipRepairSuggestion(messageId, suggestionIndex);
+  const handleUpdateRelationshipRepair = useCallback(async (
+    messageId: string,
+    suggestionIndex: number,
+    source: 'suggestions' | 'queue' = 'suggestions',
+  ) => {
+    const { targetSessionId, suggestion } = findRelationshipRepairSuggestion(messageId, suggestionIndex, source);
     if (!targetSessionId || !suggestion) {
       showSaveNotification('更新失败：没有找到关系修复建议', 3200);
-      return;
+      return false;
     }
     try {
       const result = await updateRelationshipWithRepair({
@@ -1119,9 +1135,11 @@ export default function ChatPage() {
       });
       showSaveNotification(`已更新原关系资产：${result.contentId}`, 3200);
       refreshProjectAssets();
+      return true;
     } catch (err) {
       console.error('更新关系资产失败:', err);
       showSaveNotification(err instanceof Error ? err.message : '更新关系资产失败，请稍后重试', 3600);
+      return false;
     }
   }, [currentNovelParentId, findRelationshipRepairSuggestion, refreshProjectAssets, showSaveNotification]);
 
