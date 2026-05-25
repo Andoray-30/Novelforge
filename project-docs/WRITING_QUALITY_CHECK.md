@@ -450,6 +450,7 @@ Implemented behavior:
   - enriched / confirmed status as a default penalty
 - Trace now exposes `relationship_repair_queue`.
 - Frontend displays a "core relationship repair queue" with queue rank, score, reasons, and per-card state.
+- Frontend also shows a lightweight before/projected-after relationship quality comparison for the queue.
 - Each queue item can be saved as a repair draft, confirmed into the original relationship, or skipped.
 
 Queue selected in live validation:

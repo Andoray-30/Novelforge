@@ -478,6 +478,26 @@ function AgentTracePanel({
                 全局关系网络仍偏薄，优先补齐：{topMissingSignals(relationshipReport.missing_signals)}
               </div>
             ) : null}
+            {trace.relationship_repair_queue_report?.before && trace.relationship_repair_queue_report.projected_after ? (
+              <div style={{
+                borderRadius: 8,
+                border: '1px solid rgba(16, 185, 129, 0.24)',
+                background: 'rgba(16, 185, 129, 0.08)',
+                padding: '8px 10px',
+                color: 'var(--text-muted)',
+                fontSize: 11,
+                lineHeight: 1.5,
+              }}>
+                <div style={{ color: '#86efac', fontWeight: 700 }}>预计修复前后</div>
+                <div>
+                  修复前：有张力 {trace.relationship_repair_queue_report.before.tension_relationships} · 低信息 {trace.relationship_repair_queue_report.before.low_information_relationships} · 缺剧情功能 {trace.relationship_repair_queue_report.before.missing_plot_function_relationships}
+                </div>
+                <div>
+                  预计后：有张力 {trace.relationship_repair_queue_report.projected_after.tension_relationships} · 低信息 {trace.relationship_repair_queue_report.projected_after.low_information_relationships} · 缺剧情功能 {trace.relationship_repair_queue_report.projected_after.missing_plot_function_relationships}
+                </div>
+                {trace.relationship_repair_queue_report.note ? <div>{trace.relationship_repair_queue_report.note}</div> : null}
+              </div>
+            ) : null}
             {trace.relationship_repair_queue.map((suggestion, index) => (
               <RepairSuggestionCard
                 key={`queue-${suggestion.relationship_id ?? suggestion.title}-${index}`}

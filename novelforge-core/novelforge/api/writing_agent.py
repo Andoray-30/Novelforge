@@ -1746,6 +1746,7 @@ class WritingAgentRuntime:
         diagnostics: List[Dict[str, Any]] = []
         relationship_repair_suggestions: List[Dict[str, Any]] = []
         relationship_repair_queue: List[Dict[str, Any]] = []
+        relationship_repair_queue_assets: List[Dict[str, Any]] = []
         for step_index, observation in enumerate(observations, start=1):
             is_last_step = step_index == len(observations)
             tool_calls.append(
@@ -1765,6 +1766,15 @@ class WritingAgentRuntime:
                     repair = item.get("repair_suggestion")
                     if isinstance(repair, dict):
                         relationship_repair_queue.append(repair)
+                    if item.get("id"):
+                        relationship_repair_queue_assets.append(
+                            {
+                                "id": item.get("id"),
+                                "type": "relationship",
+                                "title": item.get("title"),
+                                "creative_diagnostics": item.get("creative_diagnostics"),
+                            }
+                        )
                     if item.get("creative_diagnostics"):
                         diagnostics.append(
                             {
@@ -1822,6 +1832,26 @@ class WritingAgentRuntime:
         }
         relationship_assets = [item for item in used_assets if item.get("type") == "relationship"]
         relationship_quality_report = _relationship_quality_report(relationship_assets)
+        relationship_repair_queue_report = None
+        if relationship_repair_queue_assets:
+            queue_ids = {item.get("id") for item in relationship_repair_queue_assets}
+            base_assets = [item for item in relationship_assets if item.get("id") not in queue_ids]
+            projected_assets: List[Dict[str, Any]] = []
+            for item in relationship_repair_queue_assets:
+                diagnostics_copy = dict(item.get("creative_diagnostics") or {})
+                missing = list(diagnostics_copy.get("missing_signals") or diagnostics_copy.get("missing") or [])
+                usable = list(diagnostics_copy.get("usable") or [])
+                diagnostics_copy["usable"] = list(dict.fromkeys([*usable, *missing]))
+                diagnostics_copy["missing"] = []
+                diagnostics_copy["missing_signals"] = []
+                diagnostics_copy["score"] = max(int(diagnostics_copy.get("score") or 0), len(diagnostics_copy["usable"]))
+                diagnostics_copy["relationship_creative_readiness"] = "strong"
+                projected_assets.append({**item, "creative_diagnostics": diagnostics_copy})
+            relationship_repair_queue_report = {
+                "before": _relationship_quality_report([*base_assets, *relationship_repair_queue_assets]),
+                "projected_after": _relationship_quality_report([*base_assets, *projected_assets]),
+                "note": "预计值基于队列建议补齐缺失关系信号；真实结果以用户保存/确认后的下一轮 trace 为准。",
+            }
         retrieval_issues = []
         if coverage_counts["characters"] == 0:
             retrieval_issues.append("未找到足够角色资产")
@@ -1848,6 +1878,7 @@ class WritingAgentRuntime:
             "creative_diagnostics": diagnostics[:12],
             "relationship_quality_report": relationship_quality_report,
             "relationship_repair_queue": relationship_repair_queue[:3],
+            "relationship_repair_queue_report": relationship_repair_queue_report,
             "relationship_repair_suggestions": relationship_repair_suggestions[:5],
             "degraded": degraded,
             "fallback_reason": fallback_reason,
@@ -1870,6 +1901,7 @@ class WritingAgentRuntime:
             "creative_diagnostics": [],
             "relationship_quality_report": _relationship_quality_report([]),
             "relationship_repair_queue": [],
+            "relationship_repair_queue_report": None,
             "relationship_repair_suggestions": [],
             "degraded": degraded,
             "fallback_reason": None,

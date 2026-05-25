@@ -95,6 +95,25 @@ describe('agent trace normalization', () => {
           relationship_enriched: false,
         },
       ],
+      relationship_repair_queue_report: {
+        before: {
+          total_relationships: 3,
+          tension_relationships: 1,
+          low_information_relationships: 2,
+          missing_plot_function_relationships: 2,
+          missing_signals: { dependency: 2 },
+          status: 'thin',
+        },
+        projected_after: {
+          total_relationships: 3,
+          tension_relationships: 3,
+          low_information_relationships: 0,
+          missing_plot_function_relationships: 0,
+          missing_signals: {},
+          status: 'usable',
+        },
+        note: 'projected',
+      },
     });
 
     expect(trace?.used_assets[0]).toMatchObject({
@@ -121,6 +140,11 @@ describe('agent trace normalization', () => {
       queue_reasons: ['低信息关系', '覆盖 3 个章节'],
       queue_status: 'pending',
       relationship_enriched: false,
+    });
+    expect(trace?.relationship_repair_queue_report?.projected_after).toMatchObject({
+      tension_relationships: 3,
+      low_information_relationships: 0,
+      status: 'usable',
     });
   });
 });

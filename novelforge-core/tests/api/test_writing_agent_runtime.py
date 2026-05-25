@@ -369,6 +369,8 @@ def test_relationship_repair_queue_is_exposed_in_trace_without_duplicate_suggest
     assert trace["relationship_repair_queue"]
     assert trace["relationship_repair_queue"][0]["relationship_id"] == "rel-thin"
     assert trace["relationship_repair_queue"][0]["queue_rank"] == 1
+    assert trace["relationship_repair_queue_report"]["before"]["low_information_relationships"] >= 1
+    assert trace["relationship_repair_queue_report"]["projected_after"]["low_information_relationships"] == 0
     assert trace["relationship_repair_suggestions"] == []
 
 

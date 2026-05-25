@@ -92,6 +92,11 @@ export type AgentTrace = {
   }>;
   relationship_quality_report?: AgentRelationshipQualityReport;
   relationship_repair_queue: AgentRelationshipRepairSuggestion[];
+  relationship_repair_queue_report?: {
+    before?: AgentRelationshipQualityReport;
+    projected_after?: AgentRelationshipQualityReport;
+    note?: string;
+  };
   relationship_repair_suggestions: AgentRelationshipRepairSuggestion[];
   degraded: boolean;
   fallback_reason?: string;
@@ -259,6 +264,11 @@ export function normalizeAgentTrace(value: unknown): AgentTrace | undefined {
         .map(normalizeRelationshipRepairSuggestion)
         .filter((item): item is AgentRelationshipRepairSuggestion => Boolean(item))
     : [];
+  const relationshipRepairQueueReport = isRecord(value.relationship_repair_queue_report) ? {
+    before: normalizeRelationshipQualityReport(value.relationship_repair_queue_report.before),
+    projected_after: normalizeRelationshipQualityReport(value.relationship_repair_queue_report.projected_after),
+    note: asString(value.relationship_repair_queue_report.note) || undefined,
+  } : undefined;
 
   const planSummary = asString(value.plan_summary);
   if (!planSummary && toolCalls.length === 0 && usedAssets.length === 0 && chapterSnippets.length === 0) {
@@ -276,6 +286,7 @@ export function normalizeAgentTrace(value: unknown): AgentTrace | undefined {
     creative_diagnostics: creativeDiagnostics,
     relationship_quality_report: normalizeRelationshipQualityReport(value.relationship_quality_report),
     relationship_repair_queue: relationshipRepairQueue,
+    relationship_repair_queue_report: relationshipRepairQueueReport,
     relationship_repair_suggestions: relationshipRepairSuggestions,
     degraded: asBoolean(value.degraded),
     fallback_reason: asString(value.fallback_reason) || undefined,
