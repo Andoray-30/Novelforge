@@ -24,6 +24,8 @@ export interface Message {
   content: string;
   timestamp: Date;
   isStreaming?: boolean;
+  retryText?: string;
+  errorKind?: 'transient_provider' | 'general';
   thinking?: string;
   agentTrace?: AgentTrace;
   assetRequest?: {
@@ -73,6 +75,7 @@ interface MessageBubbleProps {
   onRejectSaveAsset?: (messageId: string, requestIndex: number) => void;
   onChangeSaveAssetDestination?: (messageId: string, requestIndex: number, destination: ChapterSaveDestination) => void;
   onSelectSaveAssetTarget?: (messageId: string, requestIndex: number, targetId: string) => void;
+  onRetryMessage?: (messageId: string, retryText: string) => void;
 }
 
 function escapeHtml(value: string): string {
@@ -287,6 +290,7 @@ export function MessageBubble({
   onRejectSaveAsset,
   onChangeSaveAssetDestination,
   onSelectSaveAssetTarget,
+  onRetryMessage,
 }: MessageBubbleProps) {
   const isUser = message.role === 'user';
 
@@ -384,6 +388,26 @@ export function MessageBubble({
           />
         )}
       </div>
+
+      {!isUser && message.retryText ? (
+        <button
+          type="button"
+          onClick={() => onRetryMessage?.(message.id, message.retryText!)}
+          style={{
+            maxWidth: '85%',
+            alignSelf: 'flex-start',
+            border: '1px solid rgba(99, 102, 241, 0.35)',
+            background: 'rgba(99, 102, 241, 0.12)',
+            color: '#c4b5fd',
+            borderRadius: 8,
+            padding: '6px 12px',
+            fontSize: 12,
+            cursor: onRetryMessage ? 'pointer' : 'default',
+          }}
+        >
+          重试本次请求
+        </button>
+      ) : null}
 
       {message.artifact ? (
         <button
@@ -838,6 +862,7 @@ interface MessageListProps {
   onRejectSaveAsset?: (messageId: string, requestIndex: number) => void;
   onChangeSaveAssetDestination?: (messageId: string, requestIndex: number, destination: ChapterSaveDestination) => void;
   onSelectSaveAssetTarget?: (messageId: string, requestIndex: number, targetId: string) => void;
+  onRetryMessage?: (messageId: string, retryText: string) => void;
 }
 
 export function MessageList({
@@ -849,6 +874,7 @@ export function MessageList({
   onRejectSaveAsset,
   onChangeSaveAssetDestination,
   onSelectSaveAssetTarget,
+  onRetryMessage,
 }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const lastMessage = messages[messages.length - 1];
@@ -892,6 +918,7 @@ export function MessageList({
           onRejectSaveAsset={onRejectSaveAsset}
           onChangeSaveAssetDestination={onChangeSaveAssetDestination}
           onSelectSaveAssetTarget={onSelectSaveAssetTarget}
+          onRetryMessage={onRetryMessage}
         />
       ))}
     </div>

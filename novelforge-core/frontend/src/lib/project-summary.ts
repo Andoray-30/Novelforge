@@ -72,11 +72,13 @@ export function buildProjectStatsLabel(stats?: ProjectAssetStats): string {
 }
 
 export function resolveProjectStatus(
-  session: Pick<Session, 'preview' | 'messageCount' | 'metadata'>,
+  session: Pick<Session, 'title' | 'preview' | 'messageCount' | 'metadata'>,
   stats?: ProjectAssetStats,
 ): ProjectStatus {
   if (session.metadata?.hidden_by_default === true || session.metadata?.archived === true) return 'archived';
   const source = String(session.metadata?.source || session.metadata?.type || '').toLowerCase();
+  const visibleText = `${session.title || ''} ${session.preview || ''}`.toLowerCase();
+  if (visibleText.includes('agent trace') || visibleText.includes('mock response')) return 'archived';
   if (source.includes('smoke') || source.includes('test')) return 'archived';
   if (hasEffectiveAssets(stats)) return 'usable_assets';
   if (isNovelContainerOnly(stats)) return 'novel_container';

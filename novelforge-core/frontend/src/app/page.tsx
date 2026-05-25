@@ -1269,15 +1269,24 @@ export default function ChatPage() {
       updateSessionPreview(targetSessionId, displayContent, text.slice(0, 20));
     } catch (error) {
       console.error(error);
-      const message = error instanceof Error ? error.message : '发送消息失败';
+      const { message, transient } = formatChatErrorMessage(error);
       updateMessage(targetSessionId, assistantMessageId, {
         content: `请求失败：${message}`,
         thinking: '',
         isStreaming: false,
+        retryText: transient ? text : undefined,
+        errorKind: transient ? 'transient_provider' : 'general',
       });
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  const handleRetryMessage = (messageId: string, retryText: string) => {
+    if (!retryText.trim() || isGenerating) {
+      return;
+    }
+    void handleSendMessage(retryText, currentSessionId || undefined, aiMode);
   };
 
   // 全局加载判断
@@ -1617,6 +1626,7 @@ export default function ChatPage() {
                     onRejectSaveAsset={handleRejectSaveAsset}
                     onChangeSaveAssetDestination={handleChangeSaveAssetDestination}
                     onSelectSaveAssetTarget={handleSelectSaveAssetTarget}
+                    onRetryMessage={handleRetryMessage}
                   />
                 {isGenerating && (
                   <div style={{ display: 'flex', alignItems: 'center', padding: '16px 40px', color: 'var(--text-muted)' }}>
@@ -1969,6 +1979,25 @@ function formatContentTypeLabel(type: ContentType | string): string {
     default:
       return String(type);
   }
+}
+
+function isTransientProviderError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /HTTP\s+(500|502|503|504)|timeout|timed?\s*out|socket|ECONNRESET|network|fetch failed/i.test(message);
+}
+
+function formatChatErrorMessage(error: unknown): { message: string; transient: boolean } {
+  const transient = isTransientProviderError(error);
+  if (transient) {
+    return {
+      transient: true,
+      message: '上游模型服务暂时不可用或响应超时。可以点击“重试本次请求”，或切换到快速模式后再试；系统不会自动重复保存任何内容。',
+    };
+  }
+  return {
+    transient: false,
+    message: error instanceof Error ? error.message : '发送消息失败',
+  };
 }
 
 function buildFocusedAssetFromContentItem(item: ContentItem): FocusedAsset {
