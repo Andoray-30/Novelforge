@@ -131,12 +131,24 @@ describe('save asset requests', () => {
     expect(request.metadata.title).toBe('序章');
     expect(request.metadata.session_id).toBe('session-a');
     expect(request.metadata.parent_id).toBe('novel-a');
-    expect(request.metadata.tags).toEqual(['chapter', 'project-session-a', 'ai-suggested']);
+    expect(request.metadata.tags).toEqual(['chapter', 'project-session-a', 'ai-suggested', 'ai-generated', 'ai_draft']);
     expect(request.content).toBe('月光落在旧城的天台上，她第一次听见时间回潮。');
-    expect(request.extracted_data).toEqual({
+    expect(request.extracted_data).toMatchObject({
       title: '序章',
       chapter_title: '序章',
+      display_title: '序章',
+      original_title: '序章',
       content: '月光落在旧城的天台上，她第一次听见时间回潮。',
+      source_type: 'ai_generated',
+      source: 'ai_save_asset',
+      generated_by_ai: true,
+      save_destination: 'ai_draft',
+      should_replace_existing: false,
+      chapter_role: '序章',
+      volume_index: 1,
+      segment_index: 0,
+      is_decorative: false,
+      quality_flags: expect.arrayContaining(['ai_draft', 'short_chapter']),
       characters: ['辉夜'],
       locations: ['旧城天台'],
     });
@@ -145,5 +157,53 @@ describe('save asset requests', () => {
       locations: ['旧城天台'],
       worlds: [],
     });
+  });
+
+  it('defaults old chapter save requests to AI drafts with compatible metadata', () => {
+    const request = buildSaveAssetContentRequest({
+      request: {
+        type: 'chapter',
+        title: 'Test Chapter',
+        data: { content: 'A quiet test draft.' },
+      },
+      sessionId: 'session-a',
+      parentId: 'novel-a',
+    });
+
+    expect(request.extracted_data).toMatchObject({
+      source_type: 'ai_generated',
+      save_destination: 'ai_draft',
+      chapter_role: '正文',
+      word_count: 4,
+      quality_flags: expect.arrayContaining(['ai_draft', 'short_chapter']),
+    });
+    expect(request.metadata.tags).toEqual(['chapter', 'project-session-a', 'ai-suggested', 'ai-generated', 'ai_draft']);
+  });
+
+  it('builds alternate version chapter metadata without pretending it is imported body', () => {
+    const request = buildSaveAssetContentRequest({
+      request: {
+        type: 'chapter',
+        title: 'Rewrite Candidate',
+        save_destination: 'alternate_version',
+        chapter_role: '正文',
+        data: {
+          content: 'The candidate opening moves with sharper tension.',
+          characters: ['Ari'],
+        },
+      },
+      sessionId: 'session-a',
+      parentId: 'novel-a',
+    });
+
+    expect(request.extracted_data).toMatchObject({
+      source_type: 'ai_generated',
+      save_destination: 'alternate_version',
+      generated_by_ai: true,
+      chapter_role: '正文',
+      quality_flags: expect.arrayContaining(['alternate_version']),
+    });
+    expect(request.metadata.tags).toContain('alternate_version');
+    expect(request.metadata.tags).not.toContain('imported');
   });
 });

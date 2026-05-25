@@ -1,4 +1,10 @@
 import { getContentAssetPayload, getContentAssetText } from '@/lib/content-contract';
+import {
+  getChapterSaveDestinationLabel,
+  getDestinationSortOffset,
+  normalizeChapterSaveDestination,
+  type ChapterSaveDestination,
+} from '@/lib/chapter-save-destinations';
 import type { ContentItem } from '@/types';
 
 export type ChapterSourceType = 'imported' | 'system_split' | 'user_created' | 'ai_generated' | 'unknown';
@@ -8,6 +14,8 @@ export interface ChapterDirectoryMetadata {
   originalTitle: string;
   sourceType: ChapterSourceType;
   sourceLabel: string;
+  saveDestination: ChapterSaveDestination | null;
+  saveDestinationLabel: string | null;
   chapterRole: string;
   roleLabel: string;
   volumeIndex: number;
@@ -185,6 +193,18 @@ function qualityFlagLabel(flag: string): string {
       return '短章节';
     case 'system_split':
       return '拆分片段';
+    case 'ai_draft':
+      return 'AI 草稿';
+    case 'alternate_version':
+      return '候选版本';
+    case 'formal_prologue':
+      return '正式序章';
+    case 'formal_body':
+      return '正式正文';
+    case 'extra':
+      return '番外';
+    case 'ai_update_existing':
+      return '更新已有章节';
     default:
       return flag.replace(/_/g, ' ');
   }
@@ -226,6 +246,10 @@ export function resolveChapterDirectoryMetadata(item: ContentItem, fallbackIndex
       ?? 0,
   );
   const sourceType = normalizeSourceType(item, payload, inferredSegmentIndex);
+  const rawSaveDestination = asString(payload.save_destination);
+  const saveDestination = sourceType === 'ai_generated' || rawSaveDestination
+    ? normalizeChapterSaveDestination(rawSaveDestination)
+    : null;
   const chapterRole = normalizeRole(asString(payload.chapter_role), originalTitle, content);
   const wordCount = Math.max(0, Math.round(asNumber(payload.word_count) ?? estimateWordCount(content)));
   const rawQualityFlags = asStringArray(payload.quality_flags);
@@ -252,6 +276,8 @@ export function resolveChapterDirectoryMetadata(item: ContentItem, fallbackIndex
     originalTitle,
     sourceType,
     sourceLabel: sourceLabel(sourceType),
+    saveDestination,
+    saveDestinationLabel: saveDestination ? getChapterSaveDestinationLabel(saveDestination) : null,
     chapterRole,
     roleLabel: chapterRole,
     volumeIndex,
@@ -261,7 +287,7 @@ export function resolveChapterDirectoryMetadata(item: ContentItem, fallbackIndex
     wordCount,
     qualityFlags,
     qualityFlagLabels: qualityFlags.map(qualityFlagLabel),
-    sortKey: [volumeIndex, chapterIndex, segmentIndex, fallbackIndex],
+    sortKey: [volumeIndex, chapterIndex + getDestinationSortOffset(saveDestination), segmentIndex, fallbackIndex],
     isSplitSegment,
     splitLabel,
     structureLabel: `第 ${volumeIndex} 卷 · 第 ${chapterIndex} 章${splitLabel ? ` · ${splitLabel}` : ''}`,

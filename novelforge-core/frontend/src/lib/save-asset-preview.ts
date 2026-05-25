@@ -1,4 +1,5 @@
 import type { SaveAssetRequest } from '@/lib/chat-parser';
+import { getChapterSaveDestinationLabel, normalizeChapterSaveDestination } from '@/lib/chapter-save-destinations';
 
 export type SaveAssetPreviewRow = {
   label: string;
@@ -43,9 +44,19 @@ const PRIMARY_FIELDS = [
   'relative_time',
 ];
 
-export function buildSaveAssetPreviewRows(request: Pick<SaveAssetRequest, 'data'>, maxRows = 5): SaveAssetPreviewRow[] {
+export function buildSaveAssetPreviewRows(
+  request: Pick<SaveAssetRequest, 'type' | 'data' | 'save_destination' | 'id' | 'should_replace_existing'>,
+  maxRows = 5,
+): SaveAssetPreviewRow[] {
   const rows: SaveAssetPreviewRow[] = [];
   const used = new Set<string>();
+
+  if (request.type === 'chapter') {
+    rows.push({
+      label: '保存位置',
+      value: getChapterSaveDestinationLabel(resolvePreviewDestination(request)),
+    });
+  }
 
   for (const field of PRIMARY_FIELDS) {
     const row = buildRow(field, request.data[field]);
@@ -59,7 +70,14 @@ export function buildSaveAssetPreviewRows(request: Pick<SaveAssetRequest, 'data'
   }
 
   for (const [field, value] of Object.entries(request.data)) {
-    if (used.has(field) || field === 'id' || field === 'contentItemId' || field === 'content_item_id') {
+    if (
+      used.has(field)
+      || field === 'id'
+      || field === 'contentItemId'
+      || field === 'content_item_id'
+      || field === 'save_destination'
+      || field === 'should_replace_existing'
+    ) {
       continue;
     }
 
@@ -78,6 +96,22 @@ export function buildSaveAssetPreviewRows(request: Pick<SaveAssetRequest, 'data'
 export function getSaveAssetOperationLabel(request: Pick<SaveAssetRequest, 'id' | 'data'>): string {
   const id = request.id ?? request.data.id ?? request.data.contentItemId ?? request.data.content_item_id;
   return typeof id === 'string' && id.trim().length > 0 ? '更新已有资产' : '新增资产';
+}
+
+export function getSaveAssetWarningLabel(
+  request: Pick<SaveAssetRequest, 'type' | 'id' | 'data' | 'should_replace_existing'>,
+): string | null {
+  if (request.type !== 'chapter') {
+    return null;
+  }
+
+  const id = request.id ?? request.data.id ?? request.data.contentItemId ?? request.data.content_item_id;
+  const shouldReplace = request.should_replace_existing === true || request.data.should_replace_existing === true;
+  if ((typeof id === 'string' && id.trim().length > 0) || shouldReplace) {
+    return '注意：这会更新已有章节，请确认你确实要覆盖原内容。';
+  }
+
+  return null;
 }
 
 function buildRow(field: string, value: unknown): SaveAssetPreviewRow | null {
@@ -122,4 +156,16 @@ function normalizeValue(value: unknown): string | null {
 function clip(value: string, maxLength = 120): string {
   const normalized = value.replace(/\s+/g, ' ').trim();
   return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
+}
+
+function resolvePreviewDestination(
+  request: Pick<SaveAssetRequest, 'save_destination' | 'data' | 'id' | 'should_replace_existing'>,
+) {
+  const explicit = request.save_destination ?? request.data.save_destination;
+  const hasTarget = typeof request.id === 'string'
+    || typeof request.data.id === 'string'
+    || typeof request.data.contentItemId === 'string'
+    || typeof request.data.content_item_id === 'string';
+  const shouldReplace = request.should_replace_existing === true || request.data.should_replace_existing === true;
+  return normalizeChapterSaveDestination(explicit, hasTarget || shouldReplace ? 'update_existing' : 'ai_draft');
 }

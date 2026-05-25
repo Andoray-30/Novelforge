@@ -254,6 +254,9 @@ export interface SaveAssetRequest {
   title: string;
   data: Record<string, unknown>;
   id?: string;
+  save_destination?: string;
+  chapter_role?: string;
+  should_replace_existing?: boolean;
 }
 
 export function parseAssetRequest(text: string): AssetRequestDirective | null {
@@ -306,17 +309,38 @@ export function parseSaveAssetRequests(text: string): SaveAssetRequest[] {
       title?: unknown;
       data?: unknown;
       id?: unknown;
+      save_destination?: unknown;
+      chapter_role?: unknown;
+      should_replace_existing?: unknown;
     }>(match[1].trim(), {});
 
     const type = typeof parsed.type === 'string' && VALID_SAVE_ASSET_TYPES.has(parsed.type) ? parsed.type : null;
     const title = typeof parsed.title === 'string' && parsed.title.trim().length > 0 ? parsed.title.trim() : null;
     const data = parsed.data && typeof parsed.data === 'object' ? parsed.data as Record<string, unknown> : null;
     const id = typeof parsed.id === 'string' && parsed.id.trim().length > 0 ? parsed.id.trim() : undefined;
+    const saveDestination = typeof parsed.save_destination === 'string' && parsed.save_destination.trim().length > 0
+      ? parsed.save_destination.trim()
+      : undefined;
+    const chapterRole = typeof parsed.chapter_role === 'string' && parsed.chapter_role.trim().length > 0
+      ? parsed.chapter_role.trim()
+      : undefined;
+    const shouldReplaceExisting = typeof parsed.should_replace_existing === 'boolean'
+      ? parsed.should_replace_existing
+      : undefined;
 
     if (type && title && data) {
       const request: SaveAssetRequest = { type, title, data };
       if (id) {
         request.id = id;
+      }
+      if (saveDestination) {
+        request.save_destination = saveDestination;
+      }
+      if (chapterRole) {
+        request.chapter_role = chapterRole;
+      }
+      if (shouldReplaceExisting !== undefined) {
+        request.should_replace_existing = shouldReplaceExisting;
       }
       results.push(request);
     }

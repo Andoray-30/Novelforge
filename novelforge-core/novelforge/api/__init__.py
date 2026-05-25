@@ -543,9 +543,13 @@ def _build_chat_system_prompt(context: Optional[Dict[str, Any]] = None) -> str:
 
     prompt_parts.append(
         "如果你建议新增或修改项目资产（角色、世界观、时间线、关系、大纲、章节/序章），请在回答末尾追加一个或多个"
-        " <save_asset>{\"type\":\"chapter\",\"title\":\"序章\",\"data\":{\"content\":\"...\"}}</save_asset> 标签。"
+        " <save_asset>{\"type\":\"chapter\",\"title\":\"序章\",\"save_destination\":\"ai_draft\",\"data\":{\"content\":\"...\"}}</save_asset> 标签。"
         " `type` 必须是 character / world / timeline / relationship / outline / chapter 之一。"
         " `title` 为资产标题，`data` 为该资产的结构化数据。"
+        " chapter 的 `save_destination` 可选值为 ai_draft / formal_body / formal_prologue / extra / alternate_version / update_existing。"
+        " 试写和普通续写默认使用 ai_draft；正式序章使用 formal_prologue；重写、备选方案、候选稿使用 alternate_version。"
+        " 只有用户明确要求替换已有章节时，才能设置 should_replace_existing=true 或 update_existing，并且必须提供目标 id。"
+        " 标签内必须是合法 JSON，不能包含注释、尾逗号或未转义换行。"
         " 用户确认后系统会将资产保存到项目内容库。"
         " 如果要修改已有资产，请在 data 中包含原始 id 字段。"
         " 不要在正文里解释标签本身，它们会被系统解析为可操作的保存建议。"

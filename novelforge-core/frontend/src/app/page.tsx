@@ -291,10 +291,7 @@ export default function ChatPage() {
               timestamp: m.timestamp ? new Date(m.timestamp) : new Date(),
               saveAssetRequests: saveAssetRequests.length > 0
                 ? saveAssetRequests.map((req) => ({
-                    type: req.type,
-                    title: req.title,
-                    data: req.data,
-                    id: req.id,
+                    ...req,
                     status: 'pending' as const,
                   }))
                 : undefined,
@@ -535,7 +532,7 @@ export default function ChatPage() {
       if (charNames) prompt += `主要角色：${charNames}。`;
       if (worldName) prompt += `故事背景：${worldName}。`;
       if (outlineHint) prompt += `参考大纲：${outlineHint}。`;
-      prompt += `请直接写出精彩的正文，不需要任何前置说明。写完后请在末尾附加 <save_asset>{"type":"chapter","title":"第 ${chapterNum} 章","data":{"content":"章节全文"}}</save_asset>，等待我确认写回内容库。`;
+      prompt += `请直接写出精彩的正文，不需要任何前置说明。写完后请在末尾附加 <save_asset>{"type":"chapter","title":"第 ${chapterNum} 章","save_destination":"ai_draft","chapter_role":"正文","data":{"content":"章节全文"}}</save_asset>，等待我确认写回内容库。`;
       setViewMode('chat');
       await handleSendMessage(prompt, targetSessionId, 'pro');
     } finally {
@@ -553,7 +550,7 @@ export default function ChatPage() {
         `目标是写出动人、优美、有情绪张力的开篇，而不是泛泛介绍设定。`,
         `请优先使用主角的欲望/伤痕、核心关系张力、世界观规则、关键意象和伏笔；如果资产里缺失某些信息，请从现有资产中合理补全，不要写成说明文。`,
         `篇幅约 ${targetWords} 字。正文之后，请简短列出：情绪钩子、使用到的资产、埋下的伏笔。`,
-        `最后请附加 <save_asset>{"type":"chapter","title":"序章","data":{"content":"序章全文"}}</save_asset>，等待我确认写回内容库。`,
+        `最后请附加 <save_asset>{"type":"chapter","title":"序章","save_destination":"formal_prologue","chapter_role":"序章","data":{"content":"序章全文"}}</save_asset>，等待我确认写回内容库。`,
       ].join('\n');
       setViewMode('chat');
       await handleSendMessage(prompt, targetSessionId, 'pro');
@@ -1140,10 +1137,7 @@ export default function ChatPage() {
             : undefined,
           saveAssetRequests: saveAssetRequests.length > 0
             ? saveAssetRequests.map((req) => ({
-                type: req.type,
-                title: req.title,
-                data: req.data,
-                id: req.id,
+                ...req,
                 status: 'pending' as const,
               }))
             : undefined,

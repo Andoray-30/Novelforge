@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { buildSaveAssetPreviewRows, getSaveAssetOperationLabel } from '@/lib/save-asset-preview';
+import { buildSaveAssetPreviewRows, getSaveAssetOperationLabel, getSaveAssetWarningLabel } from '@/lib/save-asset-preview';
+import type { SaveAssetRequest } from '@/lib/chat-parser';
 
 export type MessageRole = 'user' | 'assistant' | 'system';
 
@@ -27,11 +28,7 @@ export interface Message {
       source: 'project_asset' | 'artifact';
     }>;
   };
-  saveAssetRequests?: Array<{
-    type: string;
-    title: string;
-    data: Record<string, unknown>;
-    id?: string;
+  saveAssetRequests?: Array<SaveAssetRequest & {
     status?: 'pending' | 'saved' | 'rejected';
   }>;
   artifact?: {
@@ -421,6 +418,7 @@ export function MessageBubble({ message, onSelectAssetCandidate, onOpenArtifact,
           {message.saveAssetRequests.map((request, index) => {
             const previewRows = buildSaveAssetPreviewRows(request, 4);
             const operationLabel = getSaveAssetOperationLabel(request);
+            const warningLabel = getSaveAssetWarningLabel(request);
 
             return (
             <div
@@ -502,6 +500,20 @@ export function MessageBubble({ message, onSelectAssetCandidate, onOpenArtifact,
                       <span style={{ color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.value}</span>
                     </div>
                   ))}
+                </div>
+              ) : null}
+              {warningLabel ? (
+                <div style={{
+                  marginLeft: 25,
+                  borderRadius: 8,
+                  border: '1px solid rgba(245, 158, 11, 0.35)',
+                  background: 'rgba(245, 158, 11, 0.12)',
+                  color: '#fcd34d',
+                  padding: '7px 9px',
+                  fontSize: 11,
+                  lineHeight: 1.5,
+                }}>
+                  {warningLabel}
                 </div>
               ) : null}
             </div>

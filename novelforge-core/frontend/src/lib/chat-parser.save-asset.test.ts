@@ -50,4 +50,21 @@ describe('parseSaveAssetRequests', () => {
       },
     ]);
   });
+
+  it('preserves chapter save destination and replacement flags', () => {
+    const result = parseSaveAssetRequests(
+      '<save_asset>{"type":"chapter","title":"候选序章","save_destination":"alternate_version","chapter_role":"序章","should_replace_existing":false,"data":{"content":"候选稿"}}</save_asset>',
+    );
+
+    expect(result).toEqual([
+      {
+        type: 'chapter',
+        title: '候选序章',
+        save_destination: 'alternate_version',
+        chapter_role: '序章',
+        should_replace_existing: false,
+        data: { content: '候选稿' },
+      },
+    ]);
+  });
 });

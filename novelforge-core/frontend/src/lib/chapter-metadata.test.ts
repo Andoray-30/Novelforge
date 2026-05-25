@@ -182,4 +182,26 @@ describe('chapter metadata helper', () => {
       chapter({ id: 'ai', title: '序章', tags: ['ai-suggested'], data: { chapter_index: 8, source_type: 'ai_generated' } }),
     ])).toBe(9);
   });
+
+  it('labels AI-generated chapter save destinations in the editor directory', () => {
+    const metadata = resolveChapterDirectoryMetadata(chapter({
+      id: 'ai-draft',
+      title: 'AI 序章候选',
+      tags: ['ai-generated'],
+      data: {
+        title: 'AI 序章候选',
+        content: '月光落下。',
+        source_type: 'ai_generated',
+        save_destination: 'ai_draft',
+        chapter_role: '序章',
+        quality_flags: ['ai_draft'],
+      },
+    }));
+
+    expect(metadata.sourceType).toBe('ai_generated');
+    expect(metadata.sourceLabel).toBe('AI 草稿');
+    expect(metadata.saveDestination).toBe('ai_draft');
+    expect(metadata.saveDestinationLabel).toBe('AI 草稿');
+    expect(metadata.qualityFlagLabels).toContain('AI 草稿');
+  });
 });

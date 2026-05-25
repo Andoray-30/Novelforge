@@ -4226,3 +4226,47 @@
 - 当前判断：
   - 编辑器目录已经从“资产存在”推进到“用户能理解章节结构”。
   - 下一步建议把同一套 helper 接入 AI 续写上下文，让 AI 选择续写目标章节时使用结构化目录，而不是只按资产更新时间或标题猜测。
+
+## 2026-05-24 AI 写回第三十二轮：章节保存目的语义
+- 本轮目标：
+  - AI 写出来的章节不再静默混入导入原文或正式正文。
+  - 用户确认保存前能看见 AI 建议保存到哪里。
+- 前端实现：
+  - 新增章节保存目的 helper：
+    - `ai_draft`：AI 草稿。
+    - `formal_body`：正式正文。
+    - `formal_prologue`：正式序章。
+    - `extra`：番外。
+    - `alternate_version`：候选版本。
+    - `update_existing`：更新已有章节。
+  - 旧版 `<save_asset>{"type":"chapter",...}</save_asset>` 继续兼容；缺少保存目的时默认 `ai_draft`。
+  - AI 章节保存请求写入兼容 metadata：
+    - `source_type=ai_generated`
+    - `save_destination`
+    - `generated_by_ai=true`
+    - `chapter_role`
+    - `word_count`
+    - `quality_flags`
+  - 保存确认卡片新增“保存位置”行。
+  - 更新已有章节时显示覆盖警告。
+  - 编辑器目录显示 `save_destination` 标签，让 AI 草稿、候选版本、正式序章可区分。
+  - AI 草稿和候选版本在目录排序中后置，减少与导入原文正文混排。
+- 后端提示词协议：
+  - 更新聊天 system prompt 的 `save_asset` 说明。
+  - 明确 chapter 的 `save_destination` 取值。
+  - 试写默认 `ai_draft`，正式序章用 `formal_prologue`，重写/候选版本用 `alternate_version`。
+  - 只有用户明确要求替换时才能设置 `should_replace_existing=true` 或 `update_existing`，且必须提供目标 id。
+- 浏览器验证：
+  - 聊天保存卡片显示 `保存位置：AI 草稿`。
+  - 确认保存测试章节 `AI 草稿浏览器验证`。
+  - `/editor` 能看到该章节为 `AI 草稿`，不是 `导入原文`。
+  - 无 Runtime/Build Error。
+- 测试：
+  - 前端针对性测试：`25 passed`。
+  - 前端全量 Vitest：`74 passed`。
+  - `npx tsc --noEmit` 通过。
+  - `npm run build` 通过。
+  - 后端 `compileall novelforge-core/novelforge/api/__init__.py` 通过。
+- 当前判断：
+  - AI 写回章节已经有清晰的状态和来源，不会再默认伪装成导入原文。
+  - 下一步建议处理“更新已有章节”的目标选择 UI，避免用户只能依赖 AI 标签里的 id。

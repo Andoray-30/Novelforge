@@ -539,6 +539,11 @@ export default function NovelEditorPage() {
                           ) : null}
                           <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
                             <span className="rounded-full border border-slate-700 px-2 py-1 text-slate-300">{chapterMeta.sourceLabel}</span>
+                            {chapterMeta.saveDestinationLabel ? (
+                              <span className="rounded-full border border-violet-500/30 bg-violet-500/10 px-2 py-1 text-violet-200">
+                                {chapterMeta.saveDestinationLabel}
+                              </span>
+                            ) : null}
                             <span className={`rounded-full border px-2 py-1 ${chapterMeta.isDecorative ? 'border-slate-700 text-slate-500' : 'border-slate-700 text-slate-300'}`}>
                               {chapterMeta.roleLabel}
                             </span>
