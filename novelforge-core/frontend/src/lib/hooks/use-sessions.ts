@@ -6,6 +6,19 @@ import { storage } from '@/lib/utils';
 import { useAppStore } from './use-app-store';
 
 const STORAGE_KEY = 'novelforge_current_session';
+const HIDDEN_TEST_SESSION_KEYWORDS = [
+  'mock response',
+  'mock conversation',
+  'test conversation',
+  'goal7',
+  'goal8',
+  'goal9',
+  'goal10',
+  'goal11',
+  'goal12',
+  '验证',
+  '清洁提取测试',
+];
 
 function sanitizePreview(value: string): string {
   const trimmed = value.trim();
@@ -30,6 +43,16 @@ function toSession(input: any): Session {
   };
 }
 
+export function isInternalTestSession(session: Pick<Session, 'id' | 'title' | 'preview' | 'metadata'>): boolean {
+  const metadata = session.metadata && typeof session.metadata === 'object' ? session.metadata as Record<string, unknown> : {};
+  const marker = String(metadata.source ?? metadata.kind ?? metadata.test_run ?? '').toLowerCase();
+  if (['test', 'mock', 'smoke', 'validation'].some((item) => marker.includes(item))) {
+    return true;
+  }
+  const haystack = `${session.id} ${session.title} ${session.preview}`.toLowerCase();
+  return HIDDEN_TEST_SESSION_KEYWORDS.some((keyword) => haystack.includes(keyword.toLowerCase()));
+}
+
 export function useSessions() {
   const sessions = useAppStore((s) => s.sessions);
   const currentSessionId = useAppStore((s) => s.currentSessionId);
@@ -48,7 +71,7 @@ export function useSessions() {
     setError(null);
     try {
       const conversations = await chatService.getConversations();
-      const mapped = conversations.map(toSession);
+      const mapped = conversations.map(toSession).filter((session) => !isInternalTestSession(session));
       mapped.sort((a, b) => (a.time > b.time ? -1 : 1));
       setSessions(mapped);
       if (!currentSessionId && mapped.length > 0) {

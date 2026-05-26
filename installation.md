@@ -35,6 +35,7 @@ pip install -e ".[dev]"
 ## 3) Configure Environment
 
 Create `novelforge-core/.env` and fill in your provider settings.
+You can start from `novelforge-core/.env.example`.
 
 Minimal example:
 
@@ -57,6 +58,8 @@ NOVELFORGE_ALLOW_RUNTIME_OPENAI_OVERRIDES=false
 ```
 
 In public deployment, the browser-side API key override is disabled and all protected APIs require the admin login cookie.
+
+Data should be persistent. Set `NOVELFORGE_DATA_DIR`, `CONTENT_DATABASE_PATH`, `DATABASE_PATH`, and `FILE_STORAGE_DIR` to a directory that survives restarts. Back up the whole data directory before upgrades.
 
 ## 4) Start Backend
 
@@ -102,3 +105,4 @@ pytest -v
 
 This repository may generate temporary directories during AI-assisted development.
 They should not be committed. Check `.gitignore` and keep runtime or agent artifacts out of commits.
+Root sample novels and real API keys must also stay out of git.

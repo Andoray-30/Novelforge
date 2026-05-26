@@ -49,6 +49,30 @@
 - `cmd /c npm run build`：passed。
 - `cmd /c npx tsc --noEmit --incremental false`：passed。
 
+## 2026-05-26 Goal 15 部署准备与数据清洁 v1
+### 本轮完成
+- 新增 `novelforge-core/.env.example`，集中说明 NewAPI/OpenAI provider、Fast/Pro 模型映射、数据目录、管理员登录、session secret 和公开部署配置。
+- 公开部署配置检查补强：
+  - `FRONTEND_ORIGIN` 在公开部署下不能停留在 localhost。
+  - `NOVELFORGE_DATA_DIR`、`FILE_STORAGE_DIR`、`DATABASE_PATH` 父目录、`CONTENT_DATABASE_PATH` 父目录都会做写入探测。
+  - 缺配置/目录不可写会抛出中文可读错误。
+- `.gitignore` 增加根目录样本文本、临时 pytest 目录、`tsconfig.tsbuildinfo` 忽略规则，避免样本文本/临时文件误提交。
+- 主工作台会隐藏明显 mock/smoke/Goal 验证会话；这是展示层清洁，不物理删除真实用户数据。
+- `INTERNAL_TEST_READINESS.md` 增加部署配置、数据目录、备份/恢复、clean workspace policy、最小 smoke 和常见错误说明。
+- `installation.md` 增加 `.env.example`、持久化数据目录和备份提醒。
+
+### 验证
+- `.\.venv\Scripts\python.exe -m pytest tests/api/test_auth.py`：6 passed。
+- `cmd /c npx vitest run src/lib/hooks/use-sessions.test.ts src/lib/api/client.test.ts src/lib/openai-config.test.ts`：3 files / 5 tests passed。
+- `cmd /c npm test`：24 files / 101 tests passed。
+- `cmd /c npx tsc --noEmit --incremental false`：passed。
+- `cmd /c npm run build`：passed。
+- `.\.venv\Scripts\python.exe -m compileall novelforge\core\config.py novelforge\api\__init__.py`：passed。
+- 最小 smoke：
+  - 临时启动后端 `127.0.0.1:8001`，`GET /health` 返回 healthy。
+  - 临时启动生产前端 `localhost:3010`，首页 HTTP 200。
+  - 通过内容 API 创建一条 `internal-smoke` AI 草稿章节，随后读取和搜索均成功，再立即删除该 smoke 内容，避免污染工作区。
+
 ## 2026-04-18 阶段审计结论
 ### 审计摘要
 - 当前系统已经从“占位页拼接阶段”进入“可用但未闭环阶段”。

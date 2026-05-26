@@ -33,6 +33,7 @@ def test_public_deployment_config_validation_requires_secure_settings(monkeypatc
     monkeypatch.setattr(api_module.config, "api_key", None, raising=False)
     monkeypatch.setattr(api_module.config, "storage_type", "file", raising=False)
     monkeypatch.setattr(api_module.config, "use_content_database", False, raising=False)
+    monkeypatch.setattr(api_module.config, "frontend_origin", "http://localhost:3010", raising=False)
 
     try:
         api_module._validate_public_deployment_config()
@@ -44,6 +45,7 @@ def test_public_deployment_config_validation_requires_secure_settings(monkeypatc
     assert "NOVELFORGE_ADMIN_PASSWORD" in message
     assert "NOVELFORGE_SESSION_SECRET" in message
     assert "OPENAI_API_KEY" in message
+    assert "FRONTEND_ORIGIN=https://your-frontend-domain" in message
     assert "STORAGE_TYPE=content_db" in message
 
 

@@ -167,6 +167,9 @@ def _validate_public_deployment_config() -> None:
         missing.append("NOVELFORGE_SESSION_SECRET")
     if not getattr(config, "api_key", None):
         missing.append("OPENAI_API_KEY")
+    frontend_origin = (getattr(config, "frontend_origin", "") or "").strip()
+    if not frontend_origin or frontend_origin.startswith("http://localhost") or frontend_origin.startswith("http://127.0.0.1"):
+        missing.append("FRONTEND_ORIGIN=https://your-frontend-domain")
     if getattr(config, "storage_type", "") != "content_db":
         missing.append("STORAGE_TYPE=content_db")
     if not getattr(config, "use_content_database", False):
@@ -176,9 +179,20 @@ def _validate_public_deployment_config() -> None:
 
     data_dir = Path(config.data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
-    probe = data_dir / ".novelforge_write_probe"
-    probe.write_text("ok", encoding="utf-8")
-    probe.unlink(missing_ok=True)
+    writable_targets = {
+        "NOVELFORGE_DATA_DIR": data_dir,
+        "FILE_STORAGE_DIR": Path(config.file_storage_dir),
+        "DATABASE_PATH parent": Path(config.database_path).parent,
+        "CONTENT_DATABASE_PATH parent": Path(config.content_database_path).parent,
+    }
+    for label, target in writable_targets.items():
+        target.mkdir(parents=True, exist_ok=True)
+        probe = target / ".novelforge_write_probe"
+        try:
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink(missing_ok=True)
+        except OSError as exc:
+            raise RuntimeError(f"公开部署数据目录不可写: {label} -> {target}") from exc
 
 # 鍒涘缓鎻愬彇鍣ㄥ崗璋冨櫒
 extractor_orchestrator = UnifiedExtractor(

@@ -110,3 +110,96 @@ Expected Goal 14 summary for this sample should therefore be:
 - The main workspace displays a compact quality overview in chat mode.
 - The dashboard displays the same quality overview with more detail and action buttons.
 
+## Goal 15 Deployment Readiness Notes
+
+Date: 2026-05-26
+
+### Required Backend Environment
+
+Use `novelforge-core/.env.example` as the template. For internal/public deployment, the minimum required settings are:
+
+- `OPENAI_API_KEY`: server-side provider key. Do not put this in frontend env.
+- `OPENAI_BASE_URL`: OpenAI-compatible endpoint, for example `https://newapi.sync-api.xyz/v1`.
+- `OPENAI_MODEL`, `NOVELFORGE_FAST_MODEL`, `NOVELFORGE_PRO_MODEL`: backend model mapping for Fast/Pro mode.
+- `NOVELFORGE_PUBLIC_DEPLOYMENT=true`: enables strict startup validation.
+- `NOVELFORGE_ADMIN_PASSWORD`: single-admin login password.
+- `NOVELFORGE_SESSION_SECRET`: long random string for HttpOnly session cookie signing.
+- `FRONTEND_ORIGIN`: real frontend origin in deployment. In public mode this must not remain `localhost`.
+- `NOVELFORGE_ALLOW_RUNTIME_OPENAI_OVERRIDES=false`: prevents browser-provided API keys/base URLs/models from replacing server config.
+- `NOVELFORGE_DATA_DIR`: persistent data root.
+- `STORAGE_TYPE=content_db` and `USE_CONTENT_DATABASE=true`: recommended deployment storage mode.
+- `CONTENT_DATABASE_PATH`, `DATABASE_PATH`, `FILE_STORAGE_DIR`: explicit persistent paths under the data root.
+
+Startup validation now checks:
+
+- admin password,
+- session secret,
+- provider key,
+- non-localhost frontend origin in public mode,
+- content DB storage mode,
+- data directory and DB parent directory write access.
+
+### Frontend Environment
+
+The frontend must only know where the backend is:
+
+- `NEXT_PUBLIC_NOVELFORGE_URL=https://your-backend-domain.example`
+
+Do not expose `OPENAI_API_KEY`, NewAPI keys, or provider base URLs as frontend public variables.
+
+### Data Directory Layout
+
+Recommended deployment layout:
+
+```text
+novelforge-core/data/
+  novelforge_content.db     # content library: novels, chapters, characters, worlds, timelines, relationships
+  novelforge.db             # generic storage backend, if used
+  file_storage/             # conversations, task state, and file-backed runtime data
+```
+
+Depending on configuration, conversations and task records may live in `file_storage/`, while structured content assets live in `novelforge_content.db`.
+
+### Backup / Restore
+
+Before internal testing or upgrades:
+
+1. Stop backend writes if possible.
+2. Copy the whole `NOVELFORGE_DATA_DIR`.
+3. Store the copy with a timestamp, for example `backups/novelforge-data-20260526/`.
+4. Restore by stopping services and replacing the current data directory with the backup copy.
+
+SQLite backup can also be done by copying:
+
+- `CONTENT_DATABASE_PATH`
+- `DATABASE_PATH`
+- `FILE_STORAGE_DIR`
+
+The whole data directory backup is safer because it includes conversations and task traces.
+
+### Clean Workspace Policy
+
+- Root sample text such as `超时空辉夜姬.txt` is ignored by git and must not be committed.
+- Temporary AI-assisted pytest folders are ignored.
+- Main workspace session list hides obvious mock/smoke/Goal validation sessions in the frontend. This is a display cleanup only; it does not physically delete real user data.
+- To start a clean internal-test project, create a new project/session and import from the upload flow instead of relying on root sample files.
+
+### Minimal Internal Smoke
+
+1. Start backend and verify:
+   - `GET /health` returns healthy.
+   - `POST /api/auth/login` succeeds when auth is enabled.
+2. Start frontend and log in.
+3. Open the main workspace.
+4. Confirm the project quality overview is visible.
+5. Open `/editor`.
+6. Start a short AI writing request or a controlled mock writing request.
+7. Save the result as an AI draft.
+8. Reopen editor and confirm the saved draft appears in the content library.
+
+### Common Errors
+
+- Missing public config: backend startup fails with a Chinese readable `公开部署配置不完整` message.
+- Provider `500`, timeout, or connection reset: frontend chat shows a readable retry hint and does not auto-save duplicate content.
+- Cookie login fails in deployment: check `FRONTEND_ORIGIN`, HTTPS, and reverse proxy cookie forwarding.
+- Data appears missing after deployment: check `NOVELFORGE_DATA_DIR`, `CONTENT_DATABASE_PATH`, `STORAGE_TYPE`, and `USE_CONTENT_DATABASE`.

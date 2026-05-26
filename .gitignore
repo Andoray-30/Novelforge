@@ -31,6 +31,10 @@ workspace/
 *.log
 backend_test_report_*.json
 backend.log
+.tmp-pytest-*/
+.tmp-pytest-runtime/
+超时空辉夜姬.txt
+*.sample.txt
 
 # -----------------------------------------------------------
 # Python 编译缓存 & 虚拟环境
@@ -109,3 +113,4 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+tsconfig.tsbuildinfo
