@@ -30,6 +30,25 @@
 - 本轮没有重构 editor 外观，只把候选管理闭环落到稳定 helper 与轻量 UI。
 - 现有页面仍有部分历史中文乱码债务，后续应做独立编码清理，不与候选版本工作流混在一起。
 
+## 2026-05-25 Goal 14 导入/提取资产质量总览与内测闸门 v1
+### 本轮完成
+- 新增 `project-quality-summary` helper，把章节、角色、关系、世界观、时间线/大纲和写作准备度统一汇总为项目级质量摘要。
+- 增加 `overall_status`：`ready / needs_repair / insufficient / unknown`。
+- 质量摘要覆盖：
+  - 章节：导入原文、AI 草稿、候选、正式正文、正式序章、番外、归档、装饰/目录、过长片段。
+  - 角色：可写角色、低信息角色。
+  - 关系：usable、有张力、低信息、已增强、待修复、缺失信号。
+  - 世界观：规则、意象、代价、禁忌、场景可用性。
+  - 写作准备：可写角色、usable/enriched 关系、世界观信号、章节来源。
+- 主工作台聊天模式增加紧凑“项目质量总览”；项目仪表盘增加更详细的质量总览与行动入口。
+- 新增 `project-docs/INTERNAL_TEST_READINESS.md`，记录内测闸门模型和当前样本项目的质量判断方式。
+
+### 验证
+- `cmd /c npx vitest run src/lib/project-quality-summary.test.ts`：6 passed。
+- `cmd /c npm test`：23 files / 99 tests passed。
+- `cmd /c npm run build`：passed。
+- `cmd /c npx tsc --noEmit --incremental false`：passed。
+
 ## 2026-04-18 阶段审计结论
 ### 审计摘要
 - 当前系统已经从“占位页拼接阶段”进入“可用但未闭环阶段”。

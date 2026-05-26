@@ -61,6 +61,7 @@ import {
   type FocusedAsset,
 } from '@/lib/focused-assets';
 import { normalizeAgentTrace } from '@/lib/agent-trace';
+import { buildProjectQualitySummary, type ProjectQualitySummary } from '@/lib/project-quality-summary';
 import type { ContentItem, ContentTopology, ContentType, ImportanceLevel, OpenAIConfig } from '@/types';
 
 // 用于 Artifact 面板的数据格式
@@ -233,6 +234,10 @@ export default function ChatPage() {
       ...projectAssets.chapters,
       ...projectAssets.outlines,
     ],
+    [projectAssets],
+  );
+  const projectQualitySummary = useMemo(
+    () => buildProjectQualitySummary(projectAssets),
     [projectAssets],
   );
   const currentNovelParentId = useMemo(() => {
@@ -1528,6 +1533,16 @@ export default function ChatPage() {
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {viewMode === 'chat' ? (
             <>
+              <ProjectQualityOverview
+                summary={projectQualitySummary}
+                compact
+                onOpenEditor={() => router.push('/editor')}
+                onOpenExtract={() => router.push('/extract')}
+                onOpenDashboard={() => {
+                  setViewMode('dashboard');
+                  setDashboardType('list');
+                }}
+              />
               {focusedAssets.length > 0 && (
                 <div
                   style={{
@@ -1813,6 +1828,16 @@ export default function ChatPage() {
                     </button>
                   </div>
                 </div>
+
+                <ProjectQualityOverview
+                  summary={projectQualitySummary}
+                  onOpenEditor={() => router.push('/editor')}
+                  onOpenExtract={() => router.push('/extract')}
+                  onOpenDashboard={() => {
+                    setViewMode('dashboard');
+                    setDashboardType('list');
+                  }}
+                />
 
                 {dashboardType === 'tree' ? (
                   <div style={{ marginBottom: 40 }}>
@@ -2140,6 +2165,160 @@ function buildFocusedAssetSummary(items: FocusedAsset[]): string {
   return items
     .map((item, index) => `${index + 1}. [${formatContentTypeLabel(item.type)}] ${item.title}\n${item.summary}`)
     .join('\n\n');
+}
+
+function ProjectQualityOverview({
+  summary,
+  compact = false,
+  onOpenEditor,
+  onOpenExtract,
+  onOpenDashboard,
+}: {
+  summary: ProjectQualitySummary;
+  compact?: boolean;
+  onOpenEditor: () => void;
+  onOpenExtract: () => void;
+  onOpenDashboard: () => void;
+}) {
+  const statusColor = summary.overall_status === 'ready'
+    ? { bg: 'rgba(16, 185, 129, 0.12)', border: 'rgba(16, 185, 129, 0.35)', text: '#a7f3d0' }
+    : summary.overall_status === 'needs_repair'
+      ? { bg: 'rgba(245, 158, 11, 0.12)', border: 'rgba(245, 158, 11, 0.35)', text: '#fde68a' }
+      : summary.overall_status === 'insufficient'
+        ? { bg: 'rgba(239, 68, 68, 0.10)', border: 'rgba(239, 68, 68, 0.30)', text: '#fecaca' }
+        : { bg: 'rgba(148, 163, 184, 0.10)', border: 'rgba(148, 163, 184, 0.25)', text: '#cbd5e1' };
+  const sections = [
+    {
+      label: '章节质量',
+      value: `${summary.chapter.imported_originals + summary.chapter.formal_body + summary.chapter.formal_prologue}/${summary.chapter.total}`,
+      hint: summary.chapter.issues[0] ?? '章节来源可用。',
+      status: summary.chapter.status,
+    },
+    {
+      label: '角色质量',
+      value: `${summary.character.writable}/${summary.character.total}`,
+      hint: summary.character.issues[0] ?? '已有可写角色。',
+      status: summary.character.status,
+    },
+    {
+      label: '关系质量',
+      value: `${summary.relationship.usable}/${summary.relationship.total}`,
+      hint: summary.relationship.issues[0] ?? '已有可写关系张力。',
+      status: summary.relationship.status,
+      sublabel: summary.relationship.quality_status === 'usable' ? 'usable' : summary.relationship.quality_status === 'thin' ? 'thin' : 'empty',
+    },
+    {
+      label: '世界观质量',
+      value: `${summary.world.usable_signals}`,
+      hint: summary.world.issues[0] ?? '已有可写世界观信号。',
+      status: summary.world.status,
+    },
+    {
+      label: '写作准备度',
+      value: summary.writing_ready ? '通过' : '未通过',
+      hint: summary.writing_readiness.issues[0] ?? '可以进入 AI 创作。',
+      status: summary.writing_readiness.status,
+      sublabel: '',
+    },
+  ];
+  const actionHints = [
+    ...summary.relationship.actions,
+    ...summary.chapter.actions,
+    ...summary.character.actions,
+    ...summary.world.actions,
+    ...summary.writing_readiness.actions,
+  ].slice(0, compact ? 3 : 6);
+
+  return (
+    <div
+      style={{
+        padding: compact ? '12px 20px' : '18px 20px',
+        borderBottom: compact ? '1px solid var(--border-subtle)' : undefined,
+        marginBottom: compact ? 0 : 28,
+        background: compact ? 'rgba(15, 23, 42, 0.45)' : 'var(--bg-surface)',
+        border: compact ? undefined : '1px solid var(--border-subtle)',
+        borderRadius: compact ? 0 : 18,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+        flexShrink: 0,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)' }}>项目质量总览</span>
+            <span style={{
+              borderRadius: 999,
+              padding: '4px 10px',
+              fontSize: 12,
+              fontWeight: 800,
+              color: statusColor.text,
+              background: statusColor.bg,
+              border: `1px solid ${statusColor.border}`,
+            }}>
+              {summary.status_label}
+            </span>
+          </div>
+          <div style={{ marginTop: 5, fontSize: 12, color: 'var(--text-muted)' }}>
+            内测闸门：至少需要可写角色、usable 关系、世界观信号和章节片段来源。
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button type="button" onClick={onOpenExtract} style={qualityButtonStyle}>提取/修复</button>
+          <button type="button" onClick={onOpenEditor} style={qualityButtonStyle}>整理章节</button>
+          {!compact ? <button type="button" onClick={onOpenDashboard} style={qualityButtonStyle}>项目仪表盘</button> : null}
+        </div>
+      </div>
+
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: compact ? 'repeat(auto-fit, minmax(130px, 1fr))' : 'repeat(auto-fit, minmax(160px, 1fr))',
+        gap: 10,
+      }}>
+        {sections.map((section) => (
+          <div key={section.label} style={{
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 12,
+            padding: '10px 12px',
+            background: 'rgba(255,255,255,0.025)',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700 }}>{section.label}</span>
+              <span style={{
+                width: 7,
+                height: 7,
+                borderRadius: 999,
+                background: section.status === 'ready' ? '#10b981' : section.status === 'needs_repair' ? '#f59e0b' : '#ef4444',
+                flexShrink: 0,
+              }} />
+            </div>
+            <div style={{ marginTop: 7, fontSize: 19, fontWeight: 900, color: 'var(--text-primary)' }}>{section.value}</div>
+            {section.sublabel ? <div style={{ marginTop: 2, fontSize: 10, color: 'var(--text-muted)' }}>{section.sublabel}</div> : null}
+            {!compact ? <div style={{ marginTop: 6, fontSize: 11, lineHeight: 1.5, color: 'var(--text-disabled)' }}>{section.hint}</div> : null}
+          </div>
+        ))}
+      </div>
+
+      {actionHints.length > 0 ? (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {actionHints.map((action, index) => (
+            <span key={`${action}-${index}`} style={{
+              border: '1px solid rgba(139, 92, 246, 0.25)',
+              background: 'rgba(139, 92, 246, 0.08)',
+              color: '#ddd6fe',
+              borderRadius: 999,
+              padding: '6px 10px',
+              fontSize: 11,
+              lineHeight: 1.4,
+            }}>
+              {action}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function reconcileAssetRequestWithFocusedAssets(
@@ -2536,4 +2715,15 @@ const assetMiniCardStyle: React.CSSProperties = {
   display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 12,
   background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
   cursor: 'pointer', transition: 'all 150ms'
+};
+
+const qualityButtonStyle: React.CSSProperties = {
+  border: '1px solid var(--border-subtle)',
+  background: 'var(--bg-elevated)',
+  color: 'var(--text-secondary)',
+  borderRadius: 10,
+  padding: '8px 11px',
+  cursor: 'pointer',
+  fontSize: 12,
+  fontWeight: 700,
 };
