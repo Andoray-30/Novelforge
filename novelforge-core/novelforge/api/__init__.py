@@ -1,6 +1,6 @@
-﻿"""
+"""
 FastAPI Web API for NovelForge
-鎻愪緵AI瑙勫垝銆佽鑹叉彁鍙栥€佷笘鐣屾瀯寤虹瓑Web API鎺ュ彛
+OpenAI-compatible planning, extraction, writing, and content-library APIs.
 """
 
 from fastapi import FastAPI, HTTPException, Query, status, File, UploadFile, Form, Request
@@ -58,7 +58,7 @@ from ..core.models import (
 )
 from ..extractors import UnifiedExtractor, ExtractionConfig
 from ..services.extraction_service import get_extraction_service, ExtractionService
-# FIXME: 瑙ｅ喅 TaskPriority 涓?api.types 鐨勫悓鍚嶅鍑哄啿绐?
+# FIXME: Resolve the TaskPriority name clash with api.types.
 from ..services.ai_scheduler import get_ai_scheduler, AITaskScheduler, TaskPriority as SchedulerTaskPriority
 from ..services.ai_service import AIService
 
@@ -88,7 +88,7 @@ def _use_content_database(storage_type: Optional[str]) -> bool:
     # Default to canonical content DB when config is absent/invalid.
     return True
 
-# 鍏ㄥ眬閰嶇疆鍜孉I鏈嶅姟
+# Global config and AI services.
 config = Config.load()
 ai_service = AIService(config)
 ai_planning_service = get_ai_planning_service(ai_service)
@@ -194,14 +194,14 @@ def _validate_public_deployment_config() -> None:
         except OSError as exc:
             raise RuntimeError(f"公开部署数据目录不可写: {label} -> {target}") from exc
 
-# 鍒涘缓鎻愬彇鍣ㄥ崗璋冨櫒
+# Create extractor orchestrator.
 extractor_orchestrator = UnifiedExtractor(
     ai_service=ai_service,
     config=ExtractionConfig()
 )
 
-# 鍒涘缓瀛樺偍绠＄悊鍣?
-# TODO: 寤鸿鍦ㄦ澶勬鏌ユ暟鎹瓨鍌ㄨ矾寰勬槸鍚﹀瓨鍦紝骞剁‘淇濆綋鍓嶈繘绋嬪叿澶囧啓鏉冮檺
+# Create storage manager.
+# TODO: Keep startup storage path checks close to deployment validation.
 storage_manager = StorageManager(
     default_storage=config.storage_type if config.storage_type in {"file", "memory", "database", "content_db"} else "file",
     file_storage_dir=config.file_storage_dir,
@@ -209,16 +209,16 @@ storage_manager = StorageManager(
     content_db_path=config.content_database_path,
 )
 
-# 鍒涘缓鍐呭绠＄悊鍣?
+# Create content manager.
 content_manager = ContentManager(
     storage_manager,
     use_database=config.use_content_database or _use_content_database(config.storage_type),
 )
 
-# 鍒涘缓鎻愬彇鏈嶅姟
+# Create extraction service.
 extraction_service = get_extraction_service(ai_service, config)
 
-# 鍒涘缓AI璋冨害鍣?
+# Create AI scheduler.
 ai_scheduler = get_ai_scheduler(ai_service, storage_manager, config, content_manager)
 
 
@@ -812,7 +812,7 @@ async def _normalize_content_item_for_write(item: ContentItem) -> ContentItem:
     item.extracted_data = payload or item.extracted_data
     return item
 
-# 鍒濆鍖朏astAPI搴旂敤
+# Create FastAPI app.
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _validate_public_deployment_config()
@@ -828,7 +828,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS閰嶇疆
+# CORS configuration.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -841,7 +841,7 @@ app.add_middleware(
         "http://127.0.0.1:3002",
         "http://127.0.0.1:3010",
         config.frontend_origin,
-    ],  # 鍓嶇寮€鍙戞湇鍔″櫒
+    ],  # Frontend dev servers.
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -859,14 +859,14 @@ async def require_admin_session(request: Request, call_next):
         )
     return await call_next(request)
 
-# 鎸傝浇瀛愯矾鐢?
+# Mount sub-routers.
 app.include_router(text_processing_router, prefix="/api")
 
-# API璺敱
+# API endpoints.
 
 @app.get("/")
 async def root():
-    """API鏍硅矾寰?"""
+    """API health check."""
     return {
         "message": "NovelForge AI Planning API",
         "version": "1.0.0",
@@ -876,7 +876,7 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """鍋ュ悍妫€鏌?"""
+    """API health check."""
     return {"status": "healthy", "timestamp": datetime.now()}
 
 
@@ -926,13 +926,13 @@ async def get_current_auth(request: Request):
         "runtime_openai_overrides_allowed": bool(getattr(config, "allow_runtime_openai_overrides", True)),
     }
 
-# AI瑙勫垝鐩稿叧绔偣
+# AI planning endpoints.
 
 @app.post("/api/ai/generate-story-outline", response_model=StoryOutline)
 async def generate_story_outline(params: StoryOutlineParams):
-    """鐢熸垚鏁呬簨鏋舵瀯"""
+    """Generate story outline."""
     try:
-        # 璋冪敤AI瑙勫垝鏈嶅姟鐢熸垚鏁呬簨鏋舵瀯
+        # Generate story outline via AI planning service.
         runtime_ai_planning_service = _resolve_runtime_ai_planning_service(params.openai_config)
         outline = await runtime_ai_planning_service.generate_story_outline(params)
         return outline
@@ -944,9 +944,9 @@ async def generate_story_outline(params: StoryOutlineParams):
 
 @app.post("/api/ai/design-characters", response_model=List[CharacterDesign])
 async def design_characters(request: CharacterDesignRequest):
-    """璁捐瑙掕壊"""
+    """Design characters."""
     try:
-        # 璋冪敤AI瑙勫垝鏈嶅姟璁捐瑙掕壊
+        # Design characters via AI planning service.
         runtime_ai_planning_service = _resolve_runtime_ai_planning_service(request.openai_config)
         characters = await runtime_ai_planning_service.design_characters(
             request.context, request.roles
@@ -960,9 +960,9 @@ async def design_characters(request: CharacterDesignRequest):
 
 @app.post("/api/ai/build-world-setting", response_model=WorldSetting)
 async def build_world_setting(request: WorldBuildingRequest):
-    """鏋勫缓涓栫晫璁惧畾"""
+    """Build world setting."""
     try:
-        # 璋冪敤AI瑙勫垝鏈嶅姟鏋勫缓涓栫晫璁惧畾
+        # Build world setting via AI planning service.
         runtime_ai_planning_service = _resolve_runtime_ai_planning_service(request.openai_config)
         world_setting = await runtime_ai_planning_service.build_world_setting(
             request.story_outline
@@ -974,13 +974,13 @@ async def build_world_setting(request: WorldBuildingRequest):
             detail=f"世界构建失败: {str(e)}"
         )
 
-# 宸ヤ綔娴佺鐞嗙鐐?
+# Workflow management endpoints.
 
 @app.post("/api/workflow/start-process")
 async def start_workflow_process(ai_plan: dict, source_text: Optional[str] = None):
-    """鍚姩瀹屾暣宸ヤ綔娴佸鐞?"""
+    """Start full workflow processing."""
     try:
-        # TODO: 姝ゅ灏氭湭鎺ュ叆瀹為檯宸ヤ綔娴佺郴缁燂紝鐩墠浠呯敓鎴愪簡涓€涓ā鎷熺殑浠诲姟ID
+        # TODO: Wire this endpoint to the real workflow system. For now it only creates a task id.
         task_id = str(uuid.uuid4())
         return {
             "taskId": task_id,
@@ -996,12 +996,12 @@ async def start_workflow_process(ai_plan: dict, source_text: Optional[str] = Non
 
 @app.get("/api/workflow/status/{task_id}")
 async def get_workflow_status(task_id: str):
-    """鑾峰彇宸ヤ綔娴佺姸鎬?"""
+    """Get workflow status."""
     try:
-        # TODO: 姝ゅ搴斿疄鐜板鎺ヤ换鍔＄鐞嗗櫒鐨勭湡瀹炵姸鎬佹煡璇㈤€昏緫
+        # TODO: Query the real task manager when workflow execution is connected.
         return {
             "taskId": task_id,
-            "status": "completed",  # 鎴?"running", "error"
+            "status": "completed",  # or "running", "error"
             "progress": 100,
             "result": {},
             "message": "工作流已完成"
@@ -1013,12 +1013,12 @@ async def get_workflow_status(task_id: str):
         )
 
 
-# 鏂囨湰鎻愬彇鐩稿叧绔偣
+# Text extraction endpoints.
 
-# FIXME: 宸茬Щ闄ら噸澶嶅畾涔夌殑澶氫綑鐨?@app.post 璺敱瑁呴グ鍣?
+# FIXME: Remove legacy duplicate route definitions when extraction API is consolidated.
 @app.post("/api/extract/text", response_model=ExtractionResult)
 async def extract_from_text(request: ExtractionRequest):
-   """浠庢枃鏈腑鎻愬彇瑙掕壊銆佷笘鐣岃瀹氥€佹椂闂寸嚎鍜屽叧绯荤綉缁?"""
+   """Extract characters, world settings, timeline, and relationships from text."""
    try:
        text = request.text.strip() if request.text else ""
        if not text:
@@ -1027,7 +1027,7 @@ async def extract_from_text(request: ExtractionRequest):
                 detail="文本内容不能为空"
            )
        
-       # 浣跨敤鎻愬彇鏈嶅姟杩涜鎻愬彇锛岃繑鍥炵粺涓€鐨?dict 缁撴瀯
+       # Use extraction service and normalize to the response model.
        runtime_extraction_service = _resolve_runtime_extraction_service(
            request.openai_config.model_dump(exclude_none=True) if request.openai_config else None
        )
@@ -1043,7 +1043,7 @@ async def extract_from_text(request: ExtractionRequest):
            }
        )
        
-       # 鏋勫缓杩斿洖缁撴灉
+       # Build response result.
        result = ExtractionResult(
            characters=extraction_result.get("characters", []),
            world=extraction_result.get("world_setting", None),
@@ -1075,9 +1075,9 @@ async def extract_from_file(
     openai_config: Optional[str] = Form(None),
     session_id: Optional[str] = Form(None),
 ):
-   """浠庢枃浠朵腑鎻愬彇瑙掕壊銆佷笘鐣岃瀹氥€佹椂闂寸嚎鍜屽叧绯荤綉缁?"""
+   """Extract characters, world settings, timeline, and relationships from an uploaded file."""
    try:
-       # 妫€鏌ユ枃浠剁被鍨?
+       # Validate file type.
        filename = file.filename or ""
        if not filename.lower().endswith(('.txt', '.md', '.text')):
            raise HTTPException(
@@ -1085,11 +1085,11 @@ async def extract_from_file(
                 detail="只支持文本文件 (.txt, .md, .text)"
            )
        
-       # 璇诲彇鏂囦欢鍐呭
+       # Read file content.
        content = await file.read()
        text = _decode_uploaded_text(content)
        
-       # 浣跨敤鎻愬彇鏈嶅姟杩涜鎻愬彇锛岃繑鍥炵粺涓€鐨?dict 缁撴瀯
+       # Use extraction service and normalize to the response model.
        runtime_extraction_service = _resolve_runtime_extraction_service(_parse_openai_config_form_value(openai_config))
        extraction_result = await runtime_extraction_service.extract_all(text)
        extraction_errors = extraction_result.get("errors", [])
@@ -1103,7 +1103,7 @@ async def extract_from_file(
            }
        )
        
-       # 鏋勫缓杩斿洖缁撴灉
+       # Build response result.
        result = ExtractionResult(
            characters=extraction_result.get("characters", []),
            world=extraction_result.get("world_setting", None),
@@ -1130,10 +1130,10 @@ async def extract_from_file(
        )
 
 
-# 鍗曠嫭鎻愬彇鐩稿叧绔偣
+# Single extraction endpoints.
 @app.post("/api/extract/characters", response_model=List[Character])
 async def extract_characters(request: ExtractionRequest):
-  """鍗曠嫭鎻愬彇瑙掕壊"""
+  """Extract characters only."""
   try:
       text = request.text
       if not text:
@@ -1158,7 +1158,7 @@ async def extract_characters(request: ExtractionRequest):
 
 @app.post("/api/extract/world-setting", response_model=WorldSetting)
 async def extract_world_setting(request: ExtractionRequest):
-  """鍗曠嫭鎻愬彇涓栫晫璁惧畾"""
+  """Extract world setting only."""
   try:
       text = request.text
       if not text:
@@ -1183,7 +1183,7 @@ async def extract_world_setting(request: ExtractionRequest):
 
 @app.post("/api/extract/timeline", response_model=List[TimelineEvent])
 async def extract_timeline(request: ExtractionRequest):
-  """鍗曠嫭鎻愬彇鏃堕棿绾?"""
+  """Extract timeline only."""
   try:
       text = request.text
       if not text:
@@ -1208,7 +1208,7 @@ async def extract_timeline(request: ExtractionRequest):
 
 @app.post("/api/extract/relationships", response_model=List[NetworkEdge])
 async def extract_relationships(request: ExtractionRequest):
-  """鍗曠嫭鎻愬彇鍏崇郴缃戠粶"""
+  """Extract relationship network only."""
   try:
       text = request.text
       if not text:
@@ -1231,7 +1231,7 @@ async def extract_relationships(request: ExtractionRequest):
       )
 
 
-# AI瀵硅瘽鍒涗綔鐩稿叧绔偣
+# AI chat and writing endpoints.
 @app.post("/api/chat/start-conversation", response_model=Conversation)
 async def start_conversation(request: Optional[StartConversationRequest] = None):
    """寮€濮嬫柊瀵硅瘽"""
@@ -1261,7 +1261,7 @@ async def start_conversation(request: Optional[StartConversationRequest] = None)
 
 @app.post("/api/chat/send-message", response_model=ChatResponse)
 async def send_message(request: ChatRequest):
-   """鍙戦€佹秷鎭埌AI"""
+   """Send a message to the AI assistant."""
    try:
        conversation_id = request.conversation_id
        if not conversation_id:
@@ -1280,7 +1280,7 @@ async def send_message(request: ChatRequest):
            if not saved:
                raise RuntimeError("对话初始化失败")
        else:
-           # 鍔犺浇鐜版湁瀵硅瘽
+           # Save user message.
            loaded = await storage_manager.load(f"conversation_{conversation_id}", storage_type=CHAT_STORAGE_TYPE)
            if loaded:
                conversation = Conversation(**loaded)
@@ -1290,11 +1290,11 @@ async def send_message(request: ChatRequest):
                    detail="对话不存在"
                )
        
-       # 娣诲姞鐢ㄦ埛娑堟伅
+       # Generate AI response.
        user_message = Message(role="user", content=request.message)
        conversation.messages.append(user_message)
        
-       # 璋冪敤AI鏈嶅姟鑾峰彇鍝嶅簲
+       # Call AI service.
        system_prompt = _build_chat_system_prompt(request.context)
 
        runtime_ai_service = _resolve_runtime_ai_service(
@@ -1313,7 +1313,7 @@ async def send_message(request: ChatRequest):
            system_prompt=agent_preparation.system_prompt
        )
        
-       # 娣诲姞AI鍝嶅簲
+       # Save AI response.
        ai_message = Message(
            role="assistant",
            content=ai_response,
@@ -1321,10 +1321,10 @@ async def send_message(request: ChatRequest):
        )
        conversation.messages.append(ai_message)
        
-       # 鏇存柊瀵硅瘽鏃堕棿鎴?
+       # Save updated conversation.
        conversation.updated_at = datetime.now()
        
-       # 淇濆瓨鏇存柊鐨勫璇?
+       # Add AI response.
        saved = await storage_manager.save(
            f"conversation_{conversation_id}",
            conversation.model_dump(),
@@ -1333,10 +1333,10 @@ async def send_message(request: ChatRequest):
        if not saved:
             raise RuntimeError("对话更新失败")
        
-       # 鐢熸垚寤鸿鍥炲
+       # Generate simple suggestions.
        suggestions = []
        if len(ai_response) > 100:
-           # 绠€鍗曠殑寤鸿鐢熸垚閫昏緫锛屽疄闄呭簲鐢ㄤ腑鍙敤AI鐢熸垚
+           # Simple suggestion generation logic; production can use AI-generated suggestions.
            suggestions = [
                "请继续这个情节",
                "能详细描述一下人物感受吗？",
@@ -1458,7 +1458,7 @@ async def send_chat_message_stream(request: ChatRequest):
 
 @app.get("/api/chat/conversations", response_model=List[Conversation])
 async def get_conversations():
-   """鍒楀嚭鎵€鏈夊璇?"""
+   """Get all conversations."""
    try:
        all_keys = await storage_manager.list_keys(storage_type=CHAT_STORAGE_TYPE)
        conversation_keys = [key for key in all_keys if key.startswith("conversation_")]
@@ -1516,7 +1516,7 @@ async def cleanup_empty_conversations():
 
 @app.delete("/api/chat/conversations/{conversation_id}", response_model=dict)
 async def delete_conversation(conversation_id: str):
-   """鍒犻櫎瀵硅瘽鍙婂叾鍏宠仈鍐呭"""
+   """Delete a conversation and its associated content."""
    try:
        loaded = await storage_manager.load(f"conversation_{conversation_id}", storage_type=CHAT_STORAGE_TYPE)
        if not loaded:
@@ -1541,7 +1541,7 @@ async def delete_conversation(conversation_id: str):
 
 @app.post("/api/openai/models", response_model=dict)
 async def list_openai_models(payload: Optional[dict] = None):
-   """鍒楀嚭褰撳墠 OpenAI 鍏煎閰嶇疆鍙敤鐨勬ā鍨?"""
+   """List models available to the current OpenAI-compatible configuration."""
    try:
        payload = payload or {}
        openai_config = payload.get("openai_config") or {}
@@ -1567,9 +1567,9 @@ async def list_openai_models(payload: Optional[dict] = None):
 
 @app.post("/api/generate/novel", response_model=NovelGenerationResult)
 async def generate_novel_content(request: NovelGenerationRequest):
-   """鐢熸垚鏂板皬璇村唴瀹?"""
+   """Generate novel content."""
    try:
-       # 鏋勫缓鐢熸垚鎻愮ず
+       # Build generation prompt.
        story_context = request.story_context
        context_info = f"故事上下文: {story_context}"
        
@@ -1591,18 +1591,18 @@ async def generate_novel_content(request: NovelGenerationRequest):
            request.openai_config.model_dump(exclude_none=True) if request.openai_config else None
        )
 
-       # 璋冪敤AI鏈嶅姟鐢熸垚鍐呭
+       # Generate content via AI service.
        generated_text = await runtime_ai_service.chat(
            prompt=prompt,
            system_prompt="你是一位专业小说作者，擅长创作高质量且连贯的情节。",
            max_tokens=request.target_length // 4,
         )
        
-       # 鍒涘缓鐢熸垚缁撴灉
+       # Create generation result.
        result = NovelGenerationResult(
            generated_text=generated_text,
-           extracted_characters=[],  # 鍙互杩涗竴姝ユ彁鍙栫敓鎴愬唴瀹逛腑鐨勮鑹?
-           extracted_events=[],      # 鍙互杩涗竴姝ユ彁鍙栫敓鎴愬唴瀹逛腑鐨勪簨浠?
+           extracted_characters=[],  # Future: extract characters from generated content.
+           extracted_events=[],      # Future: extract events from generated content.
            quality_metrics={"coherence": 0.8, "originality": 0.7, "relevance": 0.9},
            timeline=[],
            relationships=[],
@@ -1619,13 +1619,13 @@ async def generate_novel_content(request: NovelGenerationRequest):
 
 @app.post("/api/generate/text", response_model=GenerationResult)
 async def generate_text(request: GenerationRequest):
-   """閫氱敤鏂囨湰鐢熸垚"""
+   """Generate generic text."""
    try:
        runtime_ai_service = _resolve_runtime_ai_service(
            request.openai_config.model_dump(exclude_none=True) if request.openai_config else None
        )
 
-       # 浣跨敤AI鏈嶅姟鐢熸垚鏂囨湰
+       # Generate text via AI service.
        generated_text = await runtime_ai_service.chat(
            prompt=request.prompt,
            system_prompt="你是一位高质量文本生成助手，请按用户要求输出内容。",
@@ -1635,7 +1635,7 @@ async def generate_text(request: GenerationRequest):
        
        result = GenerationResult(
            content=generated_text,
-           quality_score=0.8,  # 鍙互鐢ㄨ川閲忚瘎浼版湇鍔℃潵璁＄畻
+           quality_score=0.8,  # Future: calculate this with a quality evaluation service.
            extracted_elements={} if request.extract_info else None,
            metrics={
                "length": len(generated_text),
@@ -1647,19 +1647,19 @@ async def generate_text(request: GenerationRequest):
    except Exception as e:
        raise HTTPException(
            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-           detail=f"鏂囨湰鐢熸垚澶辫触: {str(e)}"
+           detail=f"文本生成失败: {str(e)}"
        )
 
 
-# 鍚姩AI璋冨害鍣ㄧ殑鍑芥暟
+# Start AI scheduler helper.
 async def start_scheduler():
     await ai_scheduler.start()
 
 
-# AI璋冨害绯荤粺鐩稿叧绔偣
+# AI scheduler endpoints.
 @app.post("/api/task/queue", response_model=TaskQueueResponse)
 async def queue_task(request: TaskQueueRequest):
-   """灏嗕换鍔℃坊鍔犲埌闃熷垪"""
+   """Add a task to the queue."""
    try:
        task = AITask(
            type=request.task_type,
@@ -1667,25 +1667,25 @@ async def queue_task(request: TaskQueueRequest):
            priority=request.priority
        )
        
-       # 淇濆瓨浠诲姟
+       # 保存任务
        await storage_manager.save(f"task_{task.id}", task.model_dump())
        
        response = TaskQueueResponse(
            task_id=task.id,
            status=task.status,
-           message="浠诲姟宸叉坊鍔犲埌闃熷垪"
+           message="任务已添加到队列"
        )
        return response
    except Exception as e:
        raise HTTPException(
            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-           detail=f"浠诲姟闃熷垪澶辫触: {str(e)}"
+           detail=f"任务队列失败: {str(e)}"
        )
 
 
 @app.get("/api/task/{task_id}", response_model=AITask)
 async def get_basic_task_status(task_id: str):
-    """鑾峰彇浠诲姟鐘舵€?"""
+    """Get task status."""
     loaded = await storage_manager.load(f"task_{task_id}")
     if not loaded:
         raise HTTPException(
@@ -1697,7 +1697,7 @@ async def get_basic_task_status(task_id: str):
 
 @app.post("/api/task/{task_id}/execute")
 async def execute_task(task_id: str):
-   """鎵ц浠诲姟锛堟ā鎷燂級"""
+   """Execute task (mock workflow)."""
    try:
        loaded = await storage_manager.load(f"task_{task_id}")
        if not loaded:
@@ -1713,29 +1713,29 @@ async def execute_task(task_id: str):
                detail="任务状态不是待执行"
            )
        
-       # 鏇存柊浠诲姟鐘舵€佷负杩愯涓?
+       # Mark task as running.
        task.status = TaskStatus.RUNNING
        task.started_at = datetime.now()
        await storage_manager.save(f"task_{task_id}", task.model_dump())
        
-       # 鏍规嵁浠诲姟绫诲瀷鎵ц鐩稿簲鎿嶄綔锛堟ā鎷燂級
+       # Execute based on task type.
        result = None
        if task.type == "novel_generation":
-           # 鎵ц灏忚鐢熸垚浠诲姟
+           # Execute novel generation task.
            gen_request = NovelGenerationRequest(**task.parameters)
            result = await generate_novel_content(gen_request)
        elif task.type == "text_generation":
-           # 鎵ц鏂囨湰鐢熸垚浠诲姟
+           # Execute text generation task.
            gen_request = GenerationRequest(**task.parameters)
            result = await generate_text(gen_request)
        elif task.type == "extraction":
-           # 鎵ц鎻愬彇浠诲姟
+           # Execute extraction task.
            result = await extract_from_text(task.parameters)
        else:
-           # 鍏朵粬浠诲姟绫诲瀷
+           # Other task types.
            result = {"status": "completed", "message": f"执行了 {task.type} 类型的任务"}
        
-       # 鏇存柊浠诲姟鐘舵€佷负瀹屾垚
+       # Mark task as completed.
        task.status = TaskStatus.COMPLETED
        task.completed_at = datetime.now()
        task.result = result.model_dump() if hasattr(result, 'model_dump') else result
@@ -1743,7 +1743,7 @@ async def execute_task(task_id: str):
        
        return {"message": "任务执行完成", "task_id": task_id}
    except Exception as e:
-       # 鏇存柊浠诲姟鐘舵€佷负澶辫触
+       # Mark task as failed.
        try:
            loaded = await storage_manager.load(f"task_{task_id}")
            if loaded:
@@ -1753,7 +1753,7 @@ async def execute_task(task_id: str):
                task.completed_at = datetime.now()
                await storage_manager.save(f"task_{task_id}", task.model_dump())
        except:
-           pass  # 蹇界暐淇濆瓨閿欒
+           pass  # Ignore persistence errors during failure handling.
        
        raise HTTPException(
            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1761,10 +1761,10 @@ async def execute_task(task_id: str):
        )
 
 
-# 鍐呭绠＄悊鐩稿叧绔偣
+# Content management endpoints.
 @app.post("/api/content/create", response_model=dict)
 async def create_content(request: ContentCreateRequest):
-   """鍒涘缓鍐呭"""
+   """Create content."""
    try:
        content_item = _build_content_item_from_request(request)
        content_item = await _normalize_content_item_for_write(content_item)
@@ -1783,7 +1783,7 @@ async def create_content(request: ContentCreateRequest):
 
 @app.post("/api/content/search", response_model=ContentSearchResult)
 async def search_content(request: ContentSearchRequest):
-   """鎼滅储鍐呭"""
+   """Search content."""
    try:
        result = await content_manager.search_content(request)
        return result
@@ -1837,11 +1837,11 @@ async def list_novels(session_id: str):
 
 @app.post("/api/content/export")
 async def export_content(request: ContentExportRequest):
-   """瀵煎嚭鍐呭"""
+   """Export content."""
    try:
        export_data = await content_manager.export_content(request)
        
-       # 鏍规嵁鏍煎紡璁剧疆閫傚綋鐨勫搷搴斿ご
+       # Return response headers based on export format.
        if request.format == "json":
            return Response(
                content=export_data,
@@ -1859,7 +1859,7 @@ async def export_content(request: ContentExportRequest):
                }
            )
        else:
-           # 榛樿杩斿洖JSON
+           # Default to JSON.
            return Response(
                content=export_data,
                media_type="application/json",
@@ -1876,7 +1876,7 @@ async def export_content(request: ContentExportRequest):
 
 @app.get("/api/content/stats", response_model=dict)
 async def get_content_stats():
-   """鑾峰彇鍐呭缁熻"""
+   """Get content statistics."""
    try:
        stats = await content_manager.get_content_stats()
        return stats
@@ -1892,7 +1892,7 @@ async def get_content_stats():
 @app.get("/api/content/topology/{session_id}")
 async def get_content_topology(session_id: str, parent_id: Optional[str] = None):
     """
-    鑾峰彇鍐呭鐨勬嫇鎵戠粨鏋勭粨鏋勶紝鐢ㄤ簬涓栫晫鏍戝彲瑙嗗寲
+    获取内容拓扑结构，用于世界树可视化。
     """
     try:
         search_req = ContentSearchRequest(session_id=session_id, parent_id=parent_id, limit=200, include_content=False)
@@ -1998,7 +1998,7 @@ async def get_content_topology(session_id: str, parent_id: Optional[str] = None)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"鑾峰彇鎷撴墤缁撴瀯澶辫触: {str(e)}"
+            detail=f"获取拓扑结构失败: {str(e)}"
         )
 
 @app.get("/api/content/type/{content_type}", response_model=List[ContentItem])
@@ -2007,7 +2007,7 @@ async def list_content_by_type(
    content_status: Optional[str] = Query(default=None, alias="status"),
    session_id: Optional[str] = None
 ):
-   """鎸夌被鍨嬪垪鍑哄唴瀹?"""
+   """List content by type."""
    try:
        contents = await content_manager.list_content_by_type(content_type, content_status, session_id)
        return contents
@@ -2018,11 +2018,11 @@ async def list_content_by_type(
        )
 
 
-# AI璋冨害绯荤粺鐩稿叧绔偣
+# AI scheduler system endpoints.
 
 @app.get("/api/content/{content_id}", response_model=ContentItem)
 async def get_content(content_id: str):
-   """鑾峰彇鍐呭"""
+   """Get content."""
    try:
        content = await content_manager.get_content(content_id)
        if not content:
@@ -2048,9 +2048,9 @@ async def get_content(content_id: str):
 
 @app.put("/api/content/{content_id}", response_model=dict)
 async def update_content(content_id: str, request: ContentUpdateRequest):
-   """鏇存柊鍐呭"""
+   """Update content."""
    try:
-       # 璁剧疆姝ｇ‘鐨処D
+       # Set the correct content id.
        existing = await content_manager.get_content(content_id)
        if not existing:
            raise HTTPException(
@@ -2081,7 +2081,7 @@ async def update_content(content_id: str, request: ContentUpdateRequest):
 
 @app.delete("/api/content/{content_id}", response_model=dict)
 async def delete_content(content_id: str):
-   """鍒犻櫎鍐呭"""
+   """Delete content."""
    try:
        success = await content_manager.delete_content(content_id)
        if not success:
@@ -2110,7 +2110,7 @@ async def submit_task(
     priority: SchedulerTaskPriority = SchedulerTaskPriority.MEDIUM,
     user_id: Optional[str] = None
 ):
-    """鎻愪氦鏂颁换鍔″埌璋冨害鍣?"""
+    """Submit a new task to the scheduler."""
     try:
         task_id = await ai_scheduler.submit_task(
             task_type=task_type,
@@ -2126,7 +2126,7 @@ async def submit_task(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"浠诲姟鎻愪氦澶辫触: {str(e)}"
+            detail=f"任务提交失败: {str(e)}"
         )
 
 
@@ -2150,7 +2150,7 @@ def _serialize_scheduler_task(task) -> dict:
 
 @app.get("/api/scheduler/task/{task_id}", response_model=dict)
 async def get_scheduler_task_status(task_id: str):
-    """鑾峰彇浠诲姟鐘舵€?"""
+    """Get task status."""
     task = await ai_scheduler.get_task_status(task_id)
     if not task:
         raise HTTPException(
@@ -2163,13 +2163,13 @@ async def get_scheduler_task_status(task_id: str):
 
 @app.post("/api/scheduler/cancel/{task_id}", response_model=dict)
 async def cancel_task(task_id: str):
-    """鍙栨秷浠诲姟"""
+    """Cancel task."""
     try:
         success = await ai_scheduler.cancel_task(task_id)
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="浠诲姟涓嶅瓨鍦ㄦ垨鏃犳硶鍙栨秷"
+                detail="任务不存在或无法取消"
             )
         return {
             "success": True,
@@ -2178,20 +2178,20 @@ async def cancel_task(task_id: str):
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"浠诲姟鍙栨秷澶辫触: {str(e)}"
+            detail=f"任务取消失败: {str(e)}"
         )
 
 
 @app.get("/api/scheduler/active/{session_id}", response_model=List[dict])
 async def get_active_tasks_by_session(session_id: str):
-    """鑾峰彇鎸囧畾浼氳瘽鏈€杩戠殑浠诲姟"""
+    """Get active tasks for the specified session."""
     try:
         tasks = await ai_scheduler.get_active_tasks_by_session(session_id)
         return [_serialize_scheduler_task(task) for task in tasks]
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"鑾峰彇浼氳瘽浠诲姟澶辫触: {str(e)}"
+            detail=f"获取会话任务失败: {str(e)}"
         )
 
 
@@ -2216,7 +2216,7 @@ async def get_recent_tasks_by_session(
         )
 
 
-    """鑾峰彇璋冨害鍣ㄧ粺璁′俊鎭?"""
+    """Get scheduler statistics."""
     try:
         stats = ai_scheduler.get_queue_stats()
         return stats
@@ -2233,7 +2233,7 @@ async def get_user_tasks(
     limit: int = 20,
     offset: int = 0
 ):
-    """鑾峰彇鐢ㄦ埛鐨勬墍鏈変换鍔?"""
+    """Get all tasks for a user."""
     try:
         tasks = await ai_scheduler.get_user_tasks(user_id, limit, offset)
         
@@ -2258,7 +2258,7 @@ async def get_user_tasks(
         )
 
 
-# 閿欒澶勭悊
+# Error handlers.
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
     """HTTP寮傚父澶勭悊"""
@@ -2274,7 +2274,7 @@ async def http_exception_handler(request, exc):
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc):
-    """閫氱敤寮傚父澶勭悊"""
+    """General exception handler."""
     return JSONResponse(
         status_code=500,
         content={

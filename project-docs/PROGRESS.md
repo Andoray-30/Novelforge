@@ -60,6 +60,7 @@
 - 主工作台会隐藏明显 mock/smoke/Goal 验证会话；这是展示层清洁，不物理删除真实用户数据。
 - `INTERNAL_TEST_READINESS.md` 增加部署配置、数据目录、备份/恢复、clean workspace policy、最小 smoke 和常见错误说明。
 - `installation.md` 增加 `.env.example`、持久化数据目录和备份提醒。
+- 清理 `novelforge/api/__init__.py` 中残留的旧编码乱码 docstring / 注释 / API 错误文案，避免 OpenAPI 与错误响应继续出现 `????` 或 mojibake。
 
 ### 验证
 - `.\.venv\Scripts\python.exe -m pytest tests/api/test_auth.py`：6 passed。
@@ -72,6 +73,11 @@
   - 临时启动后端 `127.0.0.1:8001`，`GET /health` 返回 healthy。
   - 临时启动生产前端 `localhost:3010`，首页 HTTP 200。
   - 通过内容 API 创建一条 `internal-smoke` AI 草稿章节，随后读取和搜索均成功，再立即删除该 smoke 内容，避免污染工作区。
+- 补充隔离 smoke：
+  - 使用临时数据目录 `.tmp-goal15-smoke` 启动后端 `127.0.0.1:8015`，开启管理员登录。
+  - `POST /api/auth/login` 成功，`GET /api/auth/me` 验证 HttpOnly session cookie 生效。
+  - 在临时内容库创建小说根节点与 AI 草稿章节，随后 `GET /api/content/{id}` 与 `/api/content/search` 均能读取，最后删除测试资产并移除临时数据目录。
+  - 启动前端生产包 `localhost:3015`，`/`、`/extract`、`/editor` 均返回 HTTP 200。
 
 ## 2026-04-18 阶段审计结论
 ### 审计摘要
