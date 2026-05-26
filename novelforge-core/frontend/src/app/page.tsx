@@ -1435,6 +1435,7 @@ export default function ChatPage() {
   
   return (
     <div
+      className="nf-shell"
       style={{
         display: 'flex',
         height: '100%',
@@ -1451,10 +1452,8 @@ export default function ChatPage() {
           onCleanupEmptySessions={handleCleanupEmptySessions} sessions={sessions}
         />
 
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
-        <header style={{
-          height: 60, padding: '0 24px', borderBottom: '1px solid var(--border-subtle)',
-          background: 'var(--bg-surface)', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      <main className="nf-main" style={{ position: 'relative' }}>
+        <header className="nf-topbar" style={{
           zIndex: 30
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -1532,18 +1531,21 @@ export default function ChatPage() {
 
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {viewMode === 'chat' ? (
-            <>
-              <ProjectQualityOverview
-                summary={projectQualitySummary}
-                compact
-                onOpenEditor={() => router.push('/editor')}
-                onOpenExtract={() => router.push('/extract')}
-                onOpenDashboard={() => {
-                  setViewMode('dashboard');
-                  setDashboardType('list');
-                }}
-              />
-              {focusedAssets.length > 0 && (
+            <div className="nf-chat-layout">
+              <section className="nf-chat-main">
+              {currentMessages.length === 0 && (
+                <ProjectQualityOverview
+                  summary={projectQualitySummary}
+                  compact
+                  onOpenEditor={() => router.push('/editor')}
+                  onOpenExtract={() => router.push('/extract')}
+                  onOpenDashboard={() => {
+                    setViewMode('dashboard');
+                    setDashboardType('list');
+                  }}
+                />
+              )}
+              {currentMessages.length === 0 && focusedAssets.length > 0 && (
                 <div
                   style={{
                     padding: '14px 20px 10px',
@@ -1631,7 +1633,7 @@ export default function ChatPage() {
                   </div>
                 </div>
               )}
-              {(quickReferenceGroups.length > 0 || assetQuickSearch.trim().length > 0) && (
+              {currentMessages.length === 0 && (quickReferenceGroups.length > 0 || assetQuickSearch.trim().length > 0) && (
                 <div
                   style={{
                     padding: '12px 20px',
@@ -1765,7 +1767,7 @@ export default function ChatPage() {
                   </div>
                 )}
               </div>
-              <div style={{ maxWidth: 800, width: '100%', margin: '0 auto' }}>
+              <div className="nf-input-wrap">
                 <ChatInput
                   onSend={handleSendMessage}
                   sessionId={currentSessionId || undefined}
@@ -1775,7 +1777,35 @@ export default function ChatPage() {
                   prefill={chatPrefill}
                 />
               </div>
-            </>
+              </section>
+              <aside className="nf-context-rail" aria-label="项目上下文">
+                <div className="nf-panel nf-panel-pad">
+                  <div className="nf-panel-title">项目状态</div>
+                  <div className="nf-panel-subtitle">
+                    {projectQualitySummary.status_label}。资料不足时仍可聊天，但建议先导入小说或整理章节。
+                  </div>
+                  <div className="nf-pill-row" style={{ marginTop: 12 }}>
+                    <button className="nf-button" type="button" onClick={() => router.push('/extract')}>导入小说</button>
+                    <button className="nf-button" type="button" onClick={() => router.push('/editor')}>打开 editor</button>
+                  </div>
+                </div>
+                <div className="nf-panel nf-panel-pad">
+                  <div className="nf-panel-title">上下文</div>
+                  <div className="nf-stat-grid" style={{ marginTop: 12 }}>
+                    <div className="nf-stat"><span>角色</span><strong>{projectAssets.characters.length}</strong></div>
+                    <div className="nf-stat"><span>关系</span><strong>{projectAssets.relationships.length}</strong></div>
+                    <div className="nf-stat"><span>章节</span><strong>{projectAssets.chapters.length}</strong></div>
+                    <div className="nf-stat"><span>世界观</span><strong>{projectAssets.worlds.length}</strong></div>
+                  </div>
+                </div>
+                <div className="nf-panel nf-panel-pad">
+                  <div className="nf-panel-title">聚焦资产</div>
+                  <div className="nf-panel-subtitle">
+                    {focusedAssets.length > 0 ? `${focusedAssets.length} 条资产会优先进入本轮创作。` : '还没有聚焦资产。可以从快捷引用中加入角色、章节或世界观。'}
+                  </div>
+                </div>
+              </aside>
+            </div>
           ) : (
             <div style={{ flex: 1, overflowY: 'auto', padding: '40px' }}>
               <div style={{ maxWidth: 1000, margin: '0 auto' }}>

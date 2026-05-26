@@ -4871,3 +4871,77 @@
 - 当前判断：
   - Goal 12 的队列生成、批量补强、前端队列展示、逐条保存/更新入口、全局关系质量改善、agent 优先读取增强关系、真实多关系序章候选均已完成。
   - 最终候选可作为 AI draft/candidate 进入人工审阅；仍不应自动替换正式序章。
+
+## 2026-05-26 Goal 16：主工作台 UI 视觉重构与多尺寸截图验收 v1
+
+- 目标：
+  - 暂停继续堆新功能，把主工作台收敛成更接近 ChatGPT / Codex 的安静写作界面。
+  - 建立可复用的 `nf-*` UI primitives，为后续大规模 UI 重构留下空间，而不是把功能写死在当前页面结构里。
+- 已完成：
+  - 新增主工作台 UI token / primitive：
+    - `nf-shell`
+    - `nf-main`
+    - `nf-topbar`
+    - `nf-chat-layout`
+    - `nf-chat-main`
+    - `nf-context-rail`
+    - `nf-panel`
+    - `nf-button`
+    - `nf-chip`
+    - `nf-message-list`
+    - `nf-message-bubble`
+    - `nf-action-card`
+    - `nf-trace-card`
+    - `nf-alert`
+    - `nf-stat-grid`
+  - 主聊天页布局调整：
+    - 桌面端形成左侧项目列表 / 中央写作对话 / 右侧项目状态与上下文摘要。
+    - 平板与移动端降为单列，不出现横向溢出。
+    - 对话已有消息时，隐藏顶部快捷引用和重复质量卡，把空间让给消息流；项目质量与上下文留在右侧 / 上方摘要区。
+  - `MessageBubble` 重构：
+    - 修复用户可见中文乱码。
+    - trace 默认折叠，只显示角色、关系、世界观、章节片段、fallback、增强关系等摘要。
+    - trace 展开后分组展示：
+      - 计划
+      - 工具调用
+      - 使用资产
+      - 章节片段
+      - 关系质量
+      - 关系补强队列
+      - 关系修复建议
+    - 不展示模型原始思考链。
+    - save asset 卡片与 relationship repair 卡片统一为标题 / 状态 / 预览 / 操作结构。
+    - trace 展开从原生 `details` 改成 React 状态按钮，避免在当前布局中被输入区遮挡后无法稳定点击。
+- 截图验收：
+  - 截图目录：
+    - `project-docs/screenshots/goal16/desktop-default.png`
+    - `project-docs/screenshots/goal16/desktop-trace-expanded.png`
+    - `project-docs/screenshots/goal16/tablet-default.png`
+    - `project-docs/screenshots/goal16/mobile-default.png`
+    - `project-docs/screenshots/goal16/mobile-trace-expanded.png`
+    - `project-docs/screenshots/goal16/desktop-repair-queue.png`
+  - 验收结果：
+    - 1280 桌面默认：无横向溢出、无明显乱码、save asset 卡片可见。
+    - 1280 桌面 trace 展开：无横向溢出、关系补强队列与保存草稿 / 更新原关系入口可见。
+    - 768 平板默认：无横向溢出、质量状态 / trace / save card 文案可检索。
+    - 390 移动默认：无横向溢出、单列可用。
+    - 390 移动 trace 展开：无横向溢出、trace 可展开，关系补强内容可进入同一滚动流。
+    - clean fixture 页面检查：
+      - `hasMojibake=false`
+      - `hasTrace=true`
+      - `hasSaveCard=true`
+      - `hasRepairQueue=true`（展开态）
+- 测试：
+  - `cmd /c npx tsc --noEmit --incremental false`
+    - passed
+  - `cmd /c npm test`
+    - `24 files / 101 tests passed`
+  - `cmd /c npm run build`
+    - passed
+- 当前判断：
+  - Goal 16 达到“主工作台视觉与结构基础可继续迭代”的标准。
+  - 这不是最终 UI 完成态；它解决的是内测前最影响可用感的主工作台布局、trace 卡片、save 卡片、关系修复卡片和多尺寸横向溢出问题。
+- 后续风险 / 待办：
+  - dashboard、characters、world、editor 仍保留较多旧样式，后续应逐步迁移到同一套 `nf-*` primitives。
+  - 主工作台右侧上下文栏和顶部项目状态存在信息重复，后续可以进一步压缩。
+  - 本轮使用 clean fixture 做 UI 验收，没有重新跑真实长篇导入 smoke。
