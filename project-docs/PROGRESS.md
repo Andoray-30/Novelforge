@@ -78,6 +78,11 @@
   - `POST /api/auth/login` 成功，`GET /api/auth/me` 验证 HttpOnly session cookie 生效。
   - 在临时内容库创建小说根节点与 AI 草稿章节，随后 `GET /api/content/{id}` 与 `/api/content/search` 均能读取，最后删除测试资产并移除临时数据目录。
   - 启动前端生产包 `localhost:3015`，`/`、`/extract`、`/editor` 均返回 HTTP 200。
+- 浏览器渲染 smoke：
+  - 使用隔离后端 `127.0.0.1:8001` 与生产前端 `localhost:3016`，通过登录页完成管理员登录。
+  - 工作台能显示“项目质量总览”、AI 草稿章节快捷引用和编辑器入口，未发现 `????` / mojibake。
+  - `/editor` 自动定位到临时 AI 草稿章节，显示章节列表、章节状态、AI 草稿/候选操作和正文内容，未发现乱码。
+  - `/extract` 可打开导入与提取页，核心文案可读，未发现乱码。
 
 ## 2026-04-18 阶段审计结论
 ### 审计摘要
