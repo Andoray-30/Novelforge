@@ -2,7 +2,20 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui';
+import {
+  ArrowLeft,
+  BookOpen,
+  CheckCircle2,
+  Clock3,
+  FileText,
+  Gauge,
+  GitBranch,
+  MessageSquareText,
+  RefreshCw,
+  Sparkles,
+  Users,
+  Wand2,
+} from 'lucide-react';
 import { contentService, taskService } from '@/lib/api';
 import { getContentAssetPayload, getContentAssetText, getContentAssetTitle } from '@/lib/content-contract';
 import {
@@ -19,12 +32,11 @@ import {
   isUnassignedNovelScopedContentItem,
 } from '@/lib/content-item-binding';
 import { formatDate } from '@/lib/utils';
-import { BarChart3, CheckCircle2, Clock3, FileText, RefreshCw, Users } from 'lucide-react';
+import { buildProjectQualitySummary } from '@/lib/project-quality-summary';
 import type { AITask, ContentItem } from '@/types';
 import type { ToolCall } from '@/lib/chat-parser';
 
 type ArtifactData = ContentItemArtifactData & { toolCall?: ToolCall };
-
 
 function countChapterCharacters(items: ContentItem[]): number {
   return items.reduce((total, item) => total + getContentAssetText(item).replace(/\s+/g, '').length, 0);
@@ -45,10 +57,68 @@ function sortByUpdatedAt(items: ContentItem[]): ContentItem[] {
   return [...items].sort((left, right) => right.metadata.updated_at.localeCompare(left.metadata.updated_at));
 }
 
+function readMetadataString(item: ContentItem, key: string): string {
+  const metadata = item.metadata as unknown as Record<string, unknown>;
+  const extracted = item.extracted_data ?? {};
+  return typeof metadata[key] === 'string'
+    ? metadata[key]
+    : typeof extracted[key] === 'string'
+      ? extracted[key]
+      : '';
+}
+
+function isAIGeneratedChapter(item: ContentItem): boolean {
+  const sourceType = readMetadataString(item, 'source_type');
+  const saveDestination = readMetadataString(item, 'save_destination');
+  const tags = item.metadata.tags ?? [];
+  return (
+    sourceType.includes('ai') ||
+    saveDestination.includes('candidate') ||
+    tags.some((tag) => ['ai_draft', 'candidate_version', 'formal_prologue'].includes(tag))
+  );
+}
+
+function getChapterRoleLabel(item: ContentItem): string {
+  const role = readMetadataString(item, 'chapter_role');
+  const destination = readMetadataString(item, 'save_destination');
+  if (role === 'prologue' || destination === 'formal_prologue') return '正式序章';
+  if (destination === 'candidate') return '候选版本';
+  if (destination === 'draft') return 'AI 草稿';
+  if (item.metadata.status === 'archived') return '已归档';
+  return '正文';
+}
+
+function statusTone(status: string): string {
+  if (status === 'ready') return 'text-[var(--nf-success)]';
+  if (status === 'needs_repair') return 'text-[var(--nf-warning)]';
+  if (status === 'insufficient') return 'text-[var(--nf-danger)]';
+  return 'text-[var(--nf-text-muted)]';
+}
+
+function qualityStatusLabel(status: string): string {
+  if (status === 'ready') return '可写';
+  if (status === 'needs_repair') return '需要修复';
+  if (status === 'insufficient') return '资料不足';
+  return '未知';
+}
+
+function formatAssetType(type: string): string {
+  const labels: Record<string, string> = {
+    outline: '大纲',
+    chapter: '章节',
+    character: '角色',
+    relationship: '关系',
+    world: '世界观',
+    timeline: '时间线',
+    novel: '小说容器',
+  };
+  return labels[type] ?? type;
+}
+
 export default function AnalyticsPage() {
   const router = useRouter();
   const { currentSession, currentSessionId } = useSessions();
-  const selectedNovelId = useAppStore((s) => s.selectedNovelId);
+  const selectedNovelId = useAppStore((state) => state.selectedNovelId);
   const [items, setItems] = useState<ContentItem[]>([]);
   const [tasks, setTasks] = useState<AITask[]>([]);
   const [activeArtifacts, setActiveArtifacts] = useState<ArtifactData[]>([]);
@@ -59,44 +129,40 @@ export default function AnalyticsPage() {
   const [refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => {
-    const loadAnalytics = async () => {
+    const loadDashboard = async () => {
       setIsLoading(true);
       setError(null);
 
       try {
-        const assetPromise = contentService.searchContent({
-          query: '',
-          session_id: currentSessionId || undefined,
-          parent_id: selectedNovelId || undefined,
-          limit: 500,
-        });
-        const taskPromise = currentSessionId ? taskService.getActiveTasks(currentSessionId) : Promise.resolve([]);
-
-        const [assetResult, activeTasks] = await Promise.all([assetPromise, taskPromise]);
+        const [assetResult, activeTasks] = await Promise.all([
+          contentService.searchContent({
+            query: '',
+            session_id: currentSessionId || undefined,
+            parent_id: selectedNovelId || undefined,
+            limit: 500,
+          }),
+          currentSessionId ? taskService.getActiveTasks(currentSessionId) : Promise.resolve([]),
+        ]);
         setItems(sortByUpdatedAt(assetResult.items));
         setTasks(activeTasks);
       } catch (loadError) {
-        setError(loadError instanceof Error ? loadError.message : '加载分析数据失败');
+        setError(loadError instanceof Error ? loadError.message : '加载项目状态失败');
       } finally {
         setIsLoading(false);
       }
     };
 
-    void loadAnalytics();
+    void loadDashboard();
   }, [currentSessionId, selectedNovelId, refreshTick]);
 
   useSessionTaskEvents({
     sessionId: currentSessionId,
-    onCompleted: () => {
-      setRefreshTick((current) => current + 1);
-    },
+    onCompleted: () => setRefreshTick((current) => current + 1),
     onFailed: (detail) => {
-      setError(`后台任务失败，分析页显示的项目进度可能尚未完全更新：${detail.error || detail.message || '未知错误'}`);
+      setError(`后台任务失败，项目状态可能尚未完全更新：${detail.error || detail.message || '未知错误'}`);
       setRefreshTick((current) => current + 1);
     },
-    onCancelled: () => {
-      setRefreshTick((current) => current + 1);
-    },
+    onCancelled: () => setRefreshTick((current) => current + 1),
   });
 
   const chapters = useMemo(() => items.filter((item) => item.metadata.type === 'chapter'), [items]);
@@ -106,50 +172,77 @@ export default function AnalyticsPage() {
   const relationships = useMemo(() => items.filter((item) => item.metadata.type === 'relationship'), [items]);
   const outlines = useMemo(() => items.filter((item) => item.metadata.type === 'outline'), [items]);
 
+  const projectQualitySummary = useMemo(
+    () => buildProjectQualitySummary({ chapters, characters, worlds, timelines, relationships, outlines }),
+    [chapters, characters, outlines, relationships, timelines, worlds],
+  );
   const totalWordCount = useMemo(() => countChapterCharacters(chapters), [chapters]);
   const worldElementCount = useMemo(() => countWorldElements(worlds), [worlds]);
   const activeTaskCount = useMemo(
     () => tasks.filter((task) => ['PENDING', 'RUNNING'].includes(String(task.status).toUpperCase())).length,
-    [tasks]
+    [tasks],
+  );
+  const recentAssets = useMemo(() => items.slice(0, 8), [items]);
+  const recentAIDrafts = useMemo(
+    () => chapters.filter(isAIGeneratedChapter).slice(0, 5),
+    [chapters],
   );
 
-  const statusCards = useMemo(
-    () => [
-      { label: '章节数', value: chapters.length, icon: <FileText className="h-5 w-5" /> },
-      { label: '字数', value: totalWordCount, icon: <BarChart3 className="h-5 w-5" /> },
-      { label: '角色数', value: characters.length, icon: <Users className="h-5 w-5" /> },
-      { label: '世界要素', value: worldElementCount, icon: <CheckCircle2 className="h-5 w-5" /> },
-      { label: '活跃任务', value: activeTaskCount, icon: <Clock3 className="h-5 w-5" /> },
-    ],
-    [activeTaskCount, chapters.length, totalWordCount, characters.length, worldElementCount]
-  );
-
-  const recentAssets = useMemo(() => items.slice(0, 6), [items]);
-  const assetDistribution = useMemo(
-    () => [
-      { label: '大纲', value: outlines.length },
-      { label: '章节', value: chapters.length },
-      { label: '角色', value: characters.length },
-      { label: '世界观', value: worlds.length },
-      { label: '时间线', value: timelines.length },
-      { label: '关系网', value: relationships.length },
-    ],
-    [outlines.length, chapters.length, characters.length, worlds.length, timelines.length, relationships.length]
-  );
+  const nextSuggestions = useMemo(() => {
+    const suggestions: Array<{ title: string; detail: string; action: string; onClick: () => void }> = [];
+    if (chapters.length === 0) {
+      suggestions.push({
+        title: '先导入或生成章节',
+        detail: '章节是后续提取、续写和 editor 工作流的基础。',
+        action: '去导入',
+        onClick: () => router.push('/extract'),
+      });
+    }
+    if (characters.length < 8) {
+      suggestions.push({
+        title: '补强角色召回',
+        detail: '长篇项目角色过少时，序章会缺少人物选择和情绪张力。',
+        action: '查看角色',
+        onClick: () => router.push('/characters'),
+      });
+    }
+    if (relationships.length < 8) {
+      suggestions.push({
+        title: '补强人物关系',
+        detail: '关系不足会让 AI 更容易只写氛围，而不是写出牵动人心的选择。',
+        action: '打开工作台',
+        onClick: () => router.push('/'),
+      });
+    }
+    if (worlds.length === 0) {
+      suggestions.push({
+        title: '补齐世界观资料',
+        detail: '地点、规则和代价能帮助 AI 写出更有质感的场景。',
+        action: '查看世界',
+        onClick: () => router.push('/world'),
+      });
+    }
+    if (suggestions.length === 0) {
+      suggestions.push({
+        title: '进入 AI 写作闭环',
+        detail: '当前资产已经足够开始生成候选序章，再由用户确认写回。',
+        action: '开始写作',
+        onClick: () => router.push('/'),
+      });
+    }
+    return suggestions.slice(0, 4);
+  }, [chapters.length, characters.length, relationships.length, router, worlds.length]);
 
   const openRecentAsset = (item: ContentItem) => {
     const result = resolveContentItemReopen(item, selectedNovelId);
-
     if (result.kind === 'error') {
       setError(result.message);
       return;
     }
-
     if (result.kind === 'route') {
       router.push(result.href);
       return;
     }
-
     setActiveArtifacts([result.artifact]);
     setArtifactPanelVisible(true);
     setSaveMessage(result.message);
@@ -191,192 +284,271 @@ export default function AnalyticsPage() {
     }
   };
 
-
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100">
-        <div className="mx-auto flex min-h-screen max-w-6xl items-center justify-center px-6 py-10">
-          <div className="text-center">
-            <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-b-2 border-cyan-400" />
-            <p className="text-slate-400">正在分析当前项目资产...</p>
-          </div>
+      <div className="nf-editor-shell">
+        <div className="nf-editor-loading">
+          <div className="nf-editor-spinner" />
+          <p>正在加载项目状态...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="mx-auto max-w-6xl px-6 py-10">
-        <div className="mb-8 flex flex-col gap-4 border-b border-slate-800 pb-8 lg:flex-row lg:items-end lg:justify-between">
+    <div className="nf-editor-shell">
+      <div className="nf-editor-page">
+        <section className="nf-editor-hero">
           <div>
-            <h1 className="text-4xl font-black tracking-tight text-white">数据分析</h1>
-            <p className="mt-3 max-w-3xl text-slate-400">
-              分析页 v1 已切换到真实项目资产统计。这里展示的章节数、字数、角色数、世界要素和活跃任务都来自当前内容库。
+            <div className="nf-kicker">Project Dashboard</div>
+            <h1 className="nf-editor-title">
+              <Gauge size={28} />
+              项目状态总览
+            </h1>
+            <p className="nf-editor-subline">
+              这里不是数据大屏，而是内测前的项目首页：看质量、看资产、看最近候选，并决定下一步该导入、修复还是开始写作。
             </p>
-            <p className="mt-3 text-sm text-slate-500">当前项目: {currentSession?.title || '未选择项目，默认统计全部资产'}</p>
-            <p className="mt-2 text-sm text-slate-500">当前小说: {selectedNovelId ? '已按当前小说容器收敛统计' : '当前展示全部小说聚合统计'}</p>
+            <p className="nf-editor-meta">
+              当前项目：{currentSession?.title || '未选择项目，显示当前会话可读取资产'}
+            </p>
           </div>
+          <div className="nf-editor-actions">
+            <button type="button" className="nf-button" onClick={() => router.push('/')}>
+              <ArrowLeft size={16} />
+              返回工作台
+            </button>
+            <button type="button" className="nf-button" onClick={() => setRefreshTick((current) => current + 1)}>
+              <RefreshCw size={16} />
+              刷新
+            </button>
+            <button type="button" className="nf-button nf-button-primary" onClick={() => router.push('/extract')}>
+              <Wand2 size={16} />
+              导入/提取
+            </button>
+          </div>
+        </section>
 
-          <Button
-            onClick={() => setRefreshTick((current) => current + 1)}
-            className="border-slate-700 bg-slate-900 text-slate-100 hover:bg-slate-800"
-            variant="outline"
-          >
-            <RefreshCw className="mr-2 h-4 w-4" />
-            刷新分析
-          </Button>
-        </div>
+        {error ? <div className="nf-editor-alert">{error}</div> : null}
+        {saveMessage ? <div className="nf-editor-alert success">{saveMessage}</div> : null}
 
-        {error && <div className="mb-6 rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-red-200">{error}</div>}
-        {saveMessage && <div className="mb-6 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-5 py-4 text-emerald-200">{saveMessage}</div>}
+        <section className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+          {[
+            { label: '章节', value: chapters.length, icon: FileText },
+            { label: '字数', value: totalWordCount, icon: BookOpen },
+            { label: '角色', value: characters.length, icon: Users },
+            { label: '关系', value: relationships.length, icon: GitBranch },
+            { label: '世界观要素', value: worldElementCount, icon: CheckCircle2 },
+            { label: '后台任务', value: activeTaskCount, icon: Clock3 },
+          ].map((stat) => {
+            const Icon = stat.icon;
+            return (
+              <div key={stat.label} className="nf-stat">
+                <span className="flex items-center gap-2"><Icon size={15} />{stat.label}</span>
+                <strong>{stat.value}</strong>
+              </div>
+            );
+          })}
+        </section>
 
-        <div className="mb-8 grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-5">
-          {statusCards.map((stat) => (
-            <Card key={stat.label} className="border-slate-800 bg-slate-900 text-slate-100">
-              <CardContent className="p-6">
-                <div className="mb-3 flex items-center justify-between text-slate-400">
-                  {stat.icon}
-                  <Badge variant="outline">{stat.label}</Badge>
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+          <main className="space-y-5">
+            <section className="nf-panel nf-panel-pad">
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <div className="nf-kicker">Quality</div>
+                  <h2 className="text-2xl font-semibold text-[var(--nf-text)]">项目质量状态</h2>
+                  <p className="mt-2 text-sm leading-7 text-[var(--nf-text-muted)]">
+                    {qualityStatusLabel(projectQualitySummary.overall_status)}。质量状态用于提示当前资产是否足够支撑 AI 写作，不会阻止用户继续创作。
+                  </p>
                 </div>
-                <div className="text-3xl font-black text-white">{stat.value}</div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-
-        <div className="grid gap-6 lg:grid-cols-2">
-          <Card className="border-slate-800 bg-slate-900 text-slate-100">
-            <CardHeader>
-              <CardTitle>资产分布</CardTitle>
-              <CardDescription className="text-slate-400">当前项目中各类内容资产的真实数量</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {assetDistribution.map((item) => (
-                <div key={item.label}>
-                  <div className="mb-1 flex items-center justify-between text-sm">
-                    <span className="text-slate-300">{item.label}</span>
-                    <span className="text-white">{item.value}</span>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-slate-800">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-emerald-400"
-                      style={{ width: `${items.length > 0 ? (item.value / items.length) * 100 : 0}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          <Card className="border-slate-800 bg-slate-900 text-slate-100">
-            <CardHeader>
-              <CardTitle>最近更新的资产</CardTitle>
-              <CardDescription className="text-slate-400">帮助你快速回看最近发生变化的内容</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {recentAssets.length === 0 ? (
-                <p className="text-sm text-slate-500">当前没有可分析资产。</p>
-              ) : (
-                recentAssets.map((item) => {
-                  const canBindToCurrentNovel = Boolean(selectedNovelId && isUnassignedNovelScopedContentItem(item));
-
-                  return (
-                    <div
-                      key={item.metadata.id}
-                      className="w-full rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-left transition hover:border-cyan-500/40 hover:bg-slate-900"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => openRecentAsset(item)}
-                        className="w-full text-left"
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <p className="font-medium text-white">{getContentAssetTitle(item)}</p>
-                            <p className="mt-1 text-xs text-slate-500">{formatDate(item.metadata.updated_at)}</p>
-                          </div>
-                          <Badge variant="outline">{item.metadata.type}</Badge>
-                        </div>
-                      </button>
-                      {canBindToCurrentNovel && (
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void bindRecentAssetToSelectedNovel(item);
-                          }}
-                          className="mt-3 rounded-full border border-indigo-400/30 bg-indigo-500/10 px-3 py-1 text-xs font-medium text-indigo-200 transition hover:border-indigo-300/60 hover:bg-indigo-500/20"
-                        >
-                          绑定到当前小说
-                        </button>
-                      )}
-                    </div>
-                  );
-                })
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="mt-6 grid gap-6 lg:grid-cols-2">
-          <Card className="border-slate-800 bg-slate-900 text-slate-100">
-            <CardHeader>
-              <CardTitle>创作进展</CardTitle>
-              <CardDescription className="text-slate-400">从大纲到章节的闭环完成度</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm text-slate-300">
-                大纲资产: <span className="font-semibold text-white">{outlines.length}</span>
+                <span className={`rounded-full border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] px-3 py-1 text-xs font-semibold ${statusTone(projectQualitySummary.overall_status)}`}>
+                  {qualityStatusLabel(projectQualitySummary.overall_status)}
+                </span>
               </div>
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm text-slate-300">
-                已保存章节: <span className="font-semibold text-white">{chapters.length}</span>
-              </div>
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm text-slate-300">
-                当前总字数: <span className="font-semibold text-white">{totalWordCount}</span>
-              </div>
-            </CardContent>
-          </Card>
 
-          <Card className="border-slate-800 bg-slate-900 text-slate-100">
-            <CardHeader>
-              <CardTitle>最近任务状态</CardTitle>
-              <CardDescription className="text-slate-400">显示当前项目正在执行的后台任务</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {tasks.length === 0 ? (
-                <p className="text-sm text-slate-500">当前没有活跃后台任务。</p>
-              ) : (
-                tasks.map((task) => (
-                  <div key={task.id} className="rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3">
+              <div className="mt-5 grid gap-3 md:grid-cols-2">
+                {[
+                  { label: '章节', section: projectQualitySummary.chapter },
+                  { label: '角色', section: projectQualitySummary.character },
+                  { label: '关系', section: projectQualitySummary.relationship },
+                  { label: '世界观', section: projectQualitySummary.world },
+                  { label: '结构', section: projectQualitySummary.structure },
+                  { label: '写作准备度', section: projectQualitySummary.writing_readiness },
+                ].map((entry) => (
+                  <div key={entry.label} className="rounded-2xl border border-[var(--nf-border)] bg-[var(--nf-surface)] p-4">
                     <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="font-medium text-white">{task.type}</p>
-                        <p className="mt-1 text-xs text-slate-500">{task.message || '任务执行中'}</p>
-                      </div>
-                      <Badge variant="outline">{task.status}</Badge>
+                      <div className="font-semibold text-[var(--nf-text)]">{entry.label}</div>
+                      <span className={`text-xs font-semibold ${statusTone(entry.section.status)}`}>{qualityStatusLabel(entry.section.status)}</span>
                     </div>
+                    <p className="mt-2 text-sm leading-6 text-[var(--nf-text-muted)]">
+                      {entry.section.issues[0] || '当前分项没有明显阻塞问题。'}
+                    </p>
+                    {entry.section.actions.length > 0 ? (
+                      <p className="mt-2 text-xs leading-5 text-[var(--nf-text-subtle)]">
+                        建议：{entry.section.actions[0]}
+                      </p>
+                    ) : null}
                   </div>
-                ))
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+                ))}
+              </div>
+            </section>
 
-      <ArtifactPanel
-        visible={artifactPanelVisible}
-        onClose={() => setArtifactPanelVisible(false)}
-        artifacts={activeArtifacts}
-        onSaveToProject={(artifact, updatedData) => {
-          void handleSaveArtifact(artifact, updatedData);
-        }}
-        onSaveAll={async (payload) => {
-          for (const item of payload) {
-            await handleSaveArtifact(item.artifact, item.data);
-          }
-        }}
-      />
+            <section className="nf-panel nf-panel-pad">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <div className="nf-panel-title">最近 AI 草稿 / 候选</div>
+                  <p className="nf-panel-subtitle">优先处理最新生成内容，避免候选版本堆积污染项目。</p>
+                </div>
+                <button type="button" className="nf-button" onClick={() => router.push('/editor')}>
+                  打开 editor
+                </button>
+              </div>
+              {recentAIDrafts.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-[var(--nf-border)] bg-[var(--nf-panel-soft)] px-4 py-6 text-sm text-[var(--nf-text-muted)]">
+                  暂无 AI 草稿或候选章节。可以回到主工作台生成序章候选。
+                </div>
+              ) : (
+                <div className="grid gap-3 md:grid-cols-2">
+                  {recentAIDrafts.map((item) => {
+                    const title = getContentAssetTitle(item);
+                    const text = getContentAssetText(item);
+                    return (
+                      <article key={item.metadata.id} className="rounded-2xl border border-[var(--nf-border)] bg-[var(--nf-surface)] p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="nf-kicker">{getChapterRoleLabel(item)}</div>
+                            <h3 className="mt-1 font-semibold text-[var(--nf-text)]">{title}</h3>
+                          </div>
+                          <button type="button" className="nf-chip" onClick={() => router.push(`/editor?chapterId=${item.metadata.id}`)}>
+                            打开
+                          </button>
+                        </div>
+                        <p className="mt-3 line-clamp-4 text-sm leading-6 text-[var(--nf-text-muted)]">{text || '暂无正文预览。'}</p>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            <section className="nf-panel nf-panel-pad">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <div className="nf-panel-title">最近更新资产</div>
+                  <p className="nf-panel-subtitle">从内容库快速回到刚变化的角色、章节、关系或世界观。</p>
+                </div>
+              </div>
+              {recentAssets.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-[var(--nf-border)] bg-[var(--nf-panel-soft)] px-4 py-6 text-sm text-[var(--nf-text-muted)]">
+                  当前项目还没有可展示资产。
+                </div>
+              ) : (
+                <div className="grid gap-3 md:grid-cols-2">
+                  {recentAssets.map((item) => {
+                    const canBindToCurrentNovel = Boolean(selectedNovelId && isUnassignedNovelScopedContentItem(item));
+                    return (
+                      <article key={item.metadata.id} className="rounded-2xl border border-[var(--nf-border)] bg-[var(--nf-surface)] p-4">
+                        <button type="button" className="w-full text-left" onClick={() => openRecentAsset(item)}>
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="nf-kicker">{formatAssetType(item.metadata.type)}</div>
+                              <h3 className="mt-1 font-semibold text-[var(--nf-text)]">{getContentAssetTitle(item)}</h3>
+                              <p className="mt-1 text-xs text-[var(--nf-text-subtle)]">{formatDate(item.metadata.updated_at)}</p>
+                            </div>
+                            <span className="nf-chip">查看</span>
+                          </div>
+                        </button>
+                        {canBindToCurrentNovel ? (
+                          <button
+                            type="button"
+                            onClick={() => void bindRecentAssetToSelectedNovel(item)}
+                            className="nf-button mt-3"
+                          >
+                            绑定到当前小说
+                          </button>
+                        ) : null}
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          </main>
+
+          <aside className="space-y-4">
+            <div className="nf-panel nf-panel-pad">
+              <div className="nf-panel-title">
+                <Sparkles size={16} />
+                下一步建议
+              </div>
+              <div className="mt-3 grid gap-3">
+                {nextSuggestions.map((suggestion) => (
+                  <div key={suggestion.title} className="rounded-2xl border border-[var(--nf-border)] bg-[var(--nf-surface)] p-4">
+                    <div className="font-semibold text-[var(--nf-text)]">{suggestion.title}</div>
+                    <p className="mt-2 text-sm leading-6 text-[var(--nf-text-muted)]">{suggestion.detail}</p>
+                    <button type="button" className="nf-button mt-3" onClick={suggestion.onClick}>
+                      {suggestion.action}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="nf-panel nf-panel-pad">
+              <div className="nf-panel-title">
+                <MessageSquareText size={16} />
+                快捷入口
+              </div>
+              <div className="mt-3 grid gap-2">
+                <button type="button" className="nf-button" onClick={() => router.push('/extract')}>
+                  导入小说
+                </button>
+                <button type="button" className="nf-button" onClick={() => router.push('/editor')}>
+                  打开 editor
+                </button>
+                <button type="button" className="nf-button" onClick={() => router.push('/')}>
+                  AI 写作聊天
+                </button>
+                <button type="button" className="nf-button" onClick={() => router.push('/characters')}>
+                  角色档案馆
+                </button>
+              </div>
+            </div>
+
+            <details className="nf-panel nf-panel-pad">
+              <summary className="cursor-pointer text-sm font-semibold text-[var(--nf-text)]">
+                后台任务
+              </summary>
+              <div className="mt-3 space-y-2">
+                {tasks.length === 0 ? (
+                  <p className="text-sm text-[var(--nf-text-muted)]">当前没有活跃后台任务。</p>
+                ) : (
+                  tasks.map((task) => (
+                    <div key={task.id} className="rounded-xl border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] px-3 py-2 text-sm">
+                      <div className="font-semibold text-[var(--nf-text)]">{task.type}</div>
+                      <div className="mt-1 text-xs text-[var(--nf-text-subtle)]">{task.message || '任务执行中'} · {task.status}</div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </details>
+          </aside>
+        </div>
+
+        <ArtifactPanel
+          visible={artifactPanelVisible}
+          onClose={() => setArtifactPanelVisible(false)}
+          artifacts={activeArtifacts}
+          onSaveToProject={(artifact, updatedData) => {
+            void handleSaveArtifact(artifact, updatedData);
+          }}
+          onSaveAll={async (payload) => {
+            for (const item of payload) {
+              await handleSaveArtifact(item.artifact, item.data);
+            }
+          }}
+        />
+      </div>
     </div>
   );
 }

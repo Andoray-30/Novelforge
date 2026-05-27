@@ -5174,3 +5174,61 @@
   - 仍需要用真实长篇导入结果复测诊断内容是否足够解释“为什么质量不达标”。
   - 修复入口目前复用既有后台任务提交能力，后续需要继续完善 preview diff 和确认写回体验。
   - 全局导航和任务中心仍有历史项目/历史任务噪音，内测前需要继续做数据清理与新手路径收敛。
+
+## 2026-05-27 Goal 18B：Characters / World / Dashboard 资料库化重构 v1
+
+- 目标：
+  - 把 `characters`、`world`、`analytics` 从旧式霓虹 / 数据看板风格收敛为统一 light / dark 资料库页面。
+  - 不改 agent、提取器、editor 数据流，不新增大型业务功能。
+- 已完成：
+  - `/characters`：
+    - 重构为“角色档案馆”。
+    - 顶部展示页面标题、当前项目、统计和返回工作台 / 刷新 / 导入补强入口。
+    - 主区改为角色档案卡，展示名称、身份、摘要、置信度、可写性、欲望、伤痕、恐惧、说话方式等写作信号。
+    - 低信息角色以“需要补强”弱提示标记，不再用旧游戏卡牌 / 霓虹风格。
+    - 关系图谱保留为侧栏折叠的次级检查工具，不作为第一视觉中心。
+  - `/world`：
+    - 重构为“世界观资料库”。
+    - 世界观首页优先展示概览、地点、规则、组织 / 文化、历史 / 时间线、意象 / 特殊概念。
+    - 世界观卡展示标题、分类、摘要、规则 / 代价 / 场景用途。
+    - 旧世界树 / 图谱方向降级为折叠说明，避免继续占据首屏。
+  - `/analytics`：
+    - 重构为“项目状态总览”。
+    - 使用 `buildProjectQualitySummary` 语义展示章节、角色、关系、世界观、结构和写作准备度。
+    - 展示章节 / 字数 / 角色 / 关系 / 世界观要素 / 后台任务统计。
+    - 增加最近 AI 草稿 / 候选、最近更新资产、下一步建议和快捷入口。
+  - 统一性：
+    - 三页全部接入 `nf-*` token，支持 light / dark / system。
+    - 移动端 390px 单列布局，无横向溢出。
+    - 三页用户可见文本已清理明显乱码。
+- 截图验收：
+  - 截图目录：`project-docs/screenshots/goal18b/`
+  - 已生成并人工抽查：
+    - `characters-light-desktop.png`
+    - `characters-dark-desktop.png`
+    - `characters-light-mobile.png`
+    - `world-light-desktop.png`
+    - `world-dark-desktop.png`
+    - `world-light-mobile.png`
+    - `dashboard-light-desktop.png`
+    - `dashboard-dark-desktop.png`
+    - `dashboard-light-mobile.png`
+  - 截图说明：
+    - 使用临时 mock API 和 headless Chrome 生成。
+    - 截图是真实 Next.js 页面渲染，不是空白页或权限检查页。
+    - mock fixture 使用虚构英文项目数据，不包含样本文本、密钥或生产数据。
+- 测试：
+  - `cmd /c npx tsc --noEmit --incremental false`
+    - passed
+  - `cmd /c npm test -- --run`
+    - `25 files / 104 tests passed`
+  - `cmd /c npm run build`
+    - passed
+- 当前判断：
+  - Goal 18B 已完成 B 级资产页面的第一轮统一：角色像档案馆，世界观像资料库，项目总览像内测首页。
+  - 三页已经与主工作台 / editor / extract 的 light/dark 视觉语言对齐。
+- 后续风险 / 待办：
+  - 全局 topbar / left nav 的部分旧页面标题仍来自共享导航配置，后续可以单独清理整站导航文案。
+  - 角色详情页 `/characters/[id]` 仍未纳入本轮重构。
+  - 真实长篇项目下，角色卡和世界观卡的信息密度还需要继续根据实际资产质量调参。
+  - `analytics` 仍沿用原路径名，产品文案已改为项目状态总览；后续可考虑路由层增加 `/dashboard` 别名。

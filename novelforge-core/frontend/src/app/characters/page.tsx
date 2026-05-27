@@ -2,6 +2,19 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import {
+  AlertCircle,
+  ArrowLeft,
+  BookOpen,
+  Filter,
+  MessageSquareText,
+  Network,
+  RefreshCw,
+  Search,
+  Sparkles,
+  Users,
+  Wand2,
+} from 'lucide-react';
 import { contentService } from '@/lib/api';
 import { ArtifactPanel } from '@/components/chat/ArtifactPanel';
 import {
@@ -22,13 +35,12 @@ import {
 } from '@/lib/asset-normalization';
 import { useSessionTaskEvents } from '@/lib/hooks/use-session-task-events';
 import { useSessions } from '@/lib/hooks/use-sessions';
-import CharacterCard from '@/components/Character/CharacterCard';
 import CharacterRelationshipGraph from '@/components/Character/CharacterRelationshipGraph';
-import { Users, Database, Wand2, Filter, Network, LayoutGrid } from 'lucide-react';
 import type { Character, ContentItem, ImportanceLevel, NetworkEdge } from '@/types';
 import type { ToolCall } from '@/lib/chat-parser';
 
 type ArtifactData = ContentItemArtifactData & { toolCall?: ToolCall };
+type CharacterFilter = 'all' | 'core' | 'supporting' | 'needs_repair';
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
@@ -38,8 +50,14 @@ function asString(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
+function asNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
 function asStringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0) : [];
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : [];
 }
 
 function normalizeImportance(value: unknown): ImportanceLevel {
@@ -81,211 +99,144 @@ function parseCharacter(item: ContentItem): Character | null {
   return {
     id: item.metadata.id,
     name: decodeAssetTitle(name),
-    description: typeof data.description === 'string' ? data.description : '',
-    personality: typeof data.personality === 'string' ? data.personality : '',
-    background: typeof data.background === 'string' ? data.background : '',
-    role: typeof data.role === 'string' ? data.role.split('.').pop() || data.role : 'supporting',
+    description: asString(data.description),
+    personality: asString(data.personality),
+    background: asString(data.background),
+    role: asString(data.role).split('.').pop() || 'supporting',
     age: typeof data.age === 'number' ? data.age : undefined,
-    gender: typeof data.gender === 'string' ? data.gender : undefined,
-    appearance: typeof data.appearance === 'string' ? data.appearance : undefined,
-    occupation: typeof data.occupation === 'string' ? data.occupation : undefined,
-    abilities: Array.isArray(data.abilities) ? data.abilities.filter((value): value is string => typeof value === 'string') : [],
-    tags: Array.isArray(data.tags) ? data.tags.filter((value): value is string => typeof value === 'string') : item.metadata.tags,
-    aliases: Array.isArray(data.aliases) ? data.aliases.filter((value): value is string => typeof value === 'string') : [],
+    gender: asString(data.gender) || undefined,
+    appearance: asString(data.appearance) || undefined,
+    occupation: asString(data.occupation) || undefined,
+    abilities: asStringArray(data.abilities),
+    tags: asStringArray(data.tags).length > 0 ? asStringArray(data.tags) : item.metadata.tags,
+    aliases: asStringArray(data.aliases),
     goals: [...asStringArray(data.goals), ...asStringArray(creativeSignals.desires)],
     desires: [...asStringArray(data.desires), ...asStringArray(creativeSignals.desires)],
-    fears: [...asStringArray(data.fears), ...asStringArray(creativeSignals.wounds)],
+    fears: [...asStringArray(data.fears), ...asStringArray(creativeSignals.fears), ...asStringArray(creativeSignals.wounds)],
     wounds: [...asStringArray(data.wounds), ...asStringArray(creativeSignals.wounds)],
     conflicts: asStringArray(data.conflicts),
-    personality_tension: typeof data.personality_tension === 'string' ? data.personality_tension : asStringArray(creativeSignals.emotional_states)[0],
-    character_arc: typeof data.character_arc === 'string' ? data.character_arc : undefined,
+    personality_tension: asString(data.personality_tension) || asStringArray(creativeSignals.emotional_states)[0],
+    character_arc: asString(data.character_arc) || undefined,
     relationship_hooks: asStringArray(data.relationship_hooks),
-    entity_type: typeof data.entity_type === 'string' ? data.entity_type : undefined,
+    entity_type: asString(data.entity_type) || undefined,
     relationships: Array.isArray(data.relationships)
       ? data.relationships
           .filter((value): value is Record<string, unknown> => typeof value === 'object' && value !== null)
           .map((relationship) => ({
-            target_name: typeof relationship.target_name === 'string' ? relationship.target_name : '',
-            relationship: typeof relationship.relationship === 'string' ? relationship.relationship : 'other',
-            description: typeof relationship.description === 'string' ? relationship.description : '',
+            target_name: asString(relationship.target_name),
+            relationship: asString(relationship.relationship) || 'other',
+            description: asString(relationship.description),
           }))
           .filter((relationship) => relationship.target_name.length > 0)
       : [],
-    example_messages: Array.isArray(data.example_messages)
-      ? data.example_messages.filter((value): value is string => typeof value === 'string')
-      : [],
-    example_dialogues: Array.isArray(data.example_dialogues)
-      ? data.example_dialogues.filter((value): value is string => typeof value === 'string')
-      : [],
-    behavior_examples: Array.isArray(data.behavior_examples)
-      ? data.behavior_examples.filter((value): value is string => typeof value === 'string')
-      : [],
-    source_contexts: Array.isArray(data.source_contexts)
-      ? data.source_contexts.filter((value): value is string => typeof value === 'string')
-      : [],
+    example_messages: asStringArray(data.example_messages),
+    example_dialogues: asStringArray(data.example_dialogues),
+    behavior_examples: asStringArray(data.behavior_examples),
+    source_contexts: asStringArray(data.source_contexts),
     importance: inferImportance(data.importance, data.role),
   };
 }
 
 function buildRelationshipEdges(characters: Character[], relationshipItems: ContentItem[]): NetworkEdge[] {
-  const characterIdByName = new Map(
-    characters
-      .filter((character) => character.name.trim().length > 0)
-      .map((character) => [character.name.trim(), character.id]),
-  );
-
   const persistedEdges = resolveRelationshipEdges(characters, relationshipItems);
-
   if (persistedEdges.length > 0) {
     return persistedEdges;
   }
 
   const derivedEdges: NetworkEdge[] = [];
-  characters.forEach((char) => {
-    char.relationships.forEach((rel) => {
-      const target = characters.find((candidate) => candidate.name === rel.target_name);
+  characters.forEach((character) => {
+    character.relationships.forEach((relationship) => {
+      const target = characters.find((candidate) => candidate.name === relationship.target_name);
       derivedEdges.push({
-        source: char.id,
-        target: target?.id || rel.target_name,
-        relationship_type: normalizeRelationshipType(rel.relationship),
-        description: rel.description,
+        source: character.id,
+        target: target?.id || relationship.target_name,
+        relationship_type: normalizeRelationshipType(relationship.relationship),
+        description: relationship.description,
         strength: 5,
         status: 'active',
-        evidence: rel.description ? [rel.description] : [],
+        evidence: relationship.description ? [relationship.description] : [],
       });
     });
   });
   return derivedEdges;
 }
 
-function characterNameById(characters: Character[], id: string) {
-  return characters.find((character) => character.id === id)?.name ?? id;
+function getRoleLabel(role: string): string {
+  const normalized = role.toLowerCase();
+  if (normalized.includes('protagonist')) return '主角';
+  if (normalized.includes('antagonist')) return '反派';
+  if (normalized.includes('supporting')) return '配角';
+  if (normalized.includes('mentor')) return '导师';
+  if (normalized.includes('love')) return '情感关系';
+  return role || '角色';
 }
 
-function RelationshipInsightPanel({
-  edge,
-  characters,
-  onClose,
-}: {
-  edge: NetworkEdge;
-  characters: Character[];
-  onClose: () => void;
-}) {
-  const sourceName = edge.source_name || characterNameById(characters, edge.source);
-  const targetName = edge.target_name || characterNameById(characters, edge.target);
-  const details = edge.relationship_details ?? [];
-  const evidence = edge.evidence ?? [];
-  const evolution = edge.evolution ?? [];
+function getCharacterConfidence(item: ContentItem): number | null {
+  const payload = getContentAssetPayload(item);
+  const extractionQuality = asRecord(payload.extraction_quality) ?? {};
+  return asNumber(payload.confidence) ?? asNumber(extractionQuality.confidence);
+}
 
+function getCharacterSummary(character: Character, item: ContentItem): string {
   return (
-    <div className="rounded-3xl border border-blue-400/20 bg-slate-900/90 p-6 shadow-2xl shadow-blue-950/30">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-blue-300">关系解释</p>
-          <h3 className="text-2xl font-bold text-white">{sourceName} 与 {targetName}</h3>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {(edge.relationship_types ?? [edge.relationship_type]).map((type) => (
-              <span key={type} className="rounded-full border border-blue-300/20 bg-blue-400/10 px-3 py-1 text-xs font-semibold text-blue-100">
-                {type}
-              </span>
-            ))}
-            <span className="rounded-full border border-emerald-300/20 bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-100">
-              强度 {edge.strength}/10
-            </span>
-            {edge.confidence ? (
-              <span className="rounded-full border border-violet-300/20 bg-violet-400/10 px-3 py-1 text-xs font-semibold text-violet-100">
-                置信度 {edge.confidence}
-              </span>
-            ) : null}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200 transition hover:bg-white/10"
-        >
-          关闭
-        </button>
-      </div>
-
-      <div className="mt-6 grid gap-4 lg:grid-cols-3">
-        <div className="rounded-2xl border border-slate-700/60 bg-slate-950/70 p-4">
-          <h4 className="mb-3 text-sm font-semibold text-slate-200">关系描述</h4>
-          <p className="whitespace-pre-line text-sm leading-7 text-slate-300">
-            {edge.description || '暂无关系描述。'}
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-rose-400/20 bg-rose-400/10 p-4">
-          <h4 className="mb-3 text-sm font-semibold text-rose-100">张力 / 阶段变化</h4>
-          {edge.relationship_tension || evolution.length > 0 ? (
-            <div className="space-y-2 text-sm leading-6 text-rose-50/90">
-              {edge.relationship_tension ? <p>{edge.relationship_tension}</p> : null}
-              {evolution.slice(0, 5).map((item, index) => (
-                <p key={`${item}-${index}`} className="rounded-xl bg-slate-950/40 px-3 py-2">{item}</p>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-rose-100/60">暂无可解释张力，建议后续关系回补。</p>
-          )}
-        </div>
-
-        <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4">
-          <h4 className="mb-3 text-sm font-semibold text-emerald-100">原文证据</h4>
-          {evidence.length > 0 ? (
-            <div className="space-y-2">
-              {evidence.slice(0, 5).map((item, index) => (
-                <blockquote key={`${item}-${index}`} className="rounded-xl border-l-2 border-emerald-300/70 bg-slate-950/40 px-3 py-2 text-sm leading-6 text-emerald-50/90">
-                  {item}
-                </blockquote>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-emerald-100/60">缺少证据，建议标记为待复核关系。</p>
-          )}
-        </div>
-      </div>
-
-      {details.length > 1 ? (
-        <div className="mt-4 rounded-2xl border border-slate-700/60 bg-slate-950/70 p-4">
-          <h4 className="mb-3 text-sm font-semibold text-slate-200">合并来源</h4>
-          <div className="grid gap-2 md:grid-cols-2">
-            {details.map((detail) => (
-              <div key={detail.asset_id} className="rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-2 text-xs leading-5 text-slate-300">
-                <div className="font-semibold text-slate-100">{detail.title}</div>
-                <div>{detail.relationship_type} · {detail.confidence || 'unknown'}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
-    </div>
+    character.description ||
+    character.personality ||
+    character.background ||
+    item.content ||
+    '这个角色还缺少可写摘要，需要补充欲望、伤痕、恐惧或说话方式。'
   );
+}
+
+function getSignalList(character: Character): Array<{ label: string; value: string }> {
+  const entries = [
+    { label: '欲望', value: character.desires?.[0] || character.goals?.[0] || '' },
+    { label: '伤痕', value: character.wounds?.[0] || '' },
+    { label: '恐惧', value: character.fears?.[0] || '' },
+    { label: '说话方式', value: character.example_dialogues?.[0] || character.example_messages?.[0] || '' },
+    { label: '人物弧线', value: character.character_arc || '' },
+    { label: '关系钩子', value: character.relationship_hooks?.[0] || '' },
+  ];
+  return entries.filter((entry) => entry.value.trim().length > 0).slice(0, 4);
+}
+
+function isLowInfoCharacter(character: Character, item: ContentItem): boolean {
+  const confidence = getCharacterConfidence(item);
+  return getSignalList(character).length < 2 || (confidence !== null && confidence < 0.55);
+}
+
+function formatConfidence(confidence: number | null): string {
+  if (confidence === null) return '未标注';
+  return `${Math.round(confidence * 100)}%`;
+}
+
+function getAssetTypeLabel(type: string): string {
+  if (type === 'relationship') return '关系';
+  if (type === 'character') return '角色';
+  return type;
 }
 
 export default function CharactersPage() {
   const router = useRouter();
   const { currentSession, currentSessionId } = useSessions();
-  const selectedNovelId = useAppStore((s) => s.selectedNovelId);
+  const selectedNovelId = useAppStore((state) => state.selectedNovelId);
   const [characters, setCharacters] = useState<Character[]>([]);
   const [characterItems, setCharacterItems] = useState<ContentItem[]>([]);
-  const [relationships, setRelationships] = useState<NetworkEdge[]>([]);
   const [relationshipItems, setRelationshipItems] = useState<ContentItem[]>([]);
+  const [relationships, setRelationships] = useState<NetworkEdge[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filter, setFilter] = useState<CharacterFilter>('all');
   const [activeArtifacts, setActiveArtifacts] = useState<ArtifactData[]>([]);
   const [artifactPanelVisible, setArtifactPanelVisible] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
-  const [selectedRelationshipEdge, setSelectedRelationshipEdge] = useState<NetworkEdge | null>(null);
-
-  const [searchTerm, setSearchTerm] = useState('');
-  const [viewMode, setViewMode] = useState<'grid' | 'network'>('grid');
 
   useEffect(() => {
     const loadCharacters = async () => {
       setIsLoading(true);
       setError(null);
+
       try {
         const [characterResult, relationshipResult] = await Promise.all([
           contentService.searchContent({
@@ -293,7 +244,7 @@ export default function CharactersPage() {
             content_type: 'character',
             session_id: currentSessionId || undefined,
             parent_id: selectedNovelId || undefined,
-            limit: 100,
+            limit: 200,
             include_content: false,
           }),
           contentService.searchContent({
@@ -306,17 +257,16 @@ export default function CharactersPage() {
           }),
         ]);
 
-        const chars = characterResult.items
+        const parsedCharacters = characterResult.items
           .map(parseCharacter)
           .filter((item): item is Character => item !== null);
-        setCharacters(chars);
+        setCharacters(parsedCharacters);
         setCharacterItems(characterResult.items);
         setRelationshipItems(relationshipResult.items);
-        setRelationships(buildRelationshipEdges(chars, relationshipResult.items));
-        setSelectedRelationshipEdge(null);
+        setRelationships(buildRelationshipEdges(parsedCharacters, relationshipResult.items));
       } catch (loadError) {
-        console.error('加载角色失败:', loadError);
-        setError(loadError instanceof Error ? loadError.message : '加载角色失败');
+        console.error('Failed to load character assets:', loadError);
+        setError(loadError instanceof Error ? loadError.message : '加载角色资产失败');
       } finally {
         setIsLoading(false);
       }
@@ -337,38 +287,53 @@ export default function CharactersPage() {
       if (!['novel_import', 'extraction', 'character_generation', 'relationship_extraction'].includes(detail.taskType)) {
         return;
       }
-      setError(`后台任务失败，角色资产未完成更新：${detail.error || detail.message || 'unknown error'}`);
+      setError(`后台任务失败，角色资料库可能未完全更新：${detail.error || detail.message || '未知错误'}`);
     },
   });
 
-  const filteredChars = useMemo(
-    () => characters.filter((character) =>
-      character.name.includes(searchTerm) ||
-      character.role.includes(searchTerm) ||
-      character.description.includes(searchTerm)
-    ),
-    [characters, searchTerm]
+  const characterById = useMemo(
+    () => new Map(characterItems.map((item) => [item.metadata.id, item])),
+    [characterItems],
   );
 
-  const openRelationshipAsset = (edge: NetworkEdge) => {
-    const original = relationshipItems.find((item) => {
-      const payload = getContentAssetPayload(item);
-      const source = asString(payload.source);
-      const target = asString(payload.target) || asString(payload.target_name);
-      const relationshipType = normalizeRelationshipType(payload.relationship_type || payload.relationship);
-      return source === edge.source || source === characters.find((character) => character.id === edge.source)?.name
-        ? target === edge.target || target === characters.find((character) => character.id === edge.target)?.name
-          ? relationshipType === edge.relationship_type
-          : false
-        : false;
+  const filteredCharacters = useMemo(() => {
+    const keyword = searchTerm.trim().toLowerCase();
+    return characters.filter((character) => {
+      const item = characterById.get(character.id);
+      const text = [
+        character.name,
+        character.role,
+        character.description,
+        character.personality,
+        character.background,
+        ...(character.tags || []),
+      ].join(' ').toLowerCase();
+      const keywordMatched = !keyword || text.includes(keyword);
+      const lowInfo = item ? isLowInfoCharacter(character, item) : false;
+      if (filter === 'core') return keywordMatched && ['critical', 'high'].includes(character.importance);
+      if (filter === 'supporting') return keywordMatched && !['critical', 'high'].includes(character.importance);
+      if (filter === 'needs_repair') return keywordMatched && lowInfo;
+      return keywordMatched;
     });
+  }, [characterById, characters, filter, searchTerm]);
 
-    if (!original) {
-      setError('未找到对应关系资产，暂时无法打开详情。');
-      return;
-    }
+  const lowInfoCount = useMemo(
+    () => characters.filter((character) => {
+      const item = characterById.get(character.id);
+      return item ? isLowInfoCharacter(character, item) : false;
+    }).length,
+    [characterById, characters],
+  );
 
-    const result = resolveContentItemReopen(original, selectedNovelId);
+  const bindableAssets = useMemo(
+    () => [...characterItems, ...relationshipItems].filter(
+      (item) => Boolean(selectedNovelId && isUnassignedNovelScopedContentItem(item)),
+    ),
+    [characterItems, relationshipItems, selectedNovelId],
+  );
+
+  const openContentAsset = (item: ContentItem) => {
+    const result = resolveContentItemReopen(item, selectedNovelId);
     if (result.kind === 'error') {
       setError(result.message);
       return;
@@ -377,7 +342,6 @@ export default function CharactersPage() {
       router.push(result.href);
       return;
     }
-
     setActiveArtifacts([result.artifact]);
     setArtifactPanelVisible(true);
     setSaveMessage(result.message);
@@ -387,7 +351,7 @@ export default function CharactersPage() {
     setError(null);
     try {
       const result = await saveReopenedContentItem({
-        items: relationshipItems,
+        items: [...characterItems, ...relationshipItems],
         artifact,
         updatedData,
       });
@@ -403,25 +367,6 @@ export default function CharactersPage() {
       setError(saveError instanceof Error ? saveError.message : '保存资产失败');
     }
   };
-
-  const bindableCharacterItems = useMemo(
-    () => characterItems.filter(
-      (item) => Boolean(selectedNovelId && isUnassignedNovelScopedContentItem(item)),
-    ),
-    [characterItems, selectedNovelId],
-  );
-
-  const bindableRelationshipItems = useMemo(
-    () => relationshipItems.filter(
-      (item) => Boolean(selectedNovelId && isUnassignedNovelScopedContentItem(item)),
-    ),
-    [relationshipItems, selectedNovelId],
-  );
-
-  const bindableAssets = useMemo(
-    () => [...bindableCharacterItems, ...bindableRelationshipItems],
-    [bindableCharacterItems, bindableRelationshipItems],
-  );
 
   const bindAssetToSelectedNovel = async (item: ContentItem) => {
     if (!selectedNovelId || !isUnassignedNovelScopedContentItem(item)) {
@@ -440,170 +385,248 @@ export default function CharactersPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 p-8 pt-16 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-slate-400">加载角色数据中...</p>
+      <div className="nf-editor-shell">
+        <div className="nf-editor-loading">
+          <div className="nf-editor-spinner" />
+          <p>正在加载角色资料库...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-8 pt-16 selection:bg-blue-500/30">
-      <div className="max-w-7xl mx-auto space-y-12 animate-in fade-in slide-in-from-bottom-8 duration-700">
-        <div className="relative overflow-hidden rounded-3xl bg-slate-900 border border-slate-800 p-10 flex flex-col md:flex-row items-center justify-between gap-8 shadow-2xl shadow-blue-900/10">
-          <div className="absolute top-0 right-0 p-32 bg-blue-500/10 rounded-full blur-[100px] pointer-events-none" />
-          <div className="absolute bottom-0 left-0 p-32 bg-emerald-500/10 rounded-full blur-[100px] pointer-events-none" />
-
-          <div className="relative z-10 max-w-2xl">
-            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight mb-4 flex items-center bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-indigo-400">
-              <Users className="w-10 h-10 mr-4 text-blue-400" />
+    <div className="nf-editor-shell">
+      <div className="nf-editor-page">
+        <section className="nf-editor-hero">
+          <div>
+            <div className="nf-kicker">Character Archive</div>
+            <h1 className="nf-editor-title">
+              <Users size={28} />
               角色档案馆
             </h1>
-            <p className="text-slate-400 text-lg leading-relaxed">
-              这里存放着被 AI 从原典文本中剥离出的所有生灵。你可以查阅他们的侧写大纲，或者跳转探索他们那错综复杂的羁绊网络。
+            <p className="nf-editor-subline">
+              这里整理当前项目的角色档案、写作信号和关系入口。角色越有欲望、伤痕、恐惧和说话方式，AI 后续创作越稳定。
             </p>
-            <p className="mt-3 text-sm text-slate-500">
-              当前项目: {currentSession?.title || '未选择，默认显示全部角色资产'}
-            </p>
-            <p className="mt-2 text-sm text-slate-500">
-              当前小说: {selectedNovelId ? '已按当前小说容器收敛角色与关系网络' : '当前展示全部小说聚合角色与关系网络'}
+            <p className="nf-editor-meta">
+              当前项目：{currentSession?.title || '未选择项目，显示当前会话可读取资产'}
             </p>
           </div>
-
-          <div className="relative z-10 flex items-center gap-4 bg-slate-800/80 p-4 rounded-2xl border border-slate-700 backdrop-blur-md shrink-0">
-             <div className="flex flex-col items-center justify-center p-3 bg-slate-950/50 rounded-xl w-24">
-               <span className="text-3xl font-black text-white">{characters.length}</span>
-               <span className="text-xs font-medium text-slate-400 mt-1 uppercase tracking-wider">在库刻印</span>
-             </div>
-             <div className="flex flex-col items-center justify-center p-3 bg-slate-950/50 rounded-xl w-24">
-               <span className="text-3xl font-black text-rose-400">{characters.filter(c => c.importance === 'critical').length}</span>
-               <span className="text-xs font-medium text-slate-400 mt-1 uppercase tracking-wider">核心锚点</span>
-             </div>
-          </div>
-        </div>
-
-        <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-          <div className="relative w-full md:w-96 group">
-            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-              <Filter className="w-5 h-5 text-slate-400 group-focus-within:text-blue-400 transition-colors" />
-            </div>
-            <input
-              type="text"
-              placeholder="通过尊名、特质或职能检索..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-slate-900/50 border border-slate-700/50 text-slate-200 placeholder-slate-500 rounded-2xl pl-12 pr-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 backdrop-blur-md transition-all shadow-inner"
-            />
-          </div>
-
-          <div className="flex items-center gap-4">
-            <div className="flex bg-slate-900/80 p-1.5 rounded-2xl border border-slate-700/50 backdrop-blur-md">
-              <button
-                onClick={() => setViewMode('grid')}
-                className={`flex items-center px-4 py-2 rounded-xl transition-all font-medium text-sm ${viewMode === 'grid' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'}`}
-              >
-                <LayoutGrid className="w-4 h-4 mr-2" />
-                陈列柜
-              </button>
-              <button
-                onClick={() => setViewMode('network')}
-                className={`flex items-center px-4 py-2 rounded-xl transition-all font-medium text-sm ${viewMode === 'network' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'}`}
-              >
-                <Network className="w-4 h-4 mr-2" />
-                羁绊全景
-              </button>
-            </div>
-
-            <button
-              onClick={() => router.push('/extract')}
-              className="hidden lg:flex whitespace-nowrap items-center bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold py-2.5 px-6 rounded-2xl transition-all shadow-lg shadow-blue-900/30 hover:shadow-blue-900/50 active:scale-95"
-            >
-              <Wand2 className="w-4 h-4 mr-2" />
-              降临躯壳
+          <div className="nf-editor-actions">
+            <button type="button" className="nf-button" onClick={() => router.push('/')}>
+              <ArrowLeft size={16} />
+              返回工作台
+            </button>
+            <button type="button" className="nf-button" onClick={() => setRefreshTick((current) => current + 1)}>
+              <RefreshCw size={16} />
+              刷新
+            </button>
+            <button type="button" className="nf-button nf-button-primary" onClick={() => router.push('/extract')}>
+              <Wand2 size={16} />
+              导入/补强
             </button>
           </div>
-        </div>
+        </section>
 
-        {error && (
-          <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-red-200">
-            {error}
-          </div>
-        )}
-        {saveMessage && (
-          <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-5 py-4 text-emerald-200">
-            {saveMessage}
-          </div>
-        )}
+        {error ? <div className="nf-editor-alert">{error}</div> : null}
+        {saveMessage ? <div className="nf-editor-alert success">{saveMessage}</div> : null}
 
-        {bindableAssets.length > 0 && (
-          <div className="rounded-2xl border border-indigo-500/30 bg-indigo-500/10 px-5 py-4 text-indigo-100">
-            <div className="mb-3 text-sm font-semibold">发现未绑定到当前小说的角色/关系资产</div>
-            <div className="flex flex-wrap gap-2">
-              {bindableAssets.map((item) => (
+        {bindableAssets.length > 0 ? (
+          <div className="nf-panel nf-panel-pad">
+            <div className="nf-panel-title">发现未绑定到当前小说的资产</div>
+            <div className="nf-panel-subtitle">这些角色或关系可以绑定到当前小说容器，避免后续检索时混入其他项目。</div>
+            <div className="nf-pill-row" style={{ marginTop: 12 }}>
+              {bindableAssets.slice(0, 8).map((item) => (
                 <button
                   key={item.metadata.id}
                   type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void bindAssetToSelectedNovel(item);
-                  }}
-                  className="rounded-full border border-indigo-300/30 bg-indigo-400/10 px-3 py-1 text-xs font-medium text-indigo-100 transition hover:border-indigo-200/60 hover:bg-indigo-400/20"
+                  className="nf-chip"
+                  onClick={() => void bindAssetToSelectedNovel(item)}
                 >
-                  绑定「{getContentAssetTitle(item)}」({item.metadata.type === 'character' ? '角色' : '关系'})
+                  绑定「{getContentAssetTitle(item)}」{getAssetTypeLabel(item.metadata.type)}
                 </button>
               ))}
             </div>
           </div>
-        )}
+        ) : null}
 
-        {characters.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 text-center border-2 border-dashed border-slate-800 rounded-3xl bg-slate-900/20 backdrop-blur-sm">
-            <Database className="w-16 h-16 text-slate-700 mb-6" />
-            <h3 className="text-2xl font-bold text-slate-300 mb-2">未发现命运的收束点</h3>
-            <p className="text-slate-500 max-w-md">
-              当前项目下还没有任何角色资产。你可以通过文本提取、AI 规划，或在聊天中继续生成并保存角色。
-            </p>
-          </div>
-        ) : viewMode === 'network' ? (
-          <div className="h-[750px] w-full animate-in fade-in zoom-in-95 duration-500">
-            <CharacterRelationshipGraph
-              characters={filteredChars}
-              relationships={relationships.filter(
-                (edge) =>
-                  filteredChars.some((character) => character.id === edge.source || character.id === edge.target) ||
-                  filteredChars.some((character) => character.name === edge.source || character.name === edge.target)
-              )}
-              onRelationshipSelect={setSelectedRelationshipEdge}
-            />
-            {selectedRelationshipEdge ? (
-              <div className="mt-6">
-                <RelationshipInsightPanel
-                  edge={selectedRelationshipEdge}
-                  characters={characters}
-                  onClose={() => setSelectedRelationshipEdge(null)}
-                />
+        <section className="grid gap-4 md:grid-cols-4">
+          {[
+            { label: '角色总数', value: characters.length },
+            { label: '核心角色', value: characters.filter((character) => ['critical', 'high'].includes(character.importance)).length },
+            { label: '关系边', value: relationships.length },
+            { label: '需要补强', value: lowInfoCount },
+          ].map((stat) => (
+            <div key={stat.label} className="nf-stat">
+              <span>{stat.label}</span>
+              <strong>{stat.value}</strong>
+            </div>
+          ))}
+        </section>
+
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <main className="space-y-5">
+            <div className="nf-panel nf-panel-pad">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="relative w-full md:max-w-md">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--nf-text-subtle)]" />
+                  <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(event) => setSearchTerm(event.target.value)}
+                    placeholder="搜索角色名、身份、特质..."
+                    className="w-full rounded-xl border border-[var(--nf-border)] bg-[var(--nf-surface)] py-2.5 pl-10 pr-3 text-sm text-[var(--nf-text)] outline-none focus:border-[color-mix(in_srgb,var(--nf-accent)_40%,transparent)]"
+                  />
+                </div>
+                <div className="nf-pill-row">
+                  {[
+                    { id: 'all', label: '全部' },
+                    { id: 'core', label: '核心' },
+                    { id: 'supporting', label: '配角' },
+                    { id: 'needs_repair', label: '需补强' },
+                  ].map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`nf-chip ${filter === item.id ? 'nf-button-primary' : ''}`}
+                      onClick={() => setFilter(item.id as CharacterFilter)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {characters.length === 0 ? (
+              <div className="nf-editor-empty">
+                <BookOpen size={34} />
+                <h3>还没有角色档案</h3>
+                <p>先导入长篇文本，或在主工作台让 AI 创建角色并保存到项目内容库。</p>
+                <div className="nf-pill-row" style={{ justifyContent: 'center' }}>
+                  <button type="button" className="nf-button nf-button-primary" onClick={() => router.push('/extract')}>
+                    去导入
+                  </button>
+                  <button type="button" className="nf-button" onClick={() => router.push('/')}>
+                    打开主工作台
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {filteredCharacters.map((character) => {
+                  const item = characterById.get(character.id);
+                  const confidence = item ? getCharacterConfidence(item) : null;
+                  const signals = getSignalList(character);
+                  const lowInfo = item ? isLowInfoCharacter(character, item) : false;
+                  return (
+                    <article key={character.id} className="nf-panel nf-panel-pad">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="nf-kicker">{getRoleLabel(character.role)}</div>
+                          <h2 className="text-xl font-semibold text-[var(--nf-text)]">{character.name}</h2>
+                        </div>
+                        {lowInfo ? (
+                          <span className="rounded-full border border-[color-mix(in_srgb,var(--nf-warning)_32%,transparent)] bg-[color-mix(in_srgb,var(--nf-warning)_8%,transparent)] px-3 py-1 text-xs font-semibold text-[var(--nf-warning)]">
+                            需要补强
+                          </span>
+                        ) : (
+                          <span className="rounded-full border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] px-3 py-1 text-xs font-semibold text-[var(--nf-text-muted)]">
+                            可写
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-3 line-clamp-4 text-sm leading-6 text-[var(--nf-text-muted)]">
+                        {item ? getCharacterSummary(character, item) : character.description}
+                      </p>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <span className="nf-chip">置信度 {formatConfidence(confidence)}</span>
+                        {character.aliases?.[0] ? <span className="nf-chip">别名 {character.aliases[0]}</span> : null}
+                        {character.importance ? <span className="nf-chip">{character.importance}</span> : null}
+                      </div>
+                      <div className="mt-4 space-y-2">
+                        {signals.length > 0 ? signals.map((signal) => (
+                          <div key={`${character.id}-${signal.label}`} className="rounded-xl border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] px-3 py-2">
+                            <div className="text-xs font-semibold text-[var(--nf-text-subtle)]">{signal.label}</div>
+                            <div className="mt-1 line-clamp-2 text-sm leading-6 text-[var(--nf-text)]">{signal.value}</div>
+                          </div>
+                        )) : (
+                          <div className="rounded-xl border border-[color-mix(in_srgb,var(--nf-warning)_28%,transparent)] bg-[color-mix(in_srgb,var(--nf-warning)_7%,transparent)] px-3 py-2 text-sm text-[var(--nf-text-muted)]">
+                            缺少欲望、伤痕、恐惧、说话方式等写作信号。
+                          </div>
+                        )}
+                      </div>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <button type="button" className="nf-button" onClick={() => item && openContentAsset(item)}>
+                          查看/编辑
+                        </button>
+                        <button type="button" className="nf-button" onClick={() => router.push('/?mode=chat')}>
+                          <MessageSquareText size={15} />
+                          带入写作
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </main>
+
+          <aside className="space-y-4">
+            <div className="nf-panel nf-panel-pad">
+              <div className="nf-panel-title">
+                <Filter size={16} />
+                质量提示
+              </div>
+              <div className="mt-3 space-y-3 text-sm leading-6 text-[var(--nf-text-muted)]">
+                <p>低信息角色不会被隐藏，但会标记为“需要补强”。优先补主角、反派和核心关系中的角色。</p>
+                <p>推荐补充：人物欲望、伤痕、恐惧、说话方式、关系钩子、可写场景。</p>
+              </div>
+            </div>
+            <div className="nf-panel nf-panel-pad">
+              <div className="nf-panel-title">
+                <Network size={16} />
+                关系网络
+              </div>
+              <p className="nf-panel-subtitle">图谱保留为次级检查工具，默认不抢占角色档案视线。</p>
+              <details className="nf-save-details mt-3">
+                <summary>展开关系图谱</summary>
+                <div className="mt-3 h-[420px] overflow-hidden rounded-2xl border border-[var(--nf-border)] bg-[var(--nf-panel-soft)]">
+                  <CharacterRelationshipGraph
+                    characters={filteredCharacters}
+                    relationships={relationships.filter(
+                      (edge) =>
+                        filteredCharacters.some((character) => character.id === edge.source || character.id === edge.target) ||
+                        filteredCharacters.some((character) => character.name === edge.source || character.name === edge.target),
+                    )}
+                  />
+                </div>
+              </details>
+            </div>
+            <div className="nf-panel nf-panel-pad">
+              <div className="nf-panel-title">
+                <Sparkles size={16} />
+                下一步
+              </div>
+              <div className="mt-3 grid gap-2">
+                <button type="button" className="nf-button" onClick={() => router.push('/extract')}>
+                  修复提取质量
+                </button>
+                <button type="button" className="nf-button" onClick={() => router.push('/analytics')}>
+                  查看项目总览
+                </button>
+                <button type="button" className="nf-button" onClick={() => router.push('/')}>
+                  回到 AI 写作
+                </button>
+              </div>
+            </div>
+            {lowInfoCount > 0 ? (
+              <div className="nf-alert">
+                <AlertCircle size={16} />
+                还有 {lowInfoCount} 个角色缺少写作信号。可以先写作，但建议在生成序章前补强核心人物。
               </div>
             ) : null}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {filteredChars.map((character, index) => (
-              <div
-                key={character.id}
-                className="animate-in fade-in zoom-in-95 fill-mode-both"
-                style={{ animationDelay: `${index * 50}ms`, animationDuration: '600ms' }}
-              >
-                <CharacterCard
-                  character={character}
-                  onViewDetail={(currentCharacter) => router.push(`/characters/${currentCharacter.id}`)}
-                  onRelationshipView={() => setViewMode('network')}
-                />
-              </div>
-            ))}
-          </div>
-        )}
+          </aside>
+        </div>
 
         <ArtifactPanel
           visible={artifactPanelVisible}
