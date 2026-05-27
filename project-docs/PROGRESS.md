@@ -5125,3 +5125,52 @@
   - 移动端正文和状态卡仍偏长，下一轮可以把右侧 inspector 操作进一步收敛成底部抽屉。
   - 桌面端目录 / inspector 仍有信息密度偏高的问题，真实项目数据更多时需要继续压缩。
   - 本轮使用 clean fixture 做 editor UI 验收，没有重新跑真实长篇导入或真实写作闭环。
+
+## 2026-05-27 Goal 18A：Extract 导入向导重构 v1
+
+- 目标：
+  - 把 `/extract` 从开发期功能页收敛为清晰的四步导入向导。
+  - 继续复用 `nf-*` 主题 token，支持 light / dark / system，不新增 UI 框架。
+  - 让导入后的质量诊断更像产品功能：默认展示摘要，详细日志折叠，问题按资产类型归类，并给出下一步动作。
+- 已完成：
+  - `/extract` 主界面重构为四步流程：
+    - `1 导入文本`：文件上传 + 粘贴文本导入，仍复用现有导入任务链路。
+    - `2 提取进度`：展示提交任务、保存章节、章节索引、角色、关系、时间线、世界观、写入内容库等阶段。
+    - `3 质量诊断`：按章节、角色、关系、世界观、时间线、写作准备度展示状态。
+    - `4 下一步`：进入主工作台、项目仪表盘、editor、AI 序章创作，以及章节/关系/时间线修复入口。
+  - 质量诊断产品化：
+    - 顶部保留关键数量：章节、角色、关系、时间线、世界观。
+    - 高风险问题默认露出前三条，避免用户只看到“完成”却不知道不可用点。
+    - `candidate_counts`、阶段结果、repair groups、diagnostics detail 全部放入折叠区，减少首屏噪音。
+    - 低质量状态会显示可执行修复入口，但不阻止用户继续进入写作。
+  - 视觉收敛：
+    - 移除旧的高饱和霓虹/赛博朋克表达，改为更安静的白/灰/石墨主题。
+    - warning / danger / success / muted 状态样式统一到 `nf` token。
+    - 390px 移动端保持单列布局，上传、粘贴、诊断卡片和下一步操作不横向溢出。
+- 截图验收：
+  - 截图目录：`project-docs/screenshots/goal18a/`
+  - 已生成并人工抽查：
+    - `extract-light-default-desktop.png`
+    - `extract-dark-default-desktop.png`
+    - `extract-light-diagnostics-desktop.png`
+    - `extract-light-mobile.png`
+    - `extract-dark-mobile.png`
+    - `extract-empty-or-error-state.png`
+  - 截图说明：
+    - 使用临时 mock API 和 headless Chrome 生成，不依赖真实样本文本或外部 AI。
+    - mock 数据仅用于视觉验收，未提交临时脚本或运行日志。
+    - 抽查确认页面不是权限检查页，用户可见文本无明显乱码。
+- 测试：
+  - `cmd /c npx tsc --noEmit --incremental false`
+    - passed
+  - `cmd /c npm test -- --run`
+    - `25 files / 104 tests passed`
+  - `cmd /c npm run build`
+    - passed
+- 当前判断：
+  - Goal 18A 已完成导入页 v1 的可用性收敛：用户能按“导入 -> 看进度 -> 看质量 -> 继续写作/修复”的路径理解当前项目状态。
+  - 本轮没有改提取器、agent、editor 数据流，因此不会引入新的提取质量变量。
+- 后续风险 / 待办：
+  - 仍需要用真实长篇导入结果复测诊断内容是否足够解释“为什么质量不达标”。
+  - 修复入口目前复用既有后台任务提交能力，后续需要继续完善 preview diff 和确认写回体验。
+  - 全局导航和任务中心仍有历史项目/历史任务噪音，内测前需要继续做数据清理与新手路径收敛。

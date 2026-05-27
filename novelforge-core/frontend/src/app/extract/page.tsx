@@ -4,14 +4,21 @@ import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type DragE
 import { useRouter } from 'next/navigation';
 import {
   AlertCircle,
+  ArrowRight,
+  BookOpen,
   CheckCircle2,
   Clock,
+  ClipboardPaste,
   FileText,
+  FileUp,
   Globe2,
+  LayoutDashboard,
   Loader2,
+  MessageSquareText,
   RefreshCw,
   UploadCloud,
   Users,
+  Wrench,
 } from 'lucide-react';
 import { contentService, taskService, textProcessingService } from '@/lib/api';
 import { buildAssetQualityDiagnostics, type AssetQualityDiagnosticsResult } from '@/lib/asset-quality-diagnostics';
@@ -28,6 +35,8 @@ const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024;
 type ExtractStatus = 'idle' | 'uploading' | 'extracting' | 'success' | 'error';
 type RepairTaskType = 'chapter_index_rerun' | 'relationship_backfill' | 'timeline_rebuild';
 type RepairSeverity = 'high' | 'medium' | 'low';
+type ImportStepKey = 'input' | 'progress' | 'diagnostics' | 'next';
+type DiagnosticStatus = 'ready' | 'warning' | 'danger' | 'empty';
 
 interface SavedSummary {
   characters: number;
@@ -49,6 +58,15 @@ interface QualityRepairGroup {
   severity: RepairSeverity;
   recommendedTask: RepairTaskType;
   items: Array<string | Record<string, unknown>>;
+}
+
+interface DiagnosticArea {
+  key: string;
+  title: string;
+  status: DiagnosticStatus;
+  stat: string;
+  detail: string;
+  actions: string[];
 }
 
 const ANALYSIS_STATUS_LABELS: Record<NonNullable<NovelImportTaskResult['analysis_status']>, string> = {
@@ -180,9 +198,9 @@ function getIssuePreview(value: unknown): string {
 }
 
 function severityClass(severity: RepairSeverity): string {
-  if (severity === 'high') return 'border-red-500/30 bg-red-500/10 text-red-100';
-  if (severity === 'medium') return 'border-amber-500/30 bg-amber-500/10 text-amber-100';
-  return 'border-slate-700 bg-slate-900/80 text-slate-200';
+  if (severity === 'high') return 'border-[color-mix(in_srgb,var(--nf-danger)_28%,transparent)] bg-[color-mix(in_srgb,var(--nf-danger)_7%,transparent)] text-[var(--nf-text)]';
+  if (severity === 'medium') return 'border-[color-mix(in_srgb,var(--nf-warning)_30%,transparent)] bg-[color-mix(in_srgb,var(--nf-warning)_9%,transparent)] text-[var(--nf-text)]';
+  return 'border-[var(--nf-border)] bg-[var(--nf-panel-soft)] text-[var(--nf-text)]';
 }
 
 function repairTaskLabel(taskType: RepairTaskType): string {
@@ -336,6 +354,110 @@ function buildQualityRepairGroups(result: NovelImportTaskResult | null): Quality
   return groups.filter((group) => group.items.length > 0);
 }
 
+function resolveCurrentStep(status: ExtractStatus, analysisResult: NovelImportTaskResult | null, savedSummary: SavedSummary | null): ImportStepKey {
+  if (status === 'uploading' || status === 'extracting') return 'progress';
+  if (status === 'success' && (analysisResult || savedSummary)) return 'diagnostics';
+  if (status === 'error') return 'progress';
+  return 'input';
+}
+
+function statusToneClass(status: DiagnosticStatus): string {
+  if (status === 'ready') return 'border-[color-mix(in_srgb,var(--nf-success)_28%,transparent)] bg-[color-mix(in_srgb,var(--nf-success)_8%,transparent)]';
+  if (status === 'warning') return 'border-[color-mix(in_srgb,var(--nf-warning)_30%,transparent)] bg-[color-mix(in_srgb,var(--nf-warning)_8%,transparent)]';
+  if (status === 'danger') return 'border-[color-mix(in_srgb,var(--nf-danger)_28%,transparent)] bg-[color-mix(in_srgb,var(--nf-danger)_7%,transparent)]';
+  return 'border-[var(--nf-border)] bg-[var(--nf-panel-soft)]';
+}
+
+function statusDotClass(status: DiagnosticStatus): string {
+  if (status === 'ready') return 'bg-[var(--nf-success)]';
+  if (status === 'warning') return 'bg-[var(--nf-warning)]';
+  if (status === 'danger') return 'bg-[var(--nf-danger)]';
+  return 'bg-[var(--nf-text-subtle)]';
+}
+
+function countDiagnosticItems(items?: Array<unknown>): number {
+  return Array.isArray(items) ? items.filter(Boolean).length : 0;
+}
+
+function buildDiagnosticAreas(result: NovelImportTaskResult | null, summary: SavedSummary | null, repairGroups: QualityRepairGroup[]): DiagnosticArea[] {
+  const diagnostics = result?.analysis_diagnostics;
+  const issues = result?.analysis_quality_issues ?? [];
+  const failedChapters = countDiagnosticItems(result?.failed_chapters || diagnostics?.failed_chapters);
+  const weakRelationships = countDiagnosticItems(diagnostics?.weak_relationships);
+  const unresolvedRelationships = countDiagnosticItems(result?.relationship_unresolved_endpoints || diagnostics?.relationship_unresolved_endpoints || diagnostics?.unresolved_relationship_edges);
+  const timelineMismatch = countDiagnosticItems(result?.timeline_mismatch_events || diagnostics?.timeline_mismatch_events);
+  const lowConfidenceCharacters = countDiagnosticItems(diagnostics?.low_confidence_characters);
+  const weakWorldFacts = countDiagnosticItems(diagnostics?.weak_world_facts);
+
+  const chapterCount = result?.chapters_count ?? result?.candidate_counts?.chapters_total ?? result?.candidate_counts?.recovered_chapters ?? 0;
+  const characterCount = result?.characters_count ?? summary?.characters ?? 0;
+  const relationshipCount = result?.relationships_count ?? summary?.relationships ?? 0;
+  const worldCount = result?.world_count ?? summary?.world ?? 0;
+  const timelineCount = result?.timeline_count ?? summary?.timeline ?? 0;
+
+  const writeReadyStatus: DiagnosticStatus =
+    result?.analysis_status === 'completed' && repairGroups.length === 0
+      ? 'ready'
+      : result?.analysis_status === 'failed' || result?.analysis_status === 'timed_out'
+        ? 'danger'
+        : issues.length > 0 || repairGroups.length > 0
+          ? 'warning'
+          : summary
+            ? 'ready'
+            : 'empty';
+
+  return [
+    {
+      key: 'chapters',
+      title: '章节',
+      status: failedChapters > 0 ? 'danger' : chapterCount > 0 ? 'ready' : 'empty',
+      stat: chapterCount > 0 ? `${chapterCount} 章` : '暂无章节',
+      detail: failedChapters > 0 ? `${failedChapters} 个章节索引失败` : '章节资产已写入内容库，后续可在 editor 中整理。',
+      actions: failedChapters > 0 ? ['优先重跑失败章节', '检查章节标题和正文是否为空'] : ['打开 editor 检查章节顺序'],
+    },
+    {
+      key: 'characters',
+      title: '角色',
+      status: lowConfidenceCharacters > 0 || characterCount < 3 ? 'warning' : characterCount > 0 ? 'ready' : 'empty',
+      stat: characterCount > 0 ? `${characterCount} 个角色` : '暂无角色',
+      detail: lowConfidenceCharacters > 0 ? `${lowConfidenceCharacters} 个角色置信度偏低` : '角色可作为后续写作上下文。',
+      actions: lowConfidenceCharacters > 0 ? ['补充低置信角色证据', '回到角色页复核人物性格'] : ['查看角色档案'],
+    },
+    {
+      key: 'relationships',
+      title: '关系',
+      status: unresolvedRelationships > 0 ? 'danger' : weakRelationships > 0 || relationshipCount < 3 ? 'warning' : relationshipCount > 0 ? 'ready' : 'empty',
+      stat: relationshipCount > 0 ? `${relationshipCount} 条关系` : '暂无关系',
+      detail: unresolvedRelationships > 0 ? `${unresolvedRelationships} 个端点未闭合` : weakRelationships > 0 ? `${weakRelationships} 条关系需要补强` : '关系可用于驱动情绪张力。',
+      actions: unresolvedRelationships > 0 || weakRelationships > 0 ? ['回补关系证据', '优先修复主角关系'] : ['用关系生成序章冲突'],
+    },
+    {
+      key: 'world',
+      title: '世界观',
+      status: weakWorldFacts > 0 ? 'warning' : worldCount > 0 ? 'ready' : 'empty',
+      stat: worldCount > 0 ? `${worldCount} 条世界观` : '暂无世界观',
+      detail: weakWorldFacts > 0 ? `${weakWorldFacts} 条设定分类不足` : '世界观资产可供 AI 检索和续写。',
+      actions: weakWorldFacts > 0 ? ['补充地点、规则、历史分类'] : ['查看世界观资料库'],
+    },
+    {
+      key: 'timeline',
+      title: '时间线',
+      status: timelineMismatch > 0 ? 'warning' : timelineCount > 0 ? 'ready' : 'empty',
+      stat: timelineCount > 0 ? `${timelineCount} 个事件` : '暂无事件',
+      detail: timelineMismatch > 0 ? `${timelineMismatch} 个事件标题/描述待复核` : '时间线可用于保持剧情顺序。',
+      actions: timelineMismatch > 0 ? ['重建时间线', '检查事件标题和描述是否匹配'] : ['用时间线规划下一章'],
+    },
+    {
+      key: 'readiness',
+      title: '写作准备度',
+      status: writeReadyStatus,
+      stat: result?.analysis_status ? ANALYSIS_STATUS_LABELS[result.analysis_status] : summary ? '可开始写作' : '等待导入',
+      detail: writeReadyStatus === 'ready' ? '资产足够支撑 AI 进入创作。' : writeReadyStatus === 'empty' ? '需要先导入文本或创建资产。' : '可以开始写作，但建议先处理高风险诊断。',
+      actions: writeReadyStatus === 'ready' ? ['让 AI 写序章', '打开主工作台'] : ['先修复高风险项', '写作时提醒 AI 标注不确定处'],
+    },
+  ];
+}
+
 async function loadSavedSummaryFromContent(sessionId: string, parentId?: string | null): Promise<SavedSummary> {
   const searchResult = await contentService.search({
     session_id: sessionId,
@@ -386,6 +508,7 @@ export default function ExtractPage() {
   const router = useRouter();
   const [isDragging, setIsDragging] = useState(false);
   const [file, setFile] = useState<File | null>(null);
+  const [pastedText, setPastedText] = useState('');
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState<ExtractStatus>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -710,6 +833,20 @@ export default function ExtractPage() {
     if (event.target.files?.[0]) void processFile(event.target.files[0]);
   };
 
+  const handlePasteImport = () => {
+    const text = pastedText.trim();
+    if (!text) {
+      setStatus('error');
+      setProgress(0);
+      setErrorMessage('请先粘贴需要导入的小说文本。');
+      setStatusMessage('缺少文本内容');
+      return;
+    }
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const pastedFile = new File([blob], `粘贴文本-${new Date().toISOString().slice(0, 10)}.txt`, { type: 'text/plain' });
+    void processFile(pastedFile);
+  };
+
   useEffect(() => {
     const sessionId = completedResult?.session_id || savedSummary?.sessionId || currentSessionId;
     if (!sessionId || !completedResult?.parent_id) {
@@ -783,274 +920,387 @@ export default function ExtractPage() {
     [assetQualityResult, completedResult]
   );
   const qualityRepairGroups = useMemo(() => buildQualityRepairGroups(analysisResult), [analysisResult]);
+  const currentStep = resolveCurrentStep(status, analysisResult, savedSummary);
+  const diagnosticAreas = useMemo(
+    () => buildDiagnosticAreas(analysisResult, savedSummary, qualityRepairGroups),
+    [analysisResult, qualityRepairGroups, savedSummary]
+  );
+  const topQualityIssues = analysisResult?.analysis_quality_issues?.slice(0, 3) ?? [];
+  const statusLabel = analysisResult?.analysis_status ? ANALYSIS_STATUS_LABELS[analysisResult.analysis_status] : status === 'error' ? '需要处理' : status === 'success' ? '已完成' : '等待导入';
+  const progressStageLabel = status === 'uploading'
+    ? '提交任务'
+    : status === 'extracting'
+      ? statusMessage
+      : status === 'success'
+        ? '提取完成'
+        : status === 'error'
+          ? '流程中断'
+          : '等待文本';
 
   return (
-    <div className="min-h-screen bg-slate-950 px-6 py-10 text-slate-50">
-      <div className="mx-auto max-w-5xl">
-        <div className="mb-10 text-center">
-          <h1 className="bg-gradient-to-r from-sky-400 via-cyan-300 to-emerald-300 bg-clip-text text-4xl font-extrabold tracking-tight text-transparent">
-            智能文本提取引擎
-          </h1>
-          <p className="mx-auto mt-4 max-w-3xl text-base text-slate-300">
-            上传小说文本，让系统提取角色、世界观、时间线与关系网，并写入当前项目的统一资产库。
-          </p>
-          <p className="mt-3 text-sm text-slate-500">当前项目：{projectLabel}</p>
-        </div>
+    <div className="min-h-full overflow-x-hidden bg-[var(--nf-bg)] px-4 py-6 text-[var(--nf-text)] sm:px-6 lg:px-8">
+      <div className="mx-auto flex max-w-6xl flex-col gap-5">
+        <header className="nf-panel nf-panel-pad">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div className="max-w-3xl">
+              <div className="nf-kicker">Import Wizard</div>
+              <h1 className="mt-2 text-2xl font-black tracking-tight text-[var(--nf-text)] sm:text-3xl">
+                导入小说并生成项目资产
+              </h1>
+              <p className="mt-3 text-sm leading-6 text-[var(--nf-text-muted)]">
+                按四步完成导入：选择文本、观察提取进度、复核质量诊断，然后进入写作或修复。结果会写入当前项目的内容库。
+              </p>
+              <p className="mt-2 text-xs text-[var(--nf-text-subtle)]">当前项目：{projectLabel}</p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end">
+              {[
+                { key: 'input' as const, label: '1 导入文本' },
+                { key: 'progress' as const, label: '2 提取进度' },
+                { key: 'diagnostics' as const, label: '3 质量诊断' },
+                { key: 'next' as const, label: '4 下一步' },
+              ].map((step) => {
+                const active = currentStep === step.key;
+                const done =
+                  step.key === 'input'
+                    ? status !== 'idle'
+                    : step.key === 'progress'
+                      ? status === 'success'
+                      : step.key === 'diagnostics'
+                        ? Boolean(savedSummary)
+                        : false;
+                return (
+                  <span
+                    key={step.key}
+                    className={[
+                      'inline-flex min-h-10 items-center justify-center rounded-xl border px-3 text-xs font-bold',
+                      active
+                        ? 'border-[color-mix(in_srgb,var(--nf-accent)_38%,transparent)] bg-[var(--nf-accent-soft)] text-[var(--nf-accent)]'
+                        : done
+                          ? 'border-[color-mix(in_srgb,var(--nf-success)_28%,transparent)] bg-[color-mix(in_srgb,var(--nf-success)_8%,transparent)] text-[var(--nf-text)]'
+                          : 'border-[var(--nf-border)] bg-[var(--nf-panel-soft)] text-[var(--nf-text-muted)]',
+                    ].join(' ')}
+                  >
+                    {step.label}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        </header>
 
-        <div className="relative">
-          <div className="absolute -inset-1 rounded-3xl bg-gradient-to-r from-sky-500/30 via-cyan-500/20 to-emerald-500/30 blur-2xl" />
-          <div className="relative overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/80 p-8 shadow-2xl backdrop-blur-xl">
+        <section className="grid gap-5 lg:grid-cols-[minmax(0,1.08fr)_minmax(320px,0.92fr)]">
+          <div className="nf-panel nf-panel-pad">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="nf-kicker">Step 1</div>
+                <h2 className="mt-1 text-lg font-extrabold text-[var(--nf-text)]">选择或粘贴文本</h2>
+                <p className="mt-2 text-sm leading-6 text-[var(--nf-text-muted)]">
+                  支持 {ACCEPTED_EXTENSIONS.join(', ')}。长篇建议优先上传文件；短文本或试写片段可以直接粘贴。
+                </p>
+              </div>
+              <FileUp className="h-5 w-5 shrink-0 text-[var(--nf-accent)]" />
+            </div>
+
             <div
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
               className={[
-                'rounded-2xl border-2 border-dashed px-6 py-16 text-center transition-all duration-300',
-                isDragging ? 'scale-[1.01] border-sky-400 bg-sky-500/10' : 'border-slate-700 bg-slate-950/40',
-                status === 'error' ? 'border-red-500/60 bg-red-500/5' : '',
+                'mt-5 rounded-2xl border border-dashed p-5 transition',
+                isDragging
+                  ? 'border-[color-mix(in_srgb,var(--nf-accent)_48%,transparent)] bg-[var(--nf-accent-soft)]'
+                  : 'border-[var(--nf-border-strong)] bg-[var(--nf-panel-soft)]',
+                isBusy ? 'opacity-70' : '',
               ].join(' ')}
             >
-              <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-slate-800 shadow-inner">
-                {isBusy ? (
-                  <Loader2 className="h-10 w-10 animate-spin text-sky-300" />
-                ) : status === 'success' ? (
-                  <CheckCircle2 className="h-10 w-10 text-emerald-400" />
-                ) : (
-                  <UploadCloud className={`h-10 w-10 ${isDragging ? 'text-sky-300' : 'text-slate-400'}`} />
-                )}
-              </div>
-              <h2 className="text-2xl font-semibold text-white">
-                {status === 'success' ? '提取完成' : '拖拽文本文件到这里，或点击选择文件'}
-              </h2>
-              <p className="mx-auto mt-3 max-w-2xl text-sm text-slate-400">
-                支持 {ACCEPTED_EXTENSIONS.join(', ')}，进度与完成状态会跟随真实后台任务更新。
-              </p>
-              <label className="mt-8 inline-flex cursor-pointer items-center justify-center rounded-full bg-sky-500 px-6 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-400">
-                <input type="file" accept={ACCEPTED_EXTENSIONS.join(',')} className="hidden" onChange={handleFileChange} />
-                选择文本文件
-              </label>
-
-              {file ? (
-                <div className="mx-auto mt-6 flex max-w-md items-center justify-center gap-3 rounded-2xl border border-slate-800 bg-slate-900/80 px-4 py-3 text-left">
-                  <FileText className="h-5 w-5 text-sky-300" />
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--nf-surface)] text-[var(--nf-accent)]">
+                    {isBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : <UploadCloud className="h-5 w-5" />}
+                  </div>
                   <div>
-                    <p className="text-sm font-medium text-slate-100">{file.name}</p>
-                    <p className="text-xs text-slate-500">{formatFileSize(file.size)}</p>
+                    <h3 className="text-sm font-bold text-[var(--nf-text)]">
+                      {file ? file.name : '拖拽文件到这里，或选择文本文件'}
+                    </h3>
+                    <p className="mt-1 text-xs leading-5 text-[var(--nf-text-subtle)]">
+                      {file ? formatFileSize(file.size) : `单文件上限 ${(MAX_FILE_SIZE_BYTES / 1024 / 1024).toFixed(0)}MB，导入后会自动保存章节并进入深度分析。`}
+                    </p>
                   </div>
                 </div>
-              ) : null}
-
-              {status !== 'idle' || errorMessage ? (
-                <div className="mx-auto mt-8 max-w-xl rounded-2xl border border-slate-800 bg-slate-950/80 p-4 text-left">
-                  <div className="mb-2 flex items-center gap-2 text-sm font-medium text-slate-200">
-                    {status === 'error' ? <AlertCircle className="h-4 w-4 text-red-400" /> : <Clock className="h-4 w-4 text-sky-300" />}
-                    <span>{statusMessage}</span>
-                  </div>
-                  {status !== 'error' ? (
-                    <div className="mt-3">
-                      <div className="h-2 overflow-hidden rounded-full bg-slate-800">
-                        <div className="h-full rounded-full bg-gradient-to-r from-sky-400 to-emerald-400 transition-all duration-500" style={{ width: `${progress}%` }} />
-                      </div>
-                      <p className="mt-2 text-xs text-slate-500">进度 {progress}%</p>
-                    </div>
-                  ) : null}
-                  {errorMessage ? <p className="mt-3 text-sm text-red-400">{errorMessage}</p> : null}
-                </div>
-              ) : null}
+                <label className="nf-button nf-button-primary w-full cursor-pointer sm:w-auto">
+                  <input type="file" accept={ACCEPTED_EXTENSIONS.join(',')} className="hidden" onChange={handleFileChange} disabled={isBusy} />
+                  选择文本文件
+                </label>
+              </div>
             </div>
 
-            {savedSummary ? (
-              <div className="mt-8 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-6">
-                <div className="flex items-center gap-2 text-emerald-300">
-                  <CheckCircle2 className="h-5 w-5" />
-                  <h3 className="text-lg font-semibold">已保存到项目资产库</h3>
-                </div>
-                <div className="mt-4 grid gap-4 md:grid-cols-4">
-                  {[
-                    ['角色', savedSummary.characters],
-                    ['世界观', savedSummary.world],
-                    ['时间线', savedSummary.timeline],
-                    ['关系网', savedSummary.relationships],
-                  ].map(([label, value]) => (
-                    <div key={label} className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                      <p className="text-xs uppercase tracking-wide text-slate-500">{label}</p>
-                      <p className="mt-2 text-2xl font-bold text-white">{value}</p>
-                    </div>
-                  ))}
-                </div>
+            <div className="mt-4 rounded-2xl border border-[var(--nf-border)] bg-[var(--nf-surface)] p-4">
+              <label className="text-sm font-bold text-[var(--nf-text)]" htmlFor="extract-paste-text">
+                粘贴文本导入
+              </label>
+              <textarea
+                id="extract-paste-text"
+                value={pastedText}
+                onChange={(event) => setPastedText(event.target.value)}
+                placeholder="粘贴小说正文或片段..."
+                disabled={isBusy}
+                className="mt-3 min-h-28 w-full resize-y rounded-xl border border-[var(--nf-border)] bg-[var(--nf-bg)] px-3 py-3 text-sm leading-6 text-[var(--nf-text)] outline-none transition focus:border-[color-mix(in_srgb,var(--nf-accent)_45%,transparent)]"
+              />
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs text-[var(--nf-text-subtle)]">{pastedText.trim().length} 字符</p>
+                <button type="button" className="nf-button" onClick={handlePasteImport} disabled={isBusy || pastedText.trim().length === 0}>
+                  <ClipboardPaste className="h-4 w-4" />
+                  用粘贴文本开始导入
+                </button>
+              </div>
+            </div>
 
-                {analysisResult ? (
-                  <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-950/70 p-5">
-                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <h4 className="text-sm font-semibold text-white">导入分析结果</h4>
-                        <p className="mt-1 text-sm text-slate-400">{getAnalysisStatusCopy(analysisResult)}</p>
-                      </div>
-                      {analysisResult.analysis_status ? (
-                        <span className={['inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium', ANALYSIS_STATUS_STYLES[analysisResult.analysis_status]].join(' ')}>
-                          {ANALYSIS_STATUS_LABELS[analysisResult.analysis_status]}
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="mt-4 grid gap-3 md:grid-cols-2">
-                      {ANALYSIS_STAGE_ORDER.map((stageKey) => {
-                        const stageStatus = analysisResult.analysis_stage_results?.[stageKey];
-                        return (
-                          <div key={stageKey} className={['rounded-2xl border px-4 py-3', getStageStatusStyle(stageStatus)].join(' ')}>
-                            <div className="flex items-center justify-between gap-3">
-                              <span className="text-sm font-medium">{getNovelImportStageLabel(stageKey)}</span>
-                              <span className="text-xs font-semibold">{getStageStatusLabel(stageStatus)}</span>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    {analysisResult.analysis_warning ? (
-                      <div className="mt-4 rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">{analysisResult.analysis_warning}</div>
-                    ) : null}
-                    {analysisResult.analysis_quality_issues?.length ? (
-                      <div className="mt-4 rounded-2xl border border-yellow-500/20 bg-yellow-500/10 p-4">
-                        <h5 className="text-sm font-semibold text-yellow-100">质量问题</h5>
-                        <ul className="mt-2 space-y-2 text-sm text-yellow-50/90">
-                          {analysisResult.analysis_quality_issues.slice(0, 6).map((issue, index) => <li key={`${issue}-${index}`}>{issue}</li>)}
-                        </ul>
-                      </div>
-                    ) : null}
-                    {analysisResult.candidate_counts && Object.keys(analysisResult.candidate_counts).length > 0 ? (
-                      <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                        <h5 className="text-sm font-semibold text-white">候选与合并诊断</h5>
-                        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                          {Object.entries(analysisResult.candidate_counts).map(([key, value]) => (
-                            <div key={key} className="rounded-xl border border-slate-800 bg-slate-900/70 px-3 py-2">
-                              <p className="text-xs text-slate-500">{CANDIDATE_COUNT_LABELS[key] || key}</p>
-                              <p className="mt-1 text-sm font-semibold text-slate-100">{formatDiagnosticValue(key, value)}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-                    <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                        <div>
-                          <h5 className="text-sm font-semibold text-white">质量修复重跑</h5>
-                          <p className="mt-1 text-sm text-slate-400">重跑会生成 preview 结果，先复核再进入资产替换。</p>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {[
-                            { type: 'chapter_index_rerun' as const, label: '单章/章节索引' },
-                            { type: 'relationship_backfill' as const, label: '关系回补' },
-                            { type: 'timeline_rebuild' as const, label: '时间线重建' },
-                          ].map((item) => (
-                            <button
-                              key={item.type}
-                              type="button"
-                              disabled={repairSubmitting !== null}
-                              onClick={() => void submitRepairTask(item.type)}
-                              className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-medium text-slate-100 transition hover:border-cyan-400 hover:text-cyan-200 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              <RefreshCw className={['mr-2 h-3.5 w-3.5', repairSubmitting === item.type ? 'animate-spin' : ''].join(' ')} />
-                              {item.label}
-                            </button>
-                          ))}
-                        </div>
-                        {repairChapters.length ? (
-                          <label className="flex flex-col gap-1 text-xs text-slate-400">
-                            章节范围
-                            <select
-                              value={selectedRepairChapterId}
-                              onChange={(event) => setSelectedRepairChapterId(event.target.value)}
-                              className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 outline-none transition focus:border-cyan-400"
-                            >
-                              <option value="">全部章节</option>
-                              {repairChapters.map((chapter) => <option key={chapter.id} value={chapter.id}>{chapter.title}</option>)}
-                            </select>
-                          </label>
-                        ) : null}
-                      </div>
-                      {repairMessage ? <p className="mt-3 text-sm text-slate-300">{repairMessage}</p> : null}
-                    </div>
-                    {qualityRepairGroups.length > 0 ? (
-                      <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                          <div>
-                            <h5 className="text-sm font-semibold text-white">可解释质量修复面板</h5>
-                            <p className="mt-1 text-sm text-slate-400">下面的问题会影响资产可信度和 AI 写作稳定性。优先处理高风险项。</p>
-                          </div>
-                          <span className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1 text-xs text-slate-300">
-                            {qualityRepairGroups.length} 类问题
-                          </span>
-                        </div>
-                        <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                          {qualityRepairGroups.map((group) => (
-                            <div key={group.key} className={['rounded-2xl border p-4', severityClass(group.severity)].join(' ')}>
-                              <div className="flex items-start justify-between gap-3">
-                                <div>
-                                  <h6 className="text-sm font-semibold">{group.title}</h6>
-                                  <p className="mt-1 text-xs leading-5 opacity-80">{group.description}</p>
-                                </div>
-                                <button
-                                  type="button"
-                                  disabled={repairSubmitting !== null}
-                                  onClick={() => void submitRepairTask(group.recommendedTask)}
-                                  className="shrink-0 rounded-full border border-white/10 bg-slate-950/40 px-3 py-1.5 text-xs font-medium text-slate-100 transition hover:bg-slate-950/70 disabled:cursor-not-allowed disabled:opacity-60"
-                                >
-                                  {repairTaskLabel(group.recommendedTask)}
-                                </button>
-                              </div>
-                              <ul className="mt-3 space-y-2 text-sm">
-                                {group.items.slice(0, 5).map((item, index) => (
-                                  <li key={`${group.key}-${index}`} className="rounded-xl bg-slate-950/35 px-3 py-2 leading-6">
-                                    {getIssuePreview(item)}
-                                  </li>
-                                ))}
-                                {group.items.length > 5 ? (
-                                  <li className="text-xs opacity-70">还有 {group.items.length - 5} 项未展示</li>
-                                ) : null}
-                              </ul>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : analysisResult.analysis_status && analysisResult.analysis_status !== 'completed' ? (
-                      <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-4 text-sm text-slate-300">
-                        当前状态不是 completed，但没有可展示的结构化 diagnostics。建议重新运行导入或查看任务中心错误详情。
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                <div className="mt-6 flex flex-wrap gap-3">
-                  <button type="button" onClick={() => router.push('/characters')} className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-medium text-slate-100 transition hover:border-sky-400 hover:text-sky-300">
-                    <Users className="mr-2 h-4 w-4" />
-                    查看角色
-                  </button>
-                  <button type="button" onClick={() => router.push('/world')} className="inline-flex items-center rounded-full bg-emerald-400 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300">
-                    <Globe2 className="mr-2 h-4 w-4" />
-                    查看世界观
-                  </button>
-                </div>
+            {errorMessage ? (
+              <div className="nf-alert mt-4 border-[color-mix(in_srgb,var(--nf-danger)_32%,transparent)] bg-[color-mix(in_srgb,var(--nf-danger)_8%,transparent)] text-[var(--nf-danger)]">
+                {errorMessage}
               </div>
             ) : null}
           </div>
-        </div>
 
-        <div className="mt-10 grid gap-4 md:grid-cols-3">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-5">
-            <Users className="h-8 w-8 text-sky-300" />
-            <h3 className="mt-4 text-lg font-semibold text-white">角色提取</h3>
-            <p className="mt-2 text-sm text-slate-400">提取任务走统一后台调度链路，角色结果会持续写入当前项目。</p>
+          <div className="nf-panel nf-panel-pad">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="nf-kicker">Step 2</div>
+                <h2 className="mt-1 text-lg font-extrabold text-[var(--nf-text)]">提取进度</h2>
+                <p className="mt-2 text-sm leading-6 text-[var(--nf-text-muted)]">{progressStageLabel}</p>
+              </div>
+              {isBusy ? <Loader2 className="h-5 w-5 animate-spin text-[var(--nf-accent)]" /> : status === 'success' ? <CheckCircle2 className="h-5 w-5 text-[var(--nf-success)]" /> : <Clock className="h-5 w-5 text-[var(--nf-text-subtle)]" />}
+            </div>
+            <div className="mt-5">
+              <div className="h-2 overflow-hidden rounded-full bg-[var(--nf-panel-soft)]">
+                <div className="h-full rounded-full bg-[var(--nf-accent)] transition-all duration-500" style={{ width: `${progress}%` }} />
+              </div>
+              <div className="mt-2 flex items-center justify-between text-xs text-[var(--nf-text-subtle)]">
+                <span>{statusMessage}</span>
+                <span>{progress}%</span>
+              </div>
+            </div>
+            <div className="mt-5 grid gap-2">
+              {[
+                ['保存章节', progress > 10 || status === 'success'],
+                ['章节索引', progress > 24 || status === 'success'],
+                ['角色', progress > 42 || status === 'success'],
+                ['关系', progress > 58 || status === 'success'],
+                ['时间线', progress > 72 || status === 'success'],
+                ['世界观', progress > 82 || status === 'success'],
+                ['写入内容库', status === 'success'],
+              ].map(([label, done]) => (
+                <div key={String(label)} className="flex min-h-10 items-center justify-between rounded-xl border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] px-3 text-sm">
+                  <span className="text-[var(--nf-text-muted)]">{label}</span>
+                  {done ? <CheckCircle2 className="h-4 w-4 text-[var(--nf-success)]" /> : <span className="h-2 w-2 rounded-full bg-[var(--nf-text-subtle)]" />}
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-5">
-            <Globe2 className="h-8 w-8 text-emerald-300" />
-            <h3 className="mt-4 text-lg font-semibold text-white">真实进度</h3>
-            <p className="mt-2 text-sm text-slate-400">页面进度直接读取后台任务的真实 progress 与 message。</p>
+        </section>
+
+        <section className="nf-panel nf-panel-pad">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="nf-kicker">Step 3</div>
+              <h2 className="mt-1 text-lg font-extrabold text-[var(--nf-text)]">质量诊断</h2>
+              <p className="mt-2 text-sm leading-6 text-[var(--nf-text-muted)]">
+                摘要默认展示，候选数、端点、失败章节等详细日志折叠。低质量项会给出可执行修复入口。
+              </p>
+            </div>
+            <span className="inline-flex min-h-10 items-center rounded-xl border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] px-3 text-xs font-bold text-[var(--nf-text-muted)]">
+              {statusLabel}
+            </span>
           </div>
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-5">
-            <Clock className="h-8 w-8 text-cyan-300" />
-            <h3 className="mt-4 text-lg font-semibold text-white">项目闭环</h3>
-            <p className="mt-2 text-sm text-slate-400">提取完成后，结果会进入资产库，并被角色页、世界页和聊天工作台复用。</p>
+
+          {savedSummary ? (
+            <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {[
+                ['角色', savedSummary.characters],
+                ['世界观', savedSummary.world],
+                ['时间线', savedSummary.timeline],
+                ['关系', savedSummary.relationships],
+              ].map(([label, value]) => (
+                <div key={String(label)} className="rounded-2xl border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] p-4">
+                  <p className="text-xs text-[var(--nf-text-subtle)]">{label}</p>
+                  <p className="mt-2 text-2xl font-black text-[var(--nf-text)]">{value}</p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="nf-alert mt-5">
+              还没有可诊断的导入结果。先完成 Step 1 导入，或等待后台任务写入资产。
+            </div>
+          )}
+
+          {analysisResult?.analysis_warning ? (
+            <div className="nf-alert mt-4">{analysisResult.analysis_warning}</div>
+          ) : null}
+
+          {topQualityIssues.length > 0 ? (
+            <div className="mt-4 rounded-2xl border border-[color-mix(in_srgb,var(--nf-warning)_30%,transparent)] bg-[color-mix(in_srgb,var(--nf-warning)_8%,transparent)] p-4">
+              <h3 className="text-sm font-bold text-[var(--nf-text)]">优先关注</h3>
+              <ul className="mt-3 space-y-2 text-sm text-[var(--nf-text-muted)]">
+                {topQualityIssues.map((issue, index) => (
+                  <li key={`${issue}-${index}`}>• {issue}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          <div className="mt-5 grid gap-3 lg:grid-cols-3">
+            {diagnosticAreas.map((area) => (
+              <article key={area.key} className={['rounded-2xl border p-4', statusToneClass(area.status)].join(' ')}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className={['h-2.5 w-2.5 rounded-full', statusDotClass(area.status)].join(' ')} />
+                      <h3 className="text-sm font-black text-[var(--nf-text)]">{area.title}</h3>
+                    </div>
+                    <p className="mt-2 text-xl font-black text-[var(--nf-text)]">{area.stat}</p>
+                  </div>
+                </div>
+                <p className="mt-3 text-sm leading-6 text-[var(--nf-text-muted)]">{area.detail}</p>
+                <ul className="mt-3 space-y-1 text-xs leading-5 text-[var(--nf-text-subtle)]">
+                  {area.actions.slice(0, 3).map((action) => (
+                    <li key={action}>建议：{action}</li>
+                  ))}
+                </ul>
+              </article>
+            ))}
           </div>
-        </div>
+
+          <details className="mt-5 rounded-2xl border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] p-4">
+            <summary className="cursor-pointer text-sm font-bold text-[var(--nf-text)]">查看详细诊断日志</summary>
+            <div className="mt-4 grid gap-4">
+              {analysisResult?.analysis_stage_results ? (
+                <div>
+                  <h3 className="text-sm font-bold text-[var(--nf-text)]">阶段结果</h3>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                    {ANALYSIS_STAGE_ORDER.map((stageKey) => {
+                      const stageStatus = analysisResult.analysis_stage_results?.[stageKey];
+                      return (
+                        <div key={stageKey} className="rounded-xl border border-[var(--nf-border)] bg-[var(--nf-surface)] px-3 py-2">
+                          <p className="text-xs text-[var(--nf-text-subtle)]">{getNovelImportStageLabel(stageKey)}</p>
+                          <p className="mt-1 text-sm font-bold text-[var(--nf-text)]">{getStageStatusLabel(stageStatus)}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
+              {analysisResult?.candidate_counts && Object.keys(analysisResult.candidate_counts).length > 0 ? (
+                <div>
+                  <h3 className="text-sm font-bold text-[var(--nf-text)]">候选与合并统计</h3>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                    {Object.entries(analysisResult.candidate_counts).map(([key, value]) => (
+                      <div key={key} className="rounded-xl border border-[var(--nf-border)] bg-[var(--nf-surface)] px-3 py-2">
+                        <p className="text-xs text-[var(--nf-text-subtle)]">{CANDIDATE_COUNT_LABELS[key] || key}</p>
+                        <p className="mt-1 text-sm font-bold text-[var(--nf-text)]">{formatDiagnosticValue(key, value)}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {qualityRepairGroups.length > 0 ? (
+                <div>
+                  <h3 className="text-sm font-bold text-[var(--nf-text)]">可修复问题</h3>
+                  <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                    {qualityRepairGroups.map((group) => (
+                      <div key={group.key} className={['rounded-2xl border p-4', severityClass(group.severity)].join(' ')}>
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <h4 className="text-sm font-bold">{group.title}</h4>
+                            <p className="mt-1 text-xs leading-5 text-[var(--nf-text-muted)]">{group.description}</p>
+                          </div>
+                          <button type="button" className="nf-button" disabled={repairSubmitting !== null} onClick={() => void submitRepairTask(group.recommendedTask)}>
+                            <Wrench className="h-4 w-4" />
+                            {repairTaskLabel(group.recommendedTask)}
+                          </button>
+                        </div>
+                        <ul className="mt-3 space-y-2 text-sm text-[var(--nf-text-muted)]">
+                          {group.items.slice(0, 3).map((item, index) => (
+                            <li key={`${group.key}-${index}`} className="rounded-xl bg-[var(--nf-surface)] px-3 py-2">
+                              {getIssuePreview(item)}
+                            </li>
+                          ))}
+                          {group.items.length > 3 ? <li className="text-xs text-[var(--nf-text-subtle)]">还有 {group.items.length - 3} 项</li> : null}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </details>
+
+          <div className="mt-5 rounded-2xl border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] p-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <h3 className="text-sm font-black text-[var(--nf-text)]">质量修复重跑</h3>
+                <p className="mt-1 text-sm text-[var(--nf-text-muted)]">重跑会生成 preview 结果，先复核再进入资产替换。</p>
+              </div>
+              {repairChapters.length ? (
+                <label className="flex min-w-52 flex-col gap-1 text-xs text-[var(--nf-text-subtle)]">
+                  章节范围
+                  <select
+                    value={selectedRepairChapterId}
+                    onChange={(event) => setSelectedRepairChapterId(event.target.value)}
+                    className="min-h-10 rounded-xl border border-[var(--nf-border)] bg-[var(--nf-surface)] px-3 text-sm text-[var(--nf-text)] outline-none focus:border-[color-mix(in_srgb,var(--nf-accent)_45%,transparent)]"
+                  >
+                    <option value="">全部章节</option>
+                    {repairChapters.map((chapter) => <option key={chapter.id} value={chapter.id}>{chapter.title}</option>)}
+                  </select>
+                </label>
+              ) : null}
+            </div>
+            <div className="mt-4 grid gap-2 sm:grid-cols-3">
+              {[
+                { type: 'chapter_index_rerun' as const, label: '重跑章节索引' },
+                { type: 'relationship_backfill' as const, label: '回补关系' },
+                { type: 'timeline_rebuild' as const, label: '重建时间线' },
+              ].map((item) => (
+                <button key={item.type} type="button" className="nf-button" disabled={repairSubmitting !== null} onClick={() => void submitRepairTask(item.type)}>
+                  <RefreshCw className={['h-4 w-4', repairSubmitting === item.type ? 'animate-spin' : ''].join(' ')} />
+                  {item.label}
+                </button>
+              ))}
+            </div>
+            {repairMessage ? <div className="nf-alert mt-3">{repairMessage}</div> : null}
+          </div>
+        </section>
+
+        <section className="nf-panel nf-panel-pad">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="nf-kicker">Step 4</div>
+              <h2 className="mt-1 text-lg font-extrabold text-[var(--nf-text)]">下一步行动</h2>
+              <p className="mt-2 text-sm leading-6 text-[var(--nf-text-muted)]">
+                导入完成后，直接进入写作、章节整理或资产复核。低质量项目不会阻止写作，但会提醒你先修复关键资产。
+              </p>
+            </div>
+            <ArrowRight className="hidden h-5 w-5 text-[var(--nf-accent)] md:block" />
+          </div>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            {[
+              { label: '打开主工作台', icon: MessageSquareText, action: () => router.push('/') },
+              { label: '项目质量总览', icon: LayoutDashboard, action: () => router.push('/analytics') },
+              { label: '打开 editor', icon: BookOpen, action: () => router.push('/editor') },
+              { label: '让 AI 写序章', icon: FileText, action: () => router.push('/?quickAction=prologue') },
+              { label: '修复角色/关系', icon: Wrench, action: () => void submitRepairTask('relationship_backfill') },
+            ].map((item) => {
+              const Icon = item.icon;
+              return (
+                <button key={item.label} type="button" className="nf-button min-h-12 justify-start" onClick={item.action}>
+                  <Icon className="h-4 w-4" />
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
+        </section>
       </div>
     </div>
   );
