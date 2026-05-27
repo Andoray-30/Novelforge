@@ -4945,3 +4945,65 @@
   - dashboard、characters、world、editor 仍保留较多旧样式，后续应逐步迁移到同一套 `nf-*` primitives。
   - 主工作台右侧上下文栏和顶部项目状态存在信息重复，后续可以进一步压缩。
   - 本轮使用 clean fixture 做 UI 验收，没有重新跑真实长篇导入 smoke。
+
+## 2026-05-27 Goal 16B：主题系统、浅色模式与深色模式精修
+
+- 目标：
+  - 在 Goal 16 的主工作台 UI 地基上，建立真正的 light / dark / system 主题系统。
+  - 把主工作台从偏黑紫、压迫感较重的开发界面，推进到更成熟、克制、可长期迭代的 AI 创作工作台观感。
+- 已完成：
+  - 新增主题 token：
+    - `--nf-bg`
+    - `--nf-bg-subtle`
+    - `--nf-surface`
+    - `--nf-surface-raised`
+    - `--nf-border`
+    - `--nf-border-strong`
+    - `--nf-text`
+    - `--nf-text-muted`
+    - `--nf-text-subtle`
+    - `--nf-accent`
+    - `--nf-accent-soft`
+    - `--nf-success`
+    - `--nf-warning`
+    - `--nf-danger`
+    - `--nf-shadow`
+  - 新增主题运行时：
+    - `frontend/src/lib/theme.ts`
+    - `frontend/src/components/layout/theme-toggle.tsx`
+    - 页面加载前脚本读取 `?theme=` / `localStorage` / system preference，提前设置 `data-theme` 和 `color-scheme`，减少主题闪烁。
+  - 主工作台适配：
+    - 主布局、顶部栏、左侧栏、移动导航、聊天侧栏、聊天输入框、消息气泡、项目状态卡、trace / save card 的主要视觉层级已迁移到语义 token。
+    - light mode 使用浅灰页面背景、白色卡片、柔和边框和小面积紫色强调。
+    - dark mode 从纯黑紫调整为更柔和的石墨色层级，减少强紫面积。
+  - 历史乱码防护：
+    - `MessageBubble` 对高比例问号 / 典型 mojibake 的历史消息显示可读提示，避免旧数据里的不可恢复乱码直接破坏主工作台视觉验收。
+- 截图验收：
+  - 截图目录：
+    - `project-docs/screenshots/goal16b/desktop-light-default.png`
+    - `project-docs/screenshots/goal16b/desktop-dark-default.png`
+    - `project-docs/screenshots/goal16b/desktop-light-trace-expanded.png`
+    - `project-docs/screenshots/goal16b/desktop-dark-trace-expanded.png`
+    - `project-docs/screenshots/goal16b/tablet-light-default.png`
+    - `project-docs/screenshots/goal16b/tablet-dark-default.png`
+    - `project-docs/screenshots/goal16b/mobile-light-default.png`
+    - `project-docs/screenshots/goal16b/mobile-dark-default.png`
+  - 验收结果：
+    - 1280 桌面 light / dark 默认态：主题切换生效，无横向溢出，输入框和项目状态卡可读。
+    - 1280 桌面 trace 展开 light / dark：trace 可展开，计划与工具调用分组可见，save card 周边层级可读。
+    - 768 平板 light / dark：无横向溢出，主对话与上下文状态保持可用。
+    - 390 手机 light / dark：无横向溢出，聊天输入区和顶部主题状态可用。
+- 测试：
+  - `cmd /c npx tsc --noEmit --incremental false`
+    - passed
+  - `cmd /c npm test -- --run`
+    - `25 files / 104 tests passed`
+  - `cmd /c npm run build`
+    - passed
+- 当前判断：
+  - Goal 16B 已完成主题系统与主工作台 light / dark 可用性的核心目标。
+  - 这不是全站最终视觉完成态；它解决的是主工作台主题切换、明暗模式层级、历史乱码直显和多尺寸可读性问题。
+- 后续风险 / 待办：
+  - `editor` / `extract` 仍只是“不能明显破坏主题”的程度，还没有完全迁移到同一套 token。
+  - 移动端左下角任务中心浮动按钮仍略挤，后续应并入移动底部抽屉或统一任务中心入口。
+  - 主工作台仍会显示历史测试项目和旧数据，内测前建议做一次可控的数据清理 / 迁移，避免旧乱码数据影响真实用户观感。

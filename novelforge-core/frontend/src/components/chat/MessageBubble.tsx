@@ -108,6 +108,25 @@ function renderMarkdown(text: string): string {
     .replace(/\n/g, '<br />');
 }
 
+function isLikelyCorruptedText(text: string): boolean {
+  const normalized = text.trim();
+  if (!normalized) return false;
+
+  const questionMarkCount = (normalized.match(/\?/g) || []).length;
+  const replacementCount = (normalized.match(/\uFFFD/g) || []).length;
+  const mojibakeCount = (normalized.match(/[ÃÂÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖ×ØÙÚÛÜÝÞßàáâãäåæçèéêëìíîïðñòóôõö÷øùúûüýþÿ]/g) || []).length;
+  const suspiciousCount = questionMarkCount + replacementCount + mojibakeCount;
+
+  if (questionMarkCount >= 12 && questionMarkCount / normalized.length > 0.18) return true;
+  if (replacementCount >= 2) return true;
+  return mojibakeCount >= 24 && suspiciousCount / normalized.length > 0.25;
+}
+
+function getDisplayContent(text: string): string {
+  if (!isLikelyCorruptedText(text)) return text;
+  return '这条历史消息的正文编码已损坏，已隐藏乱码内容。建议重新发送原始提示或从编辑器中的资产继续创作。';
+}
+
 function getArtifactIcon(type: string): string {
   const icons: Record<string, string> = {
     character_card: '人',
@@ -448,6 +467,7 @@ export function MessageBubble({
   onRetryMessage,
 }: MessageBubbleProps) {
   const isUser = message.role === 'user';
+  const displayContent = getDisplayContent(message.content || '');
 
   return (
     <div className={`message-animate nf-message-row ${isUser ? 'user' : 'assistant'}`}>
@@ -475,11 +495,11 @@ export function MessageBubble({
 
       <div className={`nf-message-bubble ${isUser ? 'user' : 'assistant'}`}>
         {isUser ? (
-          <span>{message.content}</span>
+          <span>{displayContent}</span>
         ) : (
           <div
             className={`prose-dark ${message.isStreaming ? 'typing-cursor' : ''}`}
-            dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content || '') }}
+            dangerouslySetInnerHTML={{ __html: renderMarkdown(displayContent) }}
           />
         )}
       </div>
