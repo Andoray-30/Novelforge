@@ -36,7 +36,7 @@ export function MainLayout({
   const [isMobileNavOpen, setIsMobileNavOpen] = React.useState(false)
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[var(--bg-base)] text-[var(--text-primary)]">
+    <div className="flex h-screen overflow-hidden bg-[var(--nf-bg)] text-[var(--nf-text)]">
       <MobileNav
         isOpen={isMobileNavOpen}
         onClose={() => setIsMobileNavOpen(false)}

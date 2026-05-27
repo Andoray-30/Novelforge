@@ -4,6 +4,7 @@ import * as React from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { AppSidebar } from '@/components/layout/app-sidebar';
 import { MainLayout } from '@/components/layout/main-layout';
+import { ThemeToggle } from '@/components/layout/theme-toggle';
 import { useSessions } from '@/lib/hooks/use-sessions';
 import { authService, contentService } from '@/lib/api/novelforge-api';
 import {
@@ -75,9 +76,7 @@ function getRouteMeta(pathname: string): RouteMeta {
 }
 
 function sumNovelStats(stats: Record<string, number> | undefined, key: keyof ProjectAssetStats): number {
-  if (!stats) {
-    return 0;
-  }
+  if (!stats) return 0;
   const direct = stats[key];
   return typeof direct === 'number' && Number.isFinite(direct) ? direct : 0;
 }
@@ -100,13 +99,13 @@ async function loadProjectAssetStats(sessionId: string): Promise<ProjectAssetSta
     const novels = await contentService.getNovels(sessionId);
     if (novels.novels.length > 0) {
       stats = novels.novels.reduce<ProjectAssetStats>((acc, novel) => {
-        const stats = novel.stats || {};
+        const novelStats = novel.stats || {};
         acc.novels += 1;
-        acc.chapters += sumNovelStats(stats, 'chapters');
-        acc.characters += sumNovelStats(stats, 'characters');
-        acc.worlds += sumNovelStats(stats, 'worlds');
-        acc.timelines += sumNovelStats(stats, 'timelines');
-        acc.relationships += sumNovelStats(stats, 'relationships');
+        acc.chapters += sumNovelStats(novelStats, 'chapters');
+        acc.characters += sumNovelStats(novelStats, 'characters');
+        acc.worlds += sumNovelStats(novelStats, 'worlds');
+        acc.timelines += sumNovelStats(novelStats, 'timelines');
+        acc.relationships += sumNovelStats(novelStats, 'relationships');
         return acc;
       }, { ...EMPTY_PROJECT_STATS });
     }
@@ -172,19 +171,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         const allowed = !status.auth_required || status.authenticated;
         setIsAuthenticated(allowed);
         setAuthChecked(true);
-        if (!allowed && pathname !== '/login') {
-          router.replace('/login');
-        }
-        if (allowed && pathname === '/login') {
-          router.replace('/');
-        }
+        if (!allowed && pathname !== '/login') router.replace('/login');
+        if (allowed && pathname === '/login') router.replace('/');
       } catch {
         if (!disposed) {
           setIsAuthenticated(false);
           setAuthChecked(true);
-          if (pathname !== '/login') {
-            router.replace('/login');
-          }
+          if (pathname !== '/login') router.replace('/login');
         }
       }
     };
@@ -208,9 +201,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       const entries = await Promise.all(
         sessionIds.map(async (sessionId) => [sessionId, await loadProjectAssetStats(sessionId)] as const),
       );
-      if (!cancelled) {
-        setProjectAssetStats(Object.fromEntries(entries));
-      }
+      if (!cancelled) setProjectAssetStats(Object.fromEntries(entries));
     };
 
     void loadStats();
@@ -225,9 +216,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   );
 
   React.useEffect(() => {
-    if (sessions.length === 0 || Object.keys(projectAssetStats).length === 0) {
-      return;
-    }
+    if (sessions.length === 0 || Object.keys(projectAssetStats).length === 0) return;
     const currentSummary = allProjectSummaries.find((summary) => summary.id === currentSessionId);
     const firstUsable = allProjectSummaries.find((summary) => !summary.hiddenByDefault);
     if (currentSummary?.hiddenByDefault && firstUsable && firstUsable.id !== currentSummary.id) {
@@ -246,14 +235,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     await createSession('新建项目');
   }, [createSession]);
 
-  if (pathname === '/login') {
-    return <>{children}</>;
-  }
+  if (pathname === '/login') return <>{children}</>;
 
   if (!authChecked || !isAuthenticated) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-950 text-zinc-200">
-        <div className="rounded-2xl border border-white/10 bg-white/5 px-5 py-4 text-sm">
+      <div className="flex min-h-screen items-center justify-center bg-[var(--nf-bg)] text-[var(--nf-text)]">
+        <div className="rounded-2xl border border-[var(--nf-border)] bg-[var(--nf-surface)] px-5 py-4 text-sm shadow-[var(--nf-shadow)]">
           正在检查访问权限...
         </div>
       </div>
@@ -269,6 +256,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       projects={projectOptions}
       onProjectChange={switchSession}
       onCreateProject={handleCreateProject}
+      actions={<ThemeToggle />}
       contentOverflow={contentOverflow}
       sidebar={<AppSidebar />}
     >

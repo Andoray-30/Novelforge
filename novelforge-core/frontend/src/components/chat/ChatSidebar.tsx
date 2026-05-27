@@ -34,19 +34,13 @@ export function ChatSidebar({
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isCleaningEmpty, setIsCleaningEmpty] = useState(false);
-  const visibleSessions = sessions.filter((session) => {
-    return session.id === currentSessionId || session.preview.trim().length > 0;
-  });
+  const visibleSessions = sessions.filter((session) => session.id === currentSessionId || session.preview.trim().length > 0);
   const hiddenNoMessageCount = Math.max(0, sessions.length - visibleSessions.length);
 
   const handleCleanupEmpty = async () => {
-    if (!onCleanupEmptySessions || isCleaningEmpty) {
-      return;
-    }
+    if (!onCleanupEmptySessions || isCleaningEmpty) return;
     const confirmed = window.confirm('只会删除没有消息、没有内容资产的空项目。继续吗？');
-    if (!confirmed) {
-      return;
-    }
+    if (!confirmed) return;
     setIsCleaningEmpty(true);
     try {
       await onCleanupEmptySessions();
@@ -65,8 +59,8 @@ export function ChatSidebar({
         height: '100%',
         maxHeight: '100%',
         minHeight: 0,
-        background: 'var(--bg-surface)',
-        borderRight: '1px solid var(--border-subtle)',
+        background: 'var(--nf-bg-subtle)',
+        borderRight: '1px solid var(--nf-border)',
         display: 'flex',
         flexDirection: 'column',
         transition: 'width 300ms ease, min-width 300ms ease',
@@ -81,18 +75,18 @@ export function ChatSidebar({
           display: 'flex',
           alignItems: 'center',
           justifyContent: collapsed ? 'center' : 'space-between',
-          borderBottom: '1px solid var(--border-subtle)',
+          borderBottom: '1px solid var(--nf-border)',
           whiteSpace: 'nowrap',
         }}
       >
-        {!collapsed && (
+        {!collapsed ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div
               style={{
                 width: 28,
                 height: 28,
                 borderRadius: 8,
-                background: 'linear-gradient(135deg, #8b5cf6, #6366f1)',
+                background: 'var(--nf-accent)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -101,11 +95,9 @@ export function ChatSidebar({
             >
               <BookOpen size={14} color="#fff" />
             </div>
-            <span style={{ fontWeight: 600, fontSize: 15, color: 'var(--text-primary)' }}>
-              NovelForge
-            </span>
+            <span style={{ fontWeight: 600, fontSize: 15, color: 'var(--nf-text)' }}>NovelForge</span>
           </div>
-        )}
+        ) : null}
         <button
           onClick={onToggleCollapse}
           title={collapsed ? '展开侧栏' : '收起侧栏'}
@@ -113,7 +105,7 @@ export function ChatSidebar({
             background: 'none',
             border: 'none',
             cursor: 'pointer',
-            color: 'var(--text-muted)',
+            color: 'var(--nf-text-muted)',
             padding: 8,
             borderRadius: 6,
             display: 'flex',
@@ -130,76 +122,47 @@ export function ChatSidebar({
         <button
           onClick={onNewSession}
           title="新建创作项目"
+          className="nf-button"
           style={{
             width: collapsed ? '36px' : '100%',
             height: '36px',
-            display: 'flex',
-            alignItems: 'center',
             justifyContent: collapsed ? 'center' : 'flex-start',
-            gap: 8,
             padding: collapsed ? '0' : '0 12px',
-            borderRadius: 8,
-            background: 'var(--bg-elevated)',
-            border: '1px solid var(--border-subtle)',
-            color: 'var(--text-secondary)',
-            cursor: 'pointer',
-            fontSize: 13,
-            transition: 'background 150ms, border-color 150ms',
-            whiteSpace: 'nowrap',
-          }}
-          onMouseEnter={e => {
-            e.currentTarget.style.borderColor = 'var(--accent-primary)';
-            e.currentTarget.style.color = 'var(--text-primary)';
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.borderColor = 'var(--border-subtle)';
-            e.currentTarget.style.color = 'var(--text-secondary)';
           }}
         >
           <Plus size={15} />
-          {!collapsed && <span>新建创作项目</span>}
+          {!collapsed ? <span>新建创作项目</span> : null}
         </button>
       </div>
 
-      {!collapsed && (
+      {!collapsed ? (
         <div style={{ padding: '4px 16px 6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-          <span style={{ fontSize: 11, fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-disabled)' }}>
+          <span style={{ fontSize: 11, fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--nf-text-subtle)' }}>
             历史项目
           </span>
-          {onCleanupEmptySessions && sessions.length > 0 && (
+          {onCleanupEmptySessions && sessions.length > 0 ? (
             <button
               type="button"
               onClick={handleCleanupEmpty}
               disabled={isCleaningEmpty}
               title="清理没有消息和内容资产的空项目"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-                padding: '4px 6px',
-                borderRadius: 6,
-                border: '1px solid var(--border-subtle)',
-                background: 'transparent',
-                color: 'var(--text-muted)',
-                cursor: isCleaningEmpty ? 'wait' : 'pointer',
-                fontSize: 11,
-                whiteSpace: 'nowrap',
-              }}
+              className="nf-button"
+              style={{ minHeight: 28, padding: '4px 7px', fontSize: 11 }}
             >
               <Trash2 size={11} />
               {isCleaningEmpty ? '清理中' : '清理空项目'}
             </button>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
 
       <div style={{ flex: 1, overflowY: 'auto', padding: collapsed ? '0' : '0 6px', display: 'flex', flexDirection: 'column', alignItems: collapsed ? 'center' : 'stretch' }}>
-        {!collapsed && sessions.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '40px 12px', color: 'var(--text-muted)', fontSize: 13 }}>
+        {!collapsed && sessions.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '40px 12px', color: 'var(--nf-text-muted)', fontSize: 13 }}>
             还没有历史项目<br /><span style={{ fontSize: 11, opacity: 0.7 }}>开始创作你的第一个故事吧</span>
           </div>
-        )}
-        {visibleSessions.map(session => {
+        ) : null}
+        {visibleSessions.map((session) => {
           const isActive = session.id === currentSessionId;
           const isHovered = hoveredId === session.id;
           return (
@@ -220,31 +183,31 @@ export function ChatSidebar({
                 borderRadius: 8,
                 marginBottom: 8,
                 cursor: 'pointer',
-                background: isActive ? 'rgba(139, 92, 246, 0.12)' : (isHovered ? 'var(--bg-elevated)' : 'transparent'),
-                border: isActive ? '1px solid rgba(139, 92, 246, 0.3)' : '1px solid transparent',
+                background: isActive ? 'var(--nf-accent-soft)' : (isHovered ? 'var(--nf-panel-soft)' : 'transparent'),
+                border: isActive ? '1px solid color-mix(in srgb, var(--nf-accent) 30%, transparent)' : '1px solid transparent',
                 transition: 'background 120ms, border-color 120ms',
                 position: 'relative',
               }}
             >
-              <MessageSquare size={14} style={{ color: isActive ? 'var(--accent-primary)' : 'var(--text-muted)', flexShrink: 0 }} />
+              <MessageSquare size={14} style={{ color: isActive ? 'var(--nf-accent)' : 'var(--nf-text-muted)', flexShrink: 0 }} />
 
-              {!collapsed && (
+              {!collapsed ? (
                 <div style={{ flex: 1, overflow: 'hidden' }}>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: isActive ? 'var(--nf-text)' : 'var(--nf-text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {session.title}
                   </div>
-                  {session.preview && (
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {session.preview ? (
+                    <div style={{ fontSize: 11, color: 'var(--nf-text-subtle)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {session.preview}
                     </div>
-                  )}
+                  ) : null}
                 </div>
-              )}
+              ) : null}
 
-              {!collapsed && (isHovered || isActive) && (
+              {!collapsed && (isHovered || isActive) ? (
                 <button
-                  onClick={async e => {
-                    e.stopPropagation();
+                  onClick={async (event) => {
+                    event.stopPropagation();
                     if (deletingId) return;
                     setDeletingId(session.id);
                     try {
@@ -261,7 +224,7 @@ export function ChatSidebar({
                     background: 'none',
                     border: 'none',
                     cursor: deletingId ? 'wait' : 'pointer',
-                    color: 'var(--text-muted)',
+                    color: 'var(--nf-text-muted)',
                     padding: 2,
                     borderRadius: 4,
                     display: 'flex',
@@ -272,22 +235,22 @@ export function ChatSidebar({
                 >
                   <Trash2 size={12} />
                 </button>
-              )}
+              ) : null}
             </div>
           );
         })}
-        {!collapsed && hiddenNoMessageCount > 0 && (
-          <div style={{ padding: '10px 12px 18px', color: 'var(--text-disabled)', fontSize: 11, lineHeight: 1.5 }}>
+        {!collapsed && hiddenNoMessageCount > 0 ? (
+          <div style={{ padding: '10px 12px 18px', color: 'var(--nf-text-subtle)', fontSize: 11, lineHeight: 1.5 }}>
             已隐藏 {hiddenNoMessageCount} 个无聊天记录的导入项目，可在顶部项目选择器中切换有资产项目。
           </div>
-        )}
+        ) : null}
       </div>
 
-      {!collapsed && (
-        <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border-subtle)', fontSize: 11, color: 'var(--text-disabled)', whiteSpace: 'nowrap' }}>
+      {!collapsed ? (
+        <div style={{ padding: '12px 16px', borderTop: '1px solid var(--nf-border)', fontSize: 11, color: 'var(--nf-text-subtle)', whiteSpace: 'nowrap' }}>
           NovelForge v0.5.0
         </div>
-      )}
+      ) : null}
     </aside>
   );
 }

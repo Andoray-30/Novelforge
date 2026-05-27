@@ -1442,7 +1442,7 @@ export default function ChatPage() {
         minHeight: 0,
         width: '100%',
         overflow: 'hidden',
-        background: 'var(--bg-base)',
+        background: 'var(--nf-bg)',
       }}
     >
         <ChatSidebar
@@ -1457,13 +1457,13 @@ export default function ChatPage() {
           zIndex: 30
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+            <div style={{ fontWeight: 600, color: 'var(--nf-text)' }}>
               {sessions.find(s => s.id === currentSessionId)?.title || '加载中...'}
             </div>
           </div>
 
           <div style={{
-            display: 'flex', background: 'var(--bg-elevated)', padding: 3, borderRadius: 10, border: '1px solid var(--border-subtle)'
+            display: 'flex', background: 'var(--nf-panel-soft)', padding: 3, borderRadius: 10, border: '1px solid var(--nf-border)'
           }}>
             <button onClick={() => setViewMode('chat')} style={toggleBtnStyle(viewMode === 'chat')}>
               <MessageSquare size={16} /> 创作聊天
@@ -1475,7 +1475,7 @@ export default function ChatPage() {
 
           {viewMode === 'dashboard' && (
             <div style={{
-              display: 'flex', background: 'var(--bg-elevated)', padding: 3, borderRadius: 10, border: '1px solid var(--border-subtle)'
+              display: 'flex', background: 'var(--nf-panel-soft)', padding: 3, borderRadius: 10, border: '1px solid var(--nf-border)'
             }}>
               <button onClick={() => setDashboardType('list')} style={toggleBtnStyle(dashboardType === 'list')}>
                 列表
@@ -1492,7 +1492,7 @@ export default function ChatPage() {
               aria-label="创作模式"
               style={{
                 display: 'flex', alignItems: 'center', padding: 3, borderRadius: 999,
-                background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-subtle)'
+                background: 'var(--nf-panel-soft)', border: '1px solid var(--nf-border)'
               }}
             >
               {(['fast', 'pro'] as AIMode[]).map((mode) => {
@@ -1505,8 +1505,8 @@ export default function ChatPage() {
                     title={mode === 'fast' ? '快速模式：适合灵感、聊天和轻量改写' : 'Pro 模式：适合深度创作、序章和复杂分析'}
                     style={{
                       border: 'none', borderRadius: 999, padding: '7px 11px',
-                      background: active ? 'rgba(139, 92, 246, 0.24)' : 'transparent',
-                      color: active ? 'var(--text-primary)' : 'var(--text-muted)',
+                      background: active ? 'var(--nf-accent-soft)' : 'transparent',
+                      color: active ? 'var(--nf-accent)' : 'var(--nf-text-muted)',
                       fontSize: 12, fontWeight: active ? 800 : 600, cursor: 'pointer'
                     }}
                   >
@@ -1519,8 +1519,8 @@ export default function ChatPage() {
               onClick={handleExportProject}
               title="导出项目数据包"
               style={{
-                width: 36, height: 36, borderRadius: 8, background: 'rgba(255,255,255,0.03)',
-                border: '1px solid var(--border-subtle)', color: 'var(--text-muted)',
+                width: 36, height: 36, borderRadius: 8, background: 'var(--nf-panel-soft)',
+                border: '1px solid var(--nf-border)', color: 'var(--nf-text-muted)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer'
               }}
             >
@@ -1549,8 +1549,8 @@ export default function ChatPage() {
                 <div
                   style={{
                     padding: '14px 20px 10px',
-                    borderBottom: '1px solid var(--border-subtle)',
-                    background: 'rgba(99, 102, 241, 0.06)',
+                    borderBottom: '1px solid var(--nf-border)',
+                    background: 'var(--nf-accent-soft)',
                     display: 'flex',
                     flexDirection: 'column',
                     gap: 10,
@@ -1559,8 +1559,8 @@ export default function ChatPage() {
                 >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
                     <div>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent-primary)' }}>当前聚焦资产</div>
-                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--nf-accent)' }}>当前聚焦资产</div>
+                      <div style={{ fontSize: 12, color: 'var(--nf-text-muted)' }}>
                         本轮聊天会优先参考这些项目资产，强化连续性、关联性和逻辑一致性。
                       </div>
                     </div>
@@ -1568,9 +1568,9 @@ export default function ChatPage() {
                       type="button"
                       onClick={clearFocusedAssets}
                       style={{
-                        border: '1px solid var(--border-subtle)',
-                        background: 'var(--bg-surface)',
-                        color: 'var(--text-secondary)',
+                        border: '1px solid var(--nf-border)',
+                        background: 'var(--nf-surface)',
+                        color: 'var(--nf-text-muted)',
                         borderRadius: 10,
                         padding: '8px 12px',
                         cursor: 'pointer',
@@ -1591,19 +1591,19 @@ export default function ChatPage() {
                           gap: 8,
                           borderRadius: 999,
                           padding: '8px 12px',
-                          background: 'var(--bg-surface)',
-                          border: '1px solid var(--border-subtle)',
+                          background: 'var(--nf-surface)',
+                          border: '1px solid var(--nf-border)',
                           maxWidth: 360,
                         }}
                       >
                         <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--nf-text)' }}>
                             {formatContentTypeLabel(asset.type)} · {asset.title}
                           </div>
                           <div
                             style={{
                               fontSize: 11,
-                              color: 'var(--text-muted)',
+                              color: 'var(--nf-text-subtle)',
                               whiteSpace: 'nowrap',
                               overflow: 'hidden',
                               textOverflow: 'ellipsis',
@@ -1619,7 +1619,7 @@ export default function ChatPage() {
                           style={{
                             border: 'none',
                             background: 'transparent',
-                            color: 'var(--text-muted)',
+                            color: 'var(--nf-text-subtle)',
                             cursor: 'pointer',
                             fontSize: 16,
                             lineHeight: 1,
@@ -1637,8 +1637,8 @@ export default function ChatPage() {
                 <div
                   style={{
                     padding: '12px 20px',
-                    borderBottom: '1px solid var(--border-subtle)',
-                    background: 'var(--bg-surface)',
+                    borderBottom: '1px solid var(--nf-border)',
+                    background: 'var(--nf-surface)',
                     display: 'flex',
                     flexDirection: 'column',
                     gap: 10,
@@ -1648,7 +1648,7 @@ export default function ChatPage() {
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--nf-text-muted)' }}>
                       项目资产快捷引用
                     </div>
                     <input
@@ -1660,9 +1660,9 @@ export default function ChatPage() {
                         width: 260,
                         maxWidth: '50%',
                         borderRadius: 10,
-                        border: '1px solid var(--border-subtle)',
-                        background: 'var(--bg-base)',
-                        color: 'var(--text-primary)',
+                        border: '1px solid var(--nf-border)',
+                        background: 'var(--nf-bg)',
+                        color: 'var(--nf-text)',
                         padding: '8px 12px',
                         fontSize: 12,
                         outline: 'none',
@@ -1685,7 +1685,7 @@ export default function ChatPage() {
                             alignItems: 'start',
                           }}
                         >
-                          <div style={{ fontSize: 12, color: 'var(--text-muted)', paddingTop: 8 }}>
+                          <div style={{ fontSize: 12, color: 'var(--nf-text-subtle)', paddingTop: 8 }}>
                             {group.label}
                           </div>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -1699,9 +1699,9 @@ export default function ChatPage() {
                                   onClick={() => pushFocusedAssetToChat(asset, 'reference')}
                                   style={{
                                     borderRadius: 999,
-                                    border: isFocused ? '1px solid rgba(99,102,241,0.45)' : '1px solid var(--border-subtle)',
-                                    background: isFocused ? 'rgba(99,102,241,0.12)' : 'var(--bg-base)',
-                                    color: isFocused ? '#c4b5fd' : 'var(--text-secondary)',
+                                    border: isFocused ? '1px solid color-mix(in srgb, var(--nf-accent) 42%, transparent)' : '1px solid var(--nf-border)',
+                                    background: isFocused ? 'var(--nf-accent-soft)' : 'var(--nf-bg)',
+                                    color: isFocused ? 'var(--nf-accent)' : 'var(--nf-text-muted)',
                                     padding: '8px 12px',
                                     cursor: 'pointer',
                                     maxWidth: 220,
@@ -1727,7 +1727,7 @@ export default function ChatPage() {
                                   <span
                                     style={{
                                       fontSize: 11,
-                                      color: 'var(--text-muted)',
+                                      color: 'var(--nf-text-subtle)',
                                       maxWidth: '100%',
                                       overflow: 'hidden',
                                       textOverflow: 'ellipsis',
@@ -1761,7 +1761,7 @@ export default function ChatPage() {
                     onRetryMessage={handleRetryMessage}
                   />
                 {isGenerating && (
-                  <div style={{ display: 'flex', alignItems: 'center', padding: '16px 40px', color: 'var(--text-muted)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', padding: '16px 40px', color: 'var(--nf-text-muted)' }}>
                     <Loader2 size={18} className="animate-spin" style={{ marginRight: 10 }} />
                     <span>AI 正在思考...</span>
                   </div>
@@ -2211,12 +2211,12 @@ function ProjectQualityOverview({
   onOpenDashboard: () => void;
 }) {
   const statusColor = summary.overall_status === 'ready'
-    ? { bg: 'rgba(16, 185, 129, 0.12)', border: 'rgba(16, 185, 129, 0.35)', text: '#a7f3d0' }
+    ? { bg: 'color-mix(in srgb, var(--nf-success) 12%, transparent)', border: 'color-mix(in srgb, var(--nf-success) 35%, transparent)', text: 'var(--nf-success)' }
     : summary.overall_status === 'needs_repair'
-      ? { bg: 'rgba(245, 158, 11, 0.12)', border: 'rgba(245, 158, 11, 0.35)', text: '#fde68a' }
+      ? { bg: 'color-mix(in srgb, var(--nf-warning) 12%, transparent)', border: 'color-mix(in srgb, var(--nf-warning) 35%, transparent)', text: 'var(--nf-warning)' }
       : summary.overall_status === 'insufficient'
-        ? { bg: 'rgba(239, 68, 68, 0.10)', border: 'rgba(239, 68, 68, 0.30)', text: '#fecaca' }
-        : { bg: 'rgba(148, 163, 184, 0.10)', border: 'rgba(148, 163, 184, 0.25)', text: '#cbd5e1' };
+        ? { bg: 'color-mix(in srgb, var(--nf-danger) 10%, transparent)', border: 'color-mix(in srgb, var(--nf-danger) 30%, transparent)', text: 'var(--nf-danger)' }
+        : { bg: 'var(--nf-panel-soft)', border: 'var(--nf-border)', text: 'var(--nf-text-muted)' };
   const sections = [
     {
       label: '章节质量',
@@ -2263,10 +2263,10 @@ function ProjectQualityOverview({
     <div
       style={{
         padding: compact ? '12px 20px' : '18px 20px',
-        borderBottom: compact ? '1px solid var(--border-subtle)' : undefined,
+        borderBottom: compact ? '1px solid var(--nf-border)' : undefined,
         marginBottom: compact ? 0 : 28,
-        background: compact ? 'rgba(15, 23, 42, 0.45)' : 'var(--bg-surface)',
-        border: compact ? undefined : '1px solid var(--border-subtle)',
+        background: compact ? 'color-mix(in srgb, var(--nf-surface) 72%, transparent)' : 'var(--nf-surface)',
+        border: compact ? undefined : '1px solid var(--nf-border)',
         borderRadius: compact ? 0 : 18,
         display: 'flex',
         flexDirection: 'column',
@@ -2277,7 +2277,7 @@ function ProjectQualityOverview({
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)' }}>项目质量总览</span>
+            <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--nf-text)' }}>项目质量总览</span>
             <span style={{
               borderRadius: 999,
               padding: '4px 10px',
@@ -2290,7 +2290,7 @@ function ProjectQualityOverview({
               {summary.status_label}
             </span>
           </div>
-          <div style={{ marginTop: 5, fontSize: 12, color: 'var(--text-muted)' }}>
+          <div style={{ marginTop: 5, fontSize: 12, color: 'var(--nf-text-muted)' }}>
             内测闸门：至少需要可写角色、usable 关系、世界观信号和章节片段来源。
           </div>
         </div>
@@ -2308,24 +2308,24 @@ function ProjectQualityOverview({
       }}>
         {sections.map((section) => (
           <div key={section.label} style={{
-            border: '1px solid var(--border-subtle)',
+            border: '1px solid var(--nf-border)',
             borderRadius: 12,
             padding: '10px 12px',
-            background: 'rgba(255,255,255,0.025)',
+            background: 'var(--nf-panel-soft)',
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
-              <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700 }}>{section.label}</span>
+              <span style={{ fontSize: 11, color: 'var(--nf-text-muted)', fontWeight: 700 }}>{section.label}</span>
               <span style={{
                 width: 7,
                 height: 7,
                 borderRadius: 999,
-                background: section.status === 'ready' ? '#10b981' : section.status === 'needs_repair' ? '#f59e0b' : '#ef4444',
+                background: section.status === 'ready' ? 'var(--nf-success)' : section.status === 'needs_repair' ? 'var(--nf-warning)' : 'var(--nf-danger)',
                 flexShrink: 0,
               }} />
             </div>
-            <div style={{ marginTop: 7, fontSize: 19, fontWeight: 900, color: 'var(--text-primary)' }}>{section.value}</div>
-            {section.sublabel ? <div style={{ marginTop: 2, fontSize: 10, color: 'var(--text-muted)' }}>{section.sublabel}</div> : null}
-            {!compact ? <div style={{ marginTop: 6, fontSize: 11, lineHeight: 1.5, color: 'var(--text-disabled)' }}>{section.hint}</div> : null}
+            <div style={{ marginTop: 7, fontSize: 19, fontWeight: 900, color: 'var(--nf-text)' }}>{section.value}</div>
+            {section.sublabel ? <div style={{ marginTop: 2, fontSize: 10, color: 'var(--nf-text-subtle)' }}>{section.sublabel}</div> : null}
+            {!compact ? <div style={{ marginTop: 6, fontSize: 11, lineHeight: 1.5, color: 'var(--nf-text-subtle)' }}>{section.hint}</div> : null}
           </div>
         ))}
       </div>
@@ -2334,9 +2334,9 @@ function ProjectQualityOverview({
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {actionHints.map((action, index) => (
             <span key={`${action}-${index}`} style={{
-              border: '1px solid rgba(139, 92, 246, 0.25)',
-              background: 'rgba(139, 92, 246, 0.08)',
-              color: '#ddd6fe',
+              border: '1px solid color-mix(in srgb, var(--nf-accent) 25%, transparent)',
+              background: 'var(--nf-accent-soft)',
+              color: 'var(--nf-accent)',
               borderRadius: 999,
               padding: '6px 10px',
               fontSize: 11,
@@ -2736,8 +2736,8 @@ function toParsedArtifact(artifact: ArtifactData): ParsedArtifact {
 
 const toggleBtnStyle = (active: boolean): React.CSSProperties => ({
   display: 'flex', alignItems: 'center', gap: 6, padding: '6px 16px', borderRadius: 8, fontSize: 13, cursor: 'pointer',
-  background: active ? 'var(--bg-surface)' : 'transparent',
-  color: active ? 'var(--accent-primary)' : 'var(--text-muted)',
+  background: active ? 'var(--nf-surface)' : 'transparent',
+  color: active ? 'var(--nf-accent)' : 'var(--nf-text-muted)',
   border: 'none', fontWeight: active ? 600 : 400, transition: 'all 200ms'
 });
 
@@ -2748,9 +2748,9 @@ const assetMiniCardStyle: React.CSSProperties = {
 };
 
 const qualityButtonStyle: React.CSSProperties = {
-  border: '1px solid var(--border-subtle)',
-  background: 'var(--bg-elevated)',
-  color: 'var(--text-secondary)',
+  border: '1px solid var(--nf-border)',
+  background: 'var(--nf-panel-soft)',
+  color: 'var(--nf-text-muted)',
   borderRadius: 10,
   padding: '8px 11px',
   cursor: 'pointer',

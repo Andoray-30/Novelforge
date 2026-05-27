@@ -42,17 +42,13 @@ export function MobileNav({
 
     let cancelled = false;
     contentService.getNovels(currentSessionId).then((res) => {
-      if (cancelled) {
-        return;
-      }
+      if (cancelled) return;
       setNovels(res.novels);
       if (res.novels.length === 1 && !selectedNovelId) {
         setSelectedNovelId(res.novels[0].id);
       }
     }).catch(() => {
-      if (!cancelled) {
-        setNovels([]);
-      }
+      if (!cancelled) setNovels([]);
     });
 
     return () => {
@@ -65,28 +61,28 @@ export function MobileNav({
   return (
     <DialogPrimitive.Root open={isOpen} onOpenChange={onClose}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50" />
+        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/40" />
         <DialogPrimitive.Content
-          className={cn('fixed left-0 top-0 z-50 flex h-full w-80 flex-col bg-white shadow-xl', className)}
+          className={cn('fixed left-0 top-0 z-50 flex h-full w-80 flex-col border-r border-[var(--nf-border)] bg-[var(--nf-surface)] text-[var(--nf-text)] shadow-[var(--nf-shadow)]', className)}
         >
           <DialogPrimitive.Title className="sr-only">移动端导航</DialogPrimitive.Title>
-          <div className="flex items-center justify-between border-b border-gray-200 p-4">
+          <div className="flex items-center justify-between border-b border-[var(--nf-border)] p-4">
             <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--nf-accent)]">
                 <BookOpen className="h-5 w-5 text-white" />
               </div>
-              <h2 className="text-lg font-bold text-gray-900">NovelForge</h2>
+              <h2 className="text-lg font-bold text-[var(--nf-text)]">NovelForge</h2>
             </div>
-            <DialogPrimitive.Close className="rounded-md p-2 transition-colors hover:bg-gray-100">
-              <X className="h-5 w-5 text-gray-500" />
+            <DialogPrimitive.Close className="rounded-md p-2 text-[var(--nf-text-muted)] transition-colors hover:bg-[var(--nf-panel-soft)] hover:text-[var(--nf-text)]">
+              <X className="h-5 w-5" />
               <span className="sr-only">关闭菜单</span>
             </DialogPrimitive.Close>
           </div>
 
-          <div className="space-y-3 border-b border-gray-200 p-4">
+          <div className="space-y-3 border-b border-[var(--nf-border)] p-4">
             {projects.length > 0 ? (
               <label className="block space-y-2">
-                <span className="flex items-center gap-2 text-xs font-medium text-gray-500">
+                <span className="flex items-center gap-2 text-xs font-medium text-[var(--nf-text-subtle)]">
                   <FolderKanban className="h-4 w-4" />
                   当前项目
                 </span>
@@ -100,7 +96,7 @@ export function MobileNav({
                         onClose();
                       }
                     }}
-                    className="min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition-colors focus:border-blue-500"
+                    className="min-w-0 flex-1 rounded-lg border border-[var(--nf-border)] bg-[var(--nf-bg)] px-3 py-2 text-sm text-[var(--nf-text)] outline-none transition-colors focus:border-[var(--nf-accent)]"
                     aria-label="切换当前项目"
                   >
                     {projects.map((project) => (
@@ -116,7 +112,7 @@ export function MobileNav({
                         onCreateProject();
                         onClose();
                       }}
-                      className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-gray-700 transition-colors hover:bg-gray-100"
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] text-[var(--nf-text-muted)] transition-colors hover:bg-[var(--nf-accent-soft)] hover:text-[var(--nf-accent)]"
                       aria-label="新建项目"
                       title="新建项目"
                     >
@@ -127,11 +123,11 @@ export function MobileNav({
               </label>
             ) : currentSessionTitle ? (
               <div className="space-y-2">
-                <div className="flex items-center gap-2 text-xs font-medium text-gray-500">
+                <div className="flex items-center gap-2 text-xs font-medium text-[var(--nf-text-subtle)]">
                   <FolderKanban className="h-4 w-4" />
                   当前项目
                 </div>
-                <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900">
+                <div className="rounded-lg border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] px-3 py-2 text-sm text-[var(--nf-text)]">
                   {currentSessionTitle}
                 </div>
               </div>
@@ -139,18 +135,17 @@ export function MobileNav({
 
             {currentSessionId && novels.length > 0 ? (
               <label className="block space-y-2">
-                <span className="flex items-center gap-2 text-xs font-medium text-gray-500">
+                <span className="flex items-center gap-2 text-xs font-medium text-[var(--nf-text-subtle)]">
                   <Library className="h-4 w-4" />
                   当前小说
                 </span>
                 <select
                   value={selectedNovelId ?? ''}
                   onChange={(event) => {
-                    const value = event.target.value;
-                    setSelectedNovelId(value || null);
+                    setSelectedNovelId(event.target.value || null);
                     onClose();
                   }}
-                  className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition-colors focus:border-blue-500"
+                  className="w-full rounded-lg border border-[var(--nf-border)] bg-[var(--nf-bg)] px-3 py-2 text-sm text-[var(--nf-text)] outline-none transition-colors focus:border-[var(--nf-accent)]"
                   aria-label="切换当前小说"
                 >
                   {novelOptions.map((novel) => (
@@ -172,8 +167,8 @@ export function MobileNav({
             />
           </nav>
 
-          <div className="border-t border-gray-200 p-4">
-            <div className="text-sm text-gray-600">移动端导航已接入统一工作区与小说切换。</div>
+          <div className="border-t border-[var(--nf-border)] p-4">
+            <div className="text-sm text-[var(--nf-text-muted)]">移动端导航已接入统一工作区与小说切换。</div>
           </div>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
@@ -192,8 +187,8 @@ export function MobileNavTrigger({ className, onClick, isOpen = false }: MobileN
     <button
       onClick={onClick}
       className={cn(
-        'rounded-md p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500',
-        className
+        'rounded-md p-2 text-[var(--nf-text-muted)] hover:bg-[var(--nf-panel-soft)] hover:text-[var(--nf-text)] focus:outline-none focus:ring-2 focus:ring-inset focus:ring-[var(--nf-accent)]',
+        className,
       )}
       aria-label="打开菜单"
       aria-expanded={isOpen}

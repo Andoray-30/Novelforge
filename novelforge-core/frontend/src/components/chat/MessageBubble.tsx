@@ -369,7 +369,7 @@ function AgentTracePanel({
           <TraceSection title="章节片段">
             <div className="nf-card-grid">
               {trace.chapter_snippets.map((snippet, index) => (
-                <div key={`${snippet.id ?? snippet.title}-${index}`} className="nf-alert" style={{ borderColor: 'rgba(167, 139, 250, 0.28)', background: 'rgba(167, 139, 250, 0.08)', color: 'var(--text-secondary)' }}>
+                <div key={`${snippet.id ?? snippet.title}-${index}`} className="nf-alert" style={{ borderColor: 'color-mix(in srgb, var(--nf-accent) 28%, transparent)', background: 'var(--nf-accent-soft)', color: 'var(--nf-text-muted)' }}>
                   <strong>{snippet.title || '章节片段'} · {getSnippetModeLabel(snippet.mode)}</strong>
                   {snippet.preview ? <div className="nf-muted" style={{ marginTop: 4 }}>{snippet.preview}</div> : null}
                 </div>
@@ -393,7 +393,7 @@ function AgentTracePanel({
         {trace.relationship_repair_queue.length > 0 ? (
           <TraceSection title="关系补强队列">
             {trace.relationship_repair_queue_report?.before && trace.relationship_repair_queue_report.projected_after ? (
-              <div className="nf-alert" style={{ borderColor: 'rgba(52, 211, 153, 0.28)', background: 'rgba(52, 211, 153, 0.07)', color: '#a7f3d0' }}>
+              <div className="nf-alert" style={{ borderColor: 'color-mix(in srgb, var(--nf-success) 28%, transparent)', background: 'color-mix(in srgb, var(--nf-success) 8%, transparent)', color: 'var(--nf-success)' }}>
                 修复前有张力 {trace.relationship_repair_queue_report.before.tension_relationships}，预计后 {trace.relationship_repair_queue_report.projected_after.tension_relationships}。
               </div>
             ) : null}
@@ -639,7 +639,7 @@ export function MessageBubble({
                   ) : null}
 
                   {warningLabel ? <div className="nf-alert">{warningLabel}</div> : null}
-                  {blockingReason ? <div className="nf-alert" style={{ borderColor: 'rgba(248, 113, 113, 0.32)', background: 'rgba(248, 113, 113, 0.08)', color: '#fecaca' }}>{blockingReason}</div> : null}
+                  {blockingReason ? <div className="nf-alert" style={{ borderColor: 'color-mix(in srgb, var(--nf-danger) 32%, transparent)', background: 'color-mix(in srgb, var(--nf-danger) 8%, transparent)', color: 'var(--nf-danger)' }}>{blockingReason}</div> : null}
                   {savedChapterEditorHref ? <a className="nf-button nf-button-primary" href={savedChapterEditorHref} style={{ width: 'fit-content', textDecoration: 'none' }}>打开编辑器</a> : null}
                 </div>
               );

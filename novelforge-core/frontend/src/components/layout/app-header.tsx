@@ -62,19 +62,20 @@ export function AppHeader({
     }).catch(() => {
       if (!cancelled) setNovels([]);
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [currentSessionId, setSelectedNovelId, selectedNovelId]);
 
   const novelOptions = React.useMemo(() => {
-    const all = [{ id: '', title: '全部小说' }];
-    return [...all, ...novels];
+    return [{ id: '', title: '全部小说' }, ...novels];
   }, [novels]);
 
   return (
     <header
       className={cn(
-        'sticky top-0 z-30 border-b border-white/10 bg-[rgba(9,9,11,0.82)] backdrop-blur-md',
-        className
+        'sticky top-0 z-30 border-b border-[var(--nf-border)] bg-[color-mix(in_srgb,var(--nf-bg)_88%,transparent)] backdrop-blur-md',
+        className,
       )}
     >
       <div className="flex h-16 items-center justify-between gap-4 px-4 sm:px-6">
@@ -82,7 +83,7 @@ export function AppHeader({
           {showMenuButton ? (
             <button
               onClick={onMenuClick}
-              className="rounded-lg border border-white/10 p-2 text-zinc-300 transition-colors hover:bg-white/5 lg:hidden"
+              className="rounded-lg border border-[var(--nf-border)] p-2 text-[var(--nf-text-muted)] transition-colors hover:bg-[var(--nf-panel-soft)] hover:text-[var(--nf-text)] lg:hidden"
               aria-label="打开导航"
             >
               <Menu className="h-5 w-5" />
@@ -90,41 +91,39 @@ export function AppHeader({
           ) : null}
 
           <Link href="/" className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-500 text-white shadow-lg shadow-violet-500/20">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--nf-accent)] text-white shadow-sm">
               <BookOpen className="h-5 w-5" />
             </div>
             <div className="hidden sm:block">
-              <div className="text-[11px] uppercase tracking-[0.24em] text-zinc-500">NovelForge</div>
-              <div className="text-sm font-semibold text-white">工作区</div>
+              <div className="text-[11px] uppercase tracking-[0.24em] text-[var(--nf-text-subtle)]">NovelForge</div>
+              <div className="text-sm font-semibold text-[var(--nf-text)]">工作区</div>
             </div>
           </Link>
 
-          <div className="hidden h-8 w-px bg-white/10 md:block" />
+          <div className="hidden h-8 w-px bg-[var(--nf-border)] md:block" />
 
           <div className="min-w-0">
-            <div className="truncate text-sm font-semibold text-white">{title}</div>
+            <div className="truncate text-sm font-semibold text-[var(--nf-text)]">{title}</div>
             {description ? (
-              <div className="hidden truncate text-xs text-zinc-400 md:block">{description}</div>
+              <div className="hidden truncate text-xs text-[var(--nf-text-muted)] md:block">{description}</div>
             ) : null}
           </div>
         </div>
 
         <div className="flex items-center gap-3">
           {projects.length > 0 ? (
-            <div className="hidden items-center gap-2 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-2 py-1.5 text-xs text-emerald-100 md:flex">
+            <div className="hidden items-center gap-2 rounded-2xl border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] px-2 py-1.5 text-xs text-[var(--nf-text-muted)] md:flex">
               <FolderKanban className="ml-1 h-4 w-4 flex-shrink-0" />
               <select
                 value={currentSessionId ?? ''}
                 onChange={(event) => {
-                  if (event.target.value && onProjectChange) {
-                    onProjectChange(event.target.value);
-                  }
+                  if (event.target.value && onProjectChange) onProjectChange(event.target.value);
                 }}
-                className="max-w-56 truncate bg-transparent text-xs font-medium text-emerald-50 outline-none"
+                className="max-w-56 truncate bg-transparent text-xs font-medium text-[var(--nf-text)] outline-none"
                 aria-label="切换当前项目"
               >
                 {projects.map((project) => (
-                  <option key={project.id} value={project.id} className="bg-zinc-950 text-zinc-100">
+                  <option key={project.id} value={project.id}>
                     {project.title}
                   </option>
                 ))}
@@ -133,7 +132,7 @@ export function AppHeader({
                 <button
                   type="button"
                   onClick={onCreateProject}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-emerald-50 transition-colors hover:bg-white/10"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-xl border border-[var(--nf-border)] bg-[var(--nf-surface)] text-[var(--nf-text-muted)] transition-colors hover:bg-[var(--nf-accent-soft)] hover:text-[var(--nf-accent)]"
                   aria-label="新建项目"
                   title="新建项目"
                 >
@@ -142,30 +141,27 @@ export function AppHeader({
               ) : null}
             </div>
           ) : currentSessionTitle ? (
-            <div className="hidden items-center gap-2 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-100 md:flex">
+            <div className="hidden items-center gap-2 rounded-full border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] px-3 py-1.5 text-xs text-[var(--nf-text-muted)] md:flex">
               <FolderKanban className="h-4 w-4" />
               <span className="max-w-56 truncate">{currentSessionTitle}</span>
             </div>
           ) : (
-            <div className="hidden rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-zinc-400 md:block">
+            <div className="hidden rounded-full border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] px-3 py-1.5 text-xs text-[var(--nf-text-subtle)] md:block">
               当前没有激活项目
             </div>
           )}
 
           {novels.length > 0 ? (
-            <div className="hidden items-center gap-2 rounded-2xl border border-violet-500/20 bg-violet-500/10 px-2 py-1.5 text-xs text-violet-100 md:flex">
+            <div className="hidden items-center gap-2 rounded-2xl border border-[var(--nf-border)] bg-[var(--nf-accent-soft)] px-2 py-1.5 text-xs text-[var(--nf-accent)] md:flex">
               <Library className="ml-1 h-4 w-4 flex-shrink-0" />
               <select
                 value={selectedNovelId ?? ''}
-                onChange={(event) => {
-                  const val = event.target.value;
-                  setSelectedNovelId(val || null);
-                }}
-                className="max-w-48 truncate bg-transparent text-xs font-medium text-violet-50 outline-none"
+                onChange={(event) => setSelectedNovelId(event.target.value || null)}
+                className="max-w-48 truncate bg-transparent text-xs font-medium text-[var(--nf-accent)] outline-none"
                 aria-label="切换当前小说"
               >
                 {novelOptions.map((novel) => (
-                  <option key={novel.id} value={novel.id} className="bg-zinc-950 text-zinc-100">
+                  <option key={novel.id} value={novel.id}>
                     {novel.title}
                   </option>
                 ))}
@@ -177,7 +173,7 @@ export function AppHeader({
 
           <Link
             href="/settings"
-            className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:bg-white/10"
+            className="rounded-full border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] px-3 py-1.5 text-xs font-medium text-[var(--nf-text-muted)] transition-colors hover:bg-[var(--nf-accent-soft)] hover:text-[var(--nf-text)]"
           >
             设置
           </Link>
@@ -187,7 +183,7 @@ export function AppHeader({
               await authService.logout();
               window.location.assign('/login');
             }}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/5 text-zinc-300 transition-colors hover:bg-white/10 hover:text-white"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] text-[var(--nf-text-muted)] transition-colors hover:bg-[var(--nf-panel-soft)] hover:text-[var(--nf-text)]"
             aria-label="退出登录"
             title="退出登录"
           >

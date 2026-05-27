@@ -67,9 +67,7 @@ export function ChatInput({
   }, [input]);
 
   useEffect(() => {
-    if (!prefill?.text) {
-      return;
-    }
+    if (!prefill?.text) return;
     setInput(prefill.text);
     window.setTimeout(() => textareaRef.current?.focus(), 0);
   }, [prefill?.id, prefill?.text]);
@@ -87,24 +85,15 @@ export function ChatInput({
       try {
         const result = await aiService.suggestPrompts(sessionId, requestConfig);
         if (cancelled) return;
-        if (Array.isArray(result) && result.length > 0) {
-          setPromptSuggestions(result.slice(0, 8));
-        } else {
-          setPromptSuggestions(DEFAULT_PROMPT_SUGGESTIONS);
-        }
+        setPromptSuggestions(Array.isArray(result) && result.length > 0 ? result.slice(0, 8) : DEFAULT_PROMPT_SUGGESTIONS);
       } catch {
-        if (!cancelled) {
-          setPromptSuggestions(DEFAULT_PROMPT_SUGGESTIONS);
-        }
+        if (!cancelled) setPromptSuggestions(DEFAULT_PROMPT_SUGGESTIONS);
       } finally {
-        if (!cancelled) {
-          setIsLoadingSuggestions(false);
-        }
+        if (!cancelled) setIsLoadingSuggestions(false);
       }
     };
 
     void fetchSuggestions();
-
     return () => {
       cancelled = true;
     };
@@ -127,32 +116,10 @@ export function ChatInput({
   const canSend = input.trim().length > 0 && !disabled;
 
   return (
-    <div
-      style={{
-        padding: '12px 20px 20px',
-        background: 'transparent',
-        flexShrink: 0,
-      }}
-    >
-      {input.length === 0 && !disabled && (
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 8,
-            marginBottom: 12,
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              gap: 8,
-              overflowX: 'auto',
-              paddingBottom: 4,
-              msOverflowStyle: 'none',
-              scrollbarWidth: 'none',
-            }}
-          >
+    <div style={{ padding: '12px 20px 20px', background: 'transparent', flexShrink: 0 }}>
+      {input.length === 0 && !disabled ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+          <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, msOverflowStyle: 'none', scrollbarWidth: 'none' }}>
             {promptSuggestions.map((suggestion, index) => (
               <button
                 key={`${suggestion}-${index}`}
@@ -160,57 +127,31 @@ export function ChatInput({
                   setInput(suggestion);
                   textareaRef.current?.focus();
                 }}
-                style={{
-                  flexShrink: 0,
-                  padding: '6px 12px',
-                  borderRadius: 999,
-                  background: 'var(--bg-elevated)',
-                  border: '1px solid var(--border-default)',
-                  color: 'var(--text-muted)',
-                  fontSize: 12,
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                  transition: 'all 150ms',
-                }}
-                onMouseEnter={(event) => {
-                  event.currentTarget.style.borderColor = 'var(--accent-primary)';
-                  event.currentTarget.style.color = 'var(--text-secondary)';
-                }}
-                onMouseLeave={(event) => {
-                  event.currentTarget.style.borderColor = 'var(--border-default)';
-                  event.currentTarget.style.color = 'var(--text-muted)';
-                }}
+                className="nf-chip"
+                style={{ flexShrink: 0, whiteSpace: 'nowrap' }}
               >
                 {suggestion.length > 34 ? `${suggestion.slice(0, 34)}...` : suggestion}
               </button>
             ))}
           </div>
-          {isLoadingSuggestions && (
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                color: 'var(--text-disabled)',
-                fontSize: 11,
-              }}
-            >
+          {isLoadingSuggestions ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--nf-text-subtle)', fontSize: 11 }}>
               <Loader2 size={12} className="animate-spin" />
               正在刷新提示词...
             </div>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
 
       <div
         style={{
           display: 'flex',
           flexDirection: 'column',
           gap: 0,
-          background: 'var(--bg-elevated)',
+          background: 'var(--nf-surface-raised)',
           borderRadius: 14,
-          border: `1px solid ${isFocused ? 'rgba(139, 92, 246, 0.5)' : 'var(--border-default)'}`,
-          boxShadow: isFocused ? '0 0 0 3px rgba(139, 92, 246, 0.1)' : 'var(--shadow-sm)',
+          border: `1px solid ${isFocused ? 'color-mix(in srgb, var(--nf-accent) 45%, transparent)' : 'var(--nf-border)'}`,
+          boxShadow: isFocused ? '0 0 0 3px var(--nf-accent-soft)' : 'var(--shadow-sm)',
           transition: 'border-color 200ms, box-shadow 200ms',
           padding: '12px 14px',
         }}
@@ -224,16 +165,13 @@ export function ChatInput({
           onBlur={() => setIsFocused(false)}
           disabled={disabled}
           rows={1}
-          placeholder={
-            placeholder ??
-            (disabled ? 'Agent 正在生成中...' : '告诉 NovelForge 你想创作什么...（Shift+Enter 换行）')
-          }
+          placeholder={placeholder ?? (disabled ? 'Agent 正在生成中...' : '告诉 NovelForge 你想创作什么...（Shift+Enter 换行）')}
           style={{
             background: 'none',
             border: 'none',
             outline: 'none',
             resize: 'none',
-            color: disabled ? 'var(--text-muted)' : 'var(--text-primary)',
+            color: disabled ? 'var(--nf-text-subtle)' : 'var(--nf-text)',
             fontSize: 14,
             lineHeight: 1.6,
             width: '100%',
@@ -244,14 +182,7 @@ export function ChatInput({
           }}
         />
 
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginTop: 10,
-          }}
-        >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <ToolButton icon={<Paperclip size={15} />} title="上传文本文件" disabled />
             <ToolButton icon={<Mic size={15} />} title="语音输入（即将支持）" disabled />
@@ -263,8 +194,8 @@ export function ChatInput({
                   display: 'flex',
                   padding: 2,
                   borderRadius: 999,
-                  border: '1px solid var(--border-subtle)',
-                  background: 'rgba(255,255,255,0.03)',
+                  border: '1px solid var(--nf-border)',
+                  background: 'var(--nf-panel-soft)',
                 }}
               >
                 {(['fast', 'pro'] as AIMode[]).map((mode) => {
@@ -281,8 +212,8 @@ export function ChatInput({
                         padding: '4px 9px',
                         fontSize: 11,
                         fontWeight: active ? 700 : 500,
-                        background: active ? 'rgba(139, 92, 246, 0.24)' : 'transparent',
-                        color: active ? 'var(--text-primary)' : 'var(--text-muted)',
+                        background: active ? 'var(--nf-accent-soft)' : 'transparent',
+                        color: active ? 'var(--nf-accent)' : 'var(--nf-text-muted)',
                         cursor: 'pointer',
                       }}
                     >
@@ -295,19 +226,15 @@ export function ChatInput({
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {input.length > 0 && (
-              <span style={{ fontSize: 11, color: 'var(--text-disabled)' }}>
-                {input.length}
-              </span>
-            )}
-            {input.length > 0 && (
+            {input.length > 0 ? <span style={{ fontSize: 11, color: 'var(--nf-text-subtle)' }}>{input.length}</span> : null}
+            {input.length > 0 ? (
               <button
                 onClick={() => setInput('')}
                 style={{
                   background: 'none',
                   border: 'none',
                   cursor: 'pointer',
-                  color: 'var(--text-muted)',
+                  color: 'var(--nf-text-muted)',
                   padding: 3,
                   borderRadius: 4,
                   display: 'flex',
@@ -316,7 +243,7 @@ export function ChatInput({
               >
                 <X size={13} />
               </button>
-            )}
+            ) : null}
             <button
               onClick={handleSend}
               disabled={!canSend}
@@ -325,17 +252,15 @@ export function ChatInput({
                 width: 32,
                 height: 32,
                 borderRadius: 9,
-                background: canSend
-                  ? 'linear-gradient(135deg, #8b5cf6, #6366f1)'
-                  : 'var(--bg-hover)',
+                background: canSend ? 'var(--nf-accent)' : 'color-mix(in srgb, var(--nf-text-subtle) 18%, transparent)',
                 border: 'none',
                 cursor: canSend ? 'pointer' : 'default',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: canSend ? '#fff' : 'var(--text-disabled)',
+                color: canSend ? '#fff' : 'var(--nf-text-subtle)',
                 transition: 'background 200ms, transform 100ms',
-                boxShadow: canSend ? '0 2px 8px rgba(139, 92, 246, 0.4)' : 'none',
+                boxShadow: canSend ? '0 2px 8px var(--nf-accent-soft)' : 'none',
               }}
               onMouseDown={(event) => {
                 if (canSend) event.currentTarget.style.transform = 'scale(0.92)';
@@ -355,7 +280,7 @@ export function ChatInput({
           marginTop: 8,
           textAlign: 'center',
           fontSize: 11,
-          color: 'var(--text-disabled)',
+          color: 'var(--nf-text-subtle)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -389,7 +314,7 @@ function ToolButton({
         background: 'none',
         border: 'none',
         cursor: disabled ? 'default' : 'pointer',
-        color: disabled ? 'var(--text-disabled)' : 'var(--text-muted)',
+        color: disabled ? 'var(--nf-text-subtle)' : 'var(--nf-text-muted)',
         padding: '4px 6px',
         borderRadius: 6,
         display: 'flex',

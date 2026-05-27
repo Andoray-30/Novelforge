@@ -78,33 +78,31 @@ export function AppSidebar({
 
   const isActiveRoute = React.useCallback(
     (href: string) => {
-      if (href === '/') {
-        return pathname === '/';
-      }
+      if (href === '/') return pathname === '/';
       return pathname === href || pathname?.startsWith(`${href}/`);
     },
-    [pathname]
+    [pathname],
   );
 
   return (
     <aside
       className={cn(
-        'flex h-full flex-col border-r border-white/10 bg-[var(--bg-surface)] text-[var(--text-primary)]',
+        'flex h-full flex-col border-r border-[var(--nf-border)] bg-[var(--nf-bg-subtle)] text-[var(--nf-text)]',
         isCollapsed ? 'w-16' : 'w-64',
         'transition-all duration-300 ease-in-out',
-        className
+        className,
       )}
     >
       {showBrand ? (
-        <div className="flex items-center justify-between border-b border-white/10 p-4">
+        <div className="flex items-center justify-between border-b border-[var(--nf-border)] p-4">
           <div className={cn('transition-opacity duration-300', isCollapsed ? 'opacity-0' : 'opacity-100')}>
-            <div className="text-[11px] uppercase tracking-[0.24em] text-zinc-500">NovelForge</div>
-            <div className="text-lg font-semibold text-white">工作区</div>
+            <div className="text-[11px] uppercase tracking-[0.24em] text-[var(--nf-text-subtle)]">NovelForge</div>
+            <div className="text-lg font-semibold text-[var(--nf-text)]">工作区</div>
           </div>
           {!isCollapsed && onToggle ? (
             <button
               onClick={onToggle}
-              className="rounded-md p-1 text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200"
+              className="rounded-md p-1 text-[var(--nf-text-subtle)] transition-colors hover:bg-[var(--nf-panel-soft)] hover:text-[var(--nf-text)]"
             >
               <span className="sr-only">切换导航栏</span>
             </button>
@@ -114,31 +112,35 @@ export function AppSidebar({
 
       <nav className="flex-1 overflow-y-auto py-4">
         <ul className="space-y-1 px-2">
-          {navigationItems.map((item) => (
-            <li key={item.href}>
-              <Link
-                href={item.href}
-                onClick={onNavigate}
-                className={cn(
-                  'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors',
-                  isActiveRoute(item.href)
-                    ? 'bg-violet-500/15 text-violet-100'
-                    : 'text-zinc-400 hover:bg-white/5 hover:text-white'
-                )}
-              >
-                <item.icon className={cn('h-5 w-5 flex-shrink-0', isCollapsed ? 'mx-auto' : '')} />
-                <span className={cn('transition-opacity duration-300', isCollapsed ? 'hidden opacity-0' : 'opacity-100')}>
-                  {item.title}
-                </span>
-              </Link>
-            </li>
-          ))}
+          {navigationItems.map((item) => {
+            const active = isActiveRoute(item.href);
+            return (
+              <li key={item.href}>
+                <Link
+                  href={item.href}
+                  onClick={onNavigate}
+                  title={item.description}
+                  className={cn(
+                    'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors',
+                    active
+                      ? 'bg-[var(--nf-accent-soft)] text-[var(--nf-accent)]'
+                      : 'text-[var(--nf-text-muted)] hover:bg-[var(--nf-panel-soft)] hover:text-[var(--nf-text)]',
+                  )}
+                >
+                  <item.icon className={cn('h-5 w-5 flex-shrink-0', isCollapsed ? 'mx-auto' : '')} />
+                  <span className={cn('transition-opacity duration-300', isCollapsed ? 'hidden opacity-0' : 'opacity-100')}>
+                    {item.title}
+                  </span>
+                </Link>
+              </li>
+            );
+          })}
         </ul>
       </nav>
 
       {!isCollapsed ? (
-        <div className="border-t border-white/10 px-4 py-3 text-xs text-zinc-500">
-          共享导航、项目上下文和后台任务现在都集中在一个界面中。
+        <div className="border-t border-[var(--nf-border)] px-4 py-3 text-xs text-[var(--nf-text-subtle)]">
+          导航、项目上下文和后台任务集中在一个界面中。
         </div>
       ) : null}
     </aside>
