@@ -429,7 +429,7 @@ export const TaskCenter = () => {
   }
 
   return (
-    <div className="fixed bottom-6 right-6 z-[60] flex w-full max-w-xs flex-col gap-3 animate-in slide-in-from-right-5 duration-300">
+    <div className="fixed bottom-24 left-3 right-3 z-[60] flex max-h-[42vh] flex-col gap-2 overflow-y-auto animate-in slide-in-from-bottom-4 duration-300 md:bottom-6 md:left-auto md:right-6 md:w-full md:max-w-xs md:gap-3 md:overflow-visible md:animate-in md:slide-in-from-right-5">
       {tasks.map((task) => {
         const status = normalizeTaskStatus(task.status)
         const isCompleted = status === 'COMPLETED'

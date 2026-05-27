@@ -5007,3 +5007,58 @@
   - `editor` / `extract` 仍只是“不能明显破坏主题”的程度，还没有完全迁移到同一套 token。
   - 移动端左下角任务中心浮动按钮仍略挤，后续应并入移动底部抽屉或统一任务中心入口。
   - 主工作台仍会显示历史测试项目和旧数据，内测前建议做一次可控的数据清理 / 迁移，避免旧乱码数据影响真实用户观感。
+
+## 2026-05-27 Goal 16C：主工作台布局减压与视觉精修
+
+- 目标：
+  - 在 Goal 16B 的 light / dark / system 主题基础上继续减压主工作台。
+  - 优先解决 1280 桌面多栏压迫、平板拥挤、移动端上下文堆叠、保存卡信息密度过高的问题。
+- 已完成：
+  - 桌面布局减压：
+    - 会话侧栏从 256px 收窄到 224px。
+    - 右侧上下文 rail 从 320px 收窄到约 248-260px。
+    - 1280 桌面下聊天主区从 Goal 16B 约 448px 提升到约 552px。
+    - 右侧 rail 改为更轻的背景和更少间距，减少“四栏后台感”。
+  - 平板布局重构：
+    - 1100px 以下默认隐藏右侧上下文 rail，避免把项目状态 / 上下文卡堆到聊天前方。
+    - 平板主工作区保留聊天与输入为中心，项目状态可通过顶部入口和仪表盘进入。
+  - 移动端聊天优先：
+    - 720px 以下隐藏右侧上下文 rail。
+    - 移动端隐藏提示词横向胶囊，避免输入区上方出现被截断的横向内容。
+    - 隐藏 Next dev indicator，避免开发态黑色 `N` 浮层遮挡移动输入区截图。
+    - 任务中心在移动端改为底部上方、左右留边的浮层，减少遮挡输入区风险。
+  - 卡片信息密度优化：
+    - save card 的预览和影响说明默认折叠到“查看预览与影响”。
+    - 移动端 save card 操作按钮自然换行并占满宽度。
+    - trace 展开态仍保留分组，但默认折叠态保持核心摘要。
+- 截图验收：
+  - 截图目录：
+    - `project-docs/screenshots/goal16c/desktop-light-default.png`
+    - `project-docs/screenshots/goal16c/desktop-dark-default.png`
+    - `project-docs/screenshots/goal16c/desktop-light-trace-expanded.png`
+    - `project-docs/screenshots/goal16c/desktop-dark-trace-expanded.png`
+    - `project-docs/screenshots/goal16c/tablet-light-default.png`
+    - `project-docs/screenshots/goal16c/tablet-dark-default.png`
+    - `project-docs/screenshots/goal16c/mobile-light-default.png`
+    - `project-docs/screenshots/goal16c/mobile-dark-default.png`
+    - `project-docs/screenshots/goal16c/mobile-save-card.png`
+  - 验收结果：
+    - 1280 桌面 light / dark：聊天主区明显变宽，save card 不再是窄竖条。
+    - 1280 trace 展开 light / dark：trace 可展开，仍可在主对话区阅读。
+    - 768 平板 light / dark：右侧 rail 默认隐藏，无横向溢出。
+    - 390 手机 light / dark：右侧上下文与提示词胶囊不再抢占聊天区，无横向溢出。
+    - 390 mobile save card：保存卡操作按钮可读，预览细节默认折叠。
+- 测试：
+  - `cmd /c npx tsc --noEmit --incremental false`
+    - passed
+  - `cmd /c npm test -- --run`
+    - `25 files / 104 tests passed`
+  - `cmd /c npm run build`
+    - passed
+- 当前判断：
+  - Goal 16C 达到“主工作台 v1.5”标准：聊天区更像视觉中心，上下文和诊断默认更低干扰，移动端更接近可真实使用。
+  - 这仍不是最终 UI 定稿，但相比 Goal 16B 明显减少了多栏后台感和移动端堆叠。
+- 后续风险 / 待办：
+  - 1280 桌面仍有全局导航 + 会话列表 + 聊天 + rail 四个区域，后续可以把会话列表做成可自动折叠或 overlay。
+  - 右侧 rail 已减压但仍有信息重复，后续可做成顶部项目状态 Popover / Drawer。
+  - 历史测试数据仍会影响视觉观感，内测前需要单独做数据清理和样例项目整理。

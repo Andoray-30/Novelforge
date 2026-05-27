@@ -515,7 +515,7 @@ html[data-theme="dark"] body {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-columns: minmax(0, 1fr) 260px;
   overflow: hidden;
 }
 
@@ -531,18 +531,18 @@ html[data-theme="dark"] body {
   min-width: 0;
   overflow-y: auto;
   border-left: 1px solid var(--nf-border);
-  background: color-mix(in srgb, var(--nf-bg-subtle) 86%, transparent);
-  padding: var(--nf-space-4);
+  background: color-mix(in srgb, var(--nf-bg-subtle) 72%, transparent);
+  padding: 14px;
   display: flex;
   flex-direction: column;
-  gap: var(--nf-space-4);
+  gap: 12px;
 }
 
 .nf-panel,
 .nf-action-card,
 .nf-trace-card {
   border: 1px solid var(--nf-border);
-  border-radius: 12px;
+  border-radius: 14px;
   background: var(--nf-panel);
 }
 
@@ -595,7 +595,7 @@ html[data-theme="dark"] body {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  padding: 28px clamp(16px, 5vw, 72px);
+  padding: 28px clamp(18px, 6vw, 88px);
 }
 
 .nf-message-row {
@@ -636,7 +636,7 @@ html[data-theme="dark"] body {
 }
 
 .nf-message-bubble {
-  max-width: min(760px, 86%);
+  max-width: min(780px, 88%);
   border-radius: 18px;
   border: 1px solid var(--nf-border);
   background: var(--nf-surface);
@@ -648,7 +648,7 @@ html[data-theme="dark"] body {
 }
 
 .nf-message-bubble.user {
-  max-width: min(680px, 76%);
+  max-width: min(680px, 74%);
   border: none;
   background: var(--nf-accent);
   color: white;
@@ -656,7 +656,7 @@ html[data-theme="dark"] body {
 
 .nf-action-card,
 .nf-trace-card {
-  max-width: min(760px, 86%);
+  max-width: min(780px, 88%);
   width: 100%;
   overflow: hidden;
 }
@@ -667,7 +667,7 @@ html[data-theme="dark"] body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 14px;
+  padding: 11px 13px;
 }
 
 .nf-trace-summary {
@@ -681,9 +681,9 @@ html[data-theme="dark"] body {
 
 .nf-card-body,
 .nf-trace-body {
-  padding: 0 14px 14px;
+  padding: 0 13px 13px;
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .nf-muted {
@@ -707,17 +707,30 @@ html[data-theme="dark"] body {
   gap: 8px;
 }
 
+.nf-save-details {
+  border-top: 1px solid var(--nf-border);
+  padding-top: 8px;
+}
+
+.nf-save-details > summary {
+  list-style: none;
+}
+
+.nf-save-details > summary::-webkit-details-marker {
+  display: none;
+}
+
 .nf-stat-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: 7px;
 }
 
 .nf-stat {
   border: 1px solid var(--nf-border);
   border-radius: 10px;
   background: var(--nf-panel-soft);
-  padding: 10px;
+  padding: 9px;
 }
 
 .nf-stat span {
@@ -778,26 +791,33 @@ html[data-theme="dark"] body {
   color: var(--nf-text);
 }
 
+.nf-prompt-suggestions {
+  max-width: 100%;
+}
+
 @media (max-width: 1100px) {
   .nf-chat-layout {
     grid-template-columns: minmax(0, 1fr);
   }
 
   .nf-context-rail {
-    order: -1;
-    max-height: 230px;
-    border-left: 0;
-    border-bottom: 1px solid var(--nf-border);
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: none;
+  }
+
+  .nf-message-list {
+    padding-inline: clamp(18px, 8vw, 72px);
   }
 }
 
 @media (max-width: 720px) {
-  html,
-  body {
-    overflow-x: hidden;
-  }
+html,
+body {
+  overflow-x: hidden;
+}
+
+nextjs-portal {
+  display: none !important;
+}
 
   .nf-shell {
     display: block;
@@ -816,20 +836,19 @@ html[data-theme="dark"] body {
     min-height: auto;
     padding: 10px 12px;
     flex-wrap: wrap;
+    gap: 8px;
   }
 
   .nf-topbar-title {
     width: 100%;
   }
 
-  .nf-context-rail {
-    display: flex;
-    max-height: 220px;
-    padding: 12px;
+  .nf-message-list {
+    padding: 14px 12px 22px;
   }
 
-  .nf-message-list {
-    padding: 18px 12px;
+  .nf-prompt-suggestions {
+    display: none !important;
   }
 
   .nf-message-bubble,
@@ -843,7 +862,20 @@ html[data-theme="dark"] body {
   .nf-card-header,
   .nf-trace-summary {
     align-items: flex-start;
-    flex-direction: column;
+    flex-direction: row;
+    gap: 10px;
+  }
+
+  .nf-action-card .nf-card-header {
+    flex-wrap: wrap;
+  }
+
+  .nf-action-card .nf-pill-row {
+    width: 100%;
+  }
+
+  .nf-action-card .nf-pill-row .nf-button {
+    flex: 1;
   }
 
   .nf-form-row {
@@ -852,5 +884,16 @@ html[data-theme="dark"] body {
 
   .nf-input-wrap {
     width: 100%;
+    padding: 0 10px;
+  }
+}
+
+@media (min-width: 1180px) {
+  .nf-chat-layout {
+    grid-template-columns: minmax(0, 1fr) 248px;
+  }
+
+  .nf-message-list {
+    padding-inline: clamp(28px, 7vw, 104px);
   }
 }

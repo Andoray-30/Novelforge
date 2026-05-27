@@ -648,14 +648,15 @@ export function MessageBubble({
                   ) : null}
 
                   {previewRows.length > 0 ? (
-                    <div className="nf-card-grid">
+                    <details className="nf-card-grid nf-save-details">
+                      <summary className="nf-chip" style={{ width: 'fit-content' }}>查看预览与影响</summary>
                       {previewRows.map((row) => (
                         <div className="nf-form-row nf-small" key={row.label}>
                           <span className="nf-muted">{row.label}</span>
                           <span style={{ color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.value}</span>
                         </div>
                       ))}
-                    </div>
+                    </details>
                   ) : null}
 
                   {warningLabel ? <div className="nf-alert">{warningLabel}</div> : null}

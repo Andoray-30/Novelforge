@@ -54,8 +54,8 @@ export function ChatSidebar({
   return (
     <aside
       style={{
-        width: collapsed ? '60px' : '256px',
-        minWidth: collapsed ? '60px' : '256px',
+        width: collapsed ? '56px' : '224px',
+        minWidth: collapsed ? '56px' : '224px',
         height: '100%',
         maxHeight: '100%',
         minHeight: 0,
@@ -71,7 +71,7 @@ export function ChatSidebar({
     >
       <div
         style={{
-          padding: collapsed ? '18px 0 12px' : '18px 16px 12px',
+          padding: collapsed ? '16px 0 10px' : '16px 14px 10px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: collapsed ? 'center' : 'space-between',
@@ -118,7 +118,7 @@ export function ChatSidebar({
         </button>
       </div>
 
-      <div style={{ padding: collapsed ? '12px 0 8px' : '12px 12px 8px', display: 'flex', justifyContent: 'center' }}>
+      <div style={{ padding: collapsed ? '10px 0 8px' : '10px 10px 8px', display: 'flex', justifyContent: 'center' }}>
         <button
           onClick={onNewSession}
           title="新建创作项目"
@@ -136,7 +136,7 @@ export function ChatSidebar({
       </div>
 
       {!collapsed ? (
-        <div style={{ padding: '4px 16px 6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <div style={{ padding: '4px 12px 6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
           <span style={{ fontSize: 11, fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--nf-text-subtle)' }}>
             历史项目
           </span>
@@ -156,7 +156,7 @@ export function ChatSidebar({
         </div>
       ) : null}
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: collapsed ? '0' : '0 6px', display: 'flex', flexDirection: 'column', alignItems: collapsed ? 'center' : 'stretch' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: collapsed ? '0' : '0 5px', display: 'flex', flexDirection: 'column', alignItems: collapsed ? 'center' : 'stretch' }}>
         {!collapsed && sessions.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '40px 12px', color: 'var(--nf-text-muted)', fontSize: 13 }}>
             还没有历史项目<br /><span style={{ fontSize: 11, opacity: 0.7 }}>开始创作你的第一个故事吧</span>
@@ -177,7 +177,7 @@ export function ChatSidebar({
                 alignItems: 'center',
                 justifyContent: collapsed ? 'center' : 'flex-start',
                 gap: 8,
-                padding: collapsed ? '0' : '9px 10px',
+                padding: collapsed ? '0' : '8px 9px',
                 width: collapsed ? '36px' : 'auto',
                 height: collapsed ? '36px' : 'auto',
                 borderRadius: 8,
@@ -247,7 +247,7 @@ export function ChatSidebar({
       </div>
 
       {!collapsed ? (
-        <div style={{ padding: '12px 16px', borderTop: '1px solid var(--nf-border)', fontSize: 11, color: 'var(--nf-text-subtle)', whiteSpace: 'nowrap' }}>
+        <div style={{ padding: '10px 14px', borderTop: '1px solid var(--nf-border)', fontSize: 11, color: 'var(--nf-text-subtle)', whiteSpace: 'nowrap' }}>
           NovelForge v0.5.0
         </div>
       ) : null}

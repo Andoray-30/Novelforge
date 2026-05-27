@@ -119,7 +119,7 @@ export function ChatInput({
     <div style={{ padding: '12px 20px 20px', background: 'transparent', flexShrink: 0 }}>
       {input.length === 0 && !disabled ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
-          <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, msOverflowStyle: 'none', scrollbarWidth: 'none' }}>
+          <div className="nf-prompt-suggestions" style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, msOverflowStyle: 'none', scrollbarWidth: 'none' }}>
             {promptSuggestions.map((suggestion, index) => (
               <button
                 key={`${suggestion}-${index}`}
