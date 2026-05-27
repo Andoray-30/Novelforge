@@ -5062,3 +5062,66 @@
   - 1280 桌面仍有全局导航 + 会话列表 + 聊天 + rail 四个区域，后续可以把会话列表做成可自动折叠或 overlay。
   - 右侧 rail 已减压但仍有信息重复，后续可做成顶部项目状态 Popover / Drawer。
   - 历史测试数据仍会影响视觉观感，内测前需要单独做数据清理和样例项目整理。
+
+## 2026-05-27 Goal 17：编辑器 UI 与写作体验重构 v1
+
+- 目标：
+  - 把 `/editor` 从章节查看器推进为 AI 草稿 / 候选 / 正式章节的写作工作台。
+  - 复用 Goal 16B/16C 的 `nf-*` 主题 token，支持 light / dark / system，不把功能强绑定到旧 UI。
+  - 桌面端形成三块结构：左侧章节目录、中间正文写作区、右侧状态 / 版本操作区。
+  - 移动端 390px 单列可用，章节目录折叠，状态和快照操作不横向溢出。
+- 已完成：
+  - Editor 主体迁移到统一 token：
+    - `nf-editor-shell`
+    - `nf-editor-hero`
+    - `nf-editor-layout`
+    - `nf-editor-directory`
+    - `nf-editor-reader`
+    - `nf-editor-inspector`
+    - `nf-editor-action-card`
+    - `nf-editor-tag`
+  - 章节目录：
+    - 增加轻量筛选 pill：全部、导入原文、AI 草稿、候选版本、正式正文、正式序章、番外、已归档。
+    - 章节卡展示结构位置、来源、保存目的、章节角色、字数、候选 / 可恢复状态。
+    - 已归档 / 非正文资产弱化显示，当前选中章节高亮。
+  - 正文写作区：
+    - 正文 textarea 改为更适合中文长文阅读的 serif 字体、较大行高和稳定宽度。
+    - 章节标题、正文统计、目标进度、更新时间和保存目的低干扰展示。
+  - 状态 / 版本操作区：
+    - 统一资产信息、继续写 / 改写 / 润色、AI 候选管理、previous_snapshot 恢复卡片。
+    - 候选转正式 / 转序章 / 转番外 / 归档仍只更新 metadata，不改正文。
+    - previous_snapshot 恢复入口清晰可见，危险操作使用低饱和 warning / danger 样式。
+  - 修复一个 editor 真实跳转问题：
+    - `chapterId` 现在在初始 state 中同步读取，避免首次加载先选中目录第一章。
+    - `/editor?chapterId=<id>` 能正确定位候选章节，后续保存卡跳转 editor 不再被目录排序抢焦点。
+- 卡住原因复盘：
+  - 旧截图脚本写出了“正在检查访问权限...”的无效截图，并把文件大小写入 audit，导致视觉验收误判。
+  - 根因不是后端接口慢，而是旧 headless 流程没有等待客户端水合和 editor selector。
+  - 已改为先用内置浏览器验证真实页面水合，再用系统 Chrome headless / CDP 截图；截图前必须确认 candidate chapter textarea 可见。
+- 截图验收：
+  - 截图目录：`project-docs/screenshots/goal17/`
+  - 已生成并人工查看：
+    - `desktop-light-editor.png`
+    - `desktop-dark-editor.png`
+    - `desktop-light-candidate-actions.png`
+    - `mobile-light-editor.png`
+    - `mobile-dark-editor.png`
+    - `mobile-snapshot-restore.png`
+  - `goal17-screenshot-audit.json` 记录尺寸、主题、文件路径和验收说明。
+  - 390px 移动端通过浏览器测量：`documentElement.scrollWidth = 390`，无横向溢出。
+- 测试：
+  - `cmd /c npx vitest run src/lib/editor-chapter-workflow.test.ts`
+    - `1 file / 7 tests passed`
+  - `cmd /c npm test -- --run`
+    - `25 files / 104 tests passed`
+  - `cmd /c npx tsc --noEmit --incremental false`
+    - passed
+  - `cmd /c npm run build`
+    - passed
+- 当前判断：
+  - Goal 17 已完成编辑器工作台 v1 的核心目标：候选章节、正文、快照恢复和候选转正式操作进入同一个可管理界面。
+  - 这仍不是最终视觉定稿，但已经从“列表 + textarea”升级为可继续迭代的写作工作台。
+- 后续风险 / 待办：
+  - 移动端正文和状态卡仍偏长，下一轮可以把右侧 inspector 操作进一步收敛成底部抽屉。
+  - 桌面端目录 / inspector 仍有信息密度偏高的问题，真实项目数据更多时需要继续压缩。
+  - 本轮使用 clean fixture 做 editor UI 验收，没有重新跑真实长篇导入或真实写作闭环。

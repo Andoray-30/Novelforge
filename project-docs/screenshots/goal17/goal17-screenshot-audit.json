@@ -1,0 +1,56 @@
+﻿{
+    "desktop-light-editor":  {
+                                 "validation":  "Chrome headless screenshot, editor textarea visible, candidate chapter selected",
+                                 "width":  1280,
+                                 "height":  900,
+                                 "theme":  "light",
+                                 "bytes":  206882,
+                                 "file":  "F:\\Cyber-Companion\\NovelForge\\project-docs\\screenshots\\goal17\\desktop-light-editor.png",
+                                 "captured_at":  "2026-05-27T17:54:47"
+                             },
+    "desktop-dark-editor":  {
+                                "validation":  "Chrome headless screenshot, editor textarea visible, candidate chapter selected",
+                                "width":  1280,
+                                "height":  900,
+                                "theme":  "dark",
+                                "bytes":  200361,
+                                "file":  "F:\\Cyber-Companion\\NovelForge\\project-docs\\screenshots\\goal17\\desktop-dark-editor.png",
+                                "captured_at":  "2026-05-27T17:54:48"
+                            },
+    "desktop-light-candidate-actions":  {
+                                            "validation":  "CDP scrolled inspector to AI candidate and previous_snapshot actions",
+                                            "width":  1280,
+                                            "height":  900,
+                                            "theme":  "light",
+                                            "bytes":  214447,
+                                            "file":  "F:\\Cyber-Companion\\NovelForge\\project-docs\\screenshots\\goal17\\desktop-light-candidate-actions.png",
+                                            "captured_at":  "2026-05-27T17:57:58"
+                                        },
+    "mobile-light-editor":  {
+                                "validation":  "Chrome headless screenshot, no horizontal overflow measured in in-app browser",
+                                "width":  390,
+                                "height":  900,
+                                "theme":  "light",
+                                "bytes":  64843,
+                                "file":  "F:\\Cyber-Companion\\NovelForge\\project-docs\\screenshots\\goal17\\mobile-light-editor.png",
+                                "captured_at":  "2026-05-27T17:54:50"
+                            },
+    "mobile-dark-editor":  {
+                               "validation":  "Chrome headless screenshot, no horizontal overflow measured in in-app browser",
+                               "width":  390,
+                               "height":  900,
+                               "theme":  "dark",
+                               "bytes":  63972,
+                               "file":  "F:\\Cyber-Companion\\NovelForge\\project-docs\\screenshots\\goal17\\mobile-dark-editor.png",
+                               "captured_at":  "2026-05-27T17:54:51"
+                           },
+    "mobile-snapshot-restore":  {
+                                    "validation":  "CDP scrolled to previous_snapshot restore card",
+                                    "width":  390,
+                                    "height":  900,
+                                    "theme":  "light",
+                                    "bytes":  47596,
+                                    "file":  "F:\\Cyber-Companion\\NovelForge\\project-docs\\screenshots\\goal17\\mobile-snapshot-restore.png",
+                                    "captured_at":  "2026-05-27T17:57:14"
+                                }
+}

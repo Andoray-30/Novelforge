@@ -38,7 +38,7 @@ import {
   type ProjectPreferences,
 } from '@/lib/project-preferences';
 import { useSessions } from '@/lib/hooks/use-sessions';
-import { Archive, BookOpen, FilePlus2, FileText, MessageSquareText, RefreshCw, RotateCcw, Save, Sparkles, Trash2 } from 'lucide-react';
+import { Archive, BookOpen, ChevronDown, FilePlus2, FileText, MessageSquareText, RefreshCw, RotateCcw, Save, Sparkles, Trash2 } from 'lucide-react';
 import type { ContentItem } from '@/types';
 
 function syncChapterQueryParam(chapterId: string | null) {
@@ -67,7 +67,10 @@ export default function NovelEditorPage() {
 
   const [chapters, setChapters] = useState<ContentItem[]>([]);
   const [chapterFilter, setChapterFilter] = useState<EditorChapterFilter>('all');
-  const [requestedChapterId, setRequestedChapterId] = useState<string | null>(null);
+  const [requestedChapterId, setRequestedChapterId] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return new URLSearchParams(window.location.search).get('chapterId');
+  });
   const [selectedChapterId, setSelectedChapterId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState('');
   const [draftContent, setDraftContent] = useState('');
@@ -76,19 +79,11 @@ export default function NovelEditorPage() {
   const [isCreatingChapter, setIsCreatingChapter] = useState(false);
   const [isDeletingChapter, setIsDeletingChapter] = useState(false);
   const [isRefreshingChapters, setIsRefreshingChapters] = useState(false);
+  const [isDirectoryOpen, setIsDirectoryOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [projectPreferences, setProjectPreferences] = useState<ProjectPreferences>(() => loadProjectPreferences(currentSessionId));
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    const params = new URLSearchParams(window.location.search);
-    setRequestedChapterId(params.get('chapterId'));
-  }, []);
 
   useEffect(() => {
     setProjectPreferences(loadProjectPreferences(currentSessionId));
@@ -128,7 +123,6 @@ export default function NovelEditorPage() {
       setChapters(items);
 
       setSelectedChapterId((currentSelected) => {
-        const preferredChapterId = options?.preferredChapterId;
         return resolveEditorChapterSelection({
           items,
           preferredChapterId: options?.preferredChapterId,
@@ -138,7 +132,7 @@ export default function NovelEditorPage() {
         });
       });
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'Failed to load chapter assets');
+      setError(loadError instanceof Error ? loadError.message : '加载章节资产失败');
     } finally {
       if (silent) {
         setIsRefreshingChapters(false);
@@ -245,6 +239,7 @@ export default function NovelEditorPage() {
     }
 
     setSelectedChapterId(chapterId);
+    setIsDirectoryOpen(false);
   }, [hasUnsavedChanges, selectedChapterId]);
 
   const handleSave = useCallback(async (mode: 'manual' | 'auto' = 'manual') => {
@@ -298,9 +293,9 @@ export default function NovelEditorPage() {
       );
 
       setDraftTitle(nextTitle);
-      setSaveMessage(mode === 'auto' ? 'Chapter auto-saved.' : 'Chapter saved back to the content library.');
+      setSaveMessage(mode === 'auto' ? '章节已自动保存。' : '章节已保存到内容库。');
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Failed to save chapter');
+      setError(saveError instanceof Error ? saveError.message : '保存章节失败');
     } finally {
       setIsSaving(false);
     }
@@ -366,7 +361,7 @@ export default function NovelEditorPage() {
       setDraftContent(content);
       setSaveMessage('章节保存位置已更新，正文内容保持不变。');
     } catch (promoteError) {
-      setError(promoteError instanceof Error ? promoteError.message : 'Failed to update chapter metadata');
+      setError(promoteError instanceof Error ? promoteError.message : '更新章节状态失败');
     } finally {
       setIsSaving(false);
     }
@@ -414,7 +409,7 @@ export default function NovelEditorPage() {
       setChapterFilter('archived');
       setSaveMessage('候选已归档。内容没有删除，可在“已归档”中恢复查看。');
     } catch (archiveError) {
-      setError(archiveError instanceof Error ? archiveError.message : 'Failed to archive chapter');
+      setError(archiveError instanceof Error ? archiveError.message : '归档章节失败');
     } finally {
       setIsSaving(false);
     }
@@ -468,7 +463,7 @@ export default function NovelEditorPage() {
       setDraftContent(request.content);
       setSaveMessage('已恢复上一版，并把恢复前版本保存为 recovery_snapshot。');
     } catch (restoreError) {
-      setError(restoreError instanceof Error ? restoreError.message : 'Failed to restore previous snapshot');
+      setError(restoreError instanceof Error ? restoreError.message : '恢复上一版失败');
     } finally {
       setIsSaving(false);
     }
@@ -485,7 +480,7 @@ export default function NovelEditorPage() {
 
   const handleCreateChapter = useCallback(async () => {
     if (hasUnsavedChanges) {
-      const confirmed = window.confirm('The current chapter has unsaved changes. Create a new chapter and discard those local edits?');
+      const confirmed = window.confirm('当前章节还有未保存修改。确定创建新章节并丢弃这些本地编辑吗？');
       if (!confirmed) {
         return;
       }
@@ -498,7 +493,7 @@ export default function NovelEditorPage() {
     try {
       let sessionId = currentSessionId;
       if (!sessionId) {
-        const createdSession = await createSession('Manual Drafting');
+        const createdSession = await createSession('手写章节');
         sessionId = createdSession.id;
       }
 
@@ -523,7 +518,7 @@ export default function NovelEditorPage() {
       setSelectedChapterId(createdChapter.metadata.id);
       setSaveMessage('新章节已创建，现在可以立即开始写作。');
     } catch (createError) {
-      setError(createError instanceof Error ? createError.message : 'Failed to create a new chapter');
+      setError(createError instanceof Error ? createError.message : '创建新章节失败');
     } finally {
       setIsCreatingChapter(false);
     }
@@ -568,7 +563,7 @@ export default function NovelEditorPage() {
       }
       setSaveMessage('章节已删除。');
     } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : 'Failed to delete chapter');
+      setError(deleteError instanceof Error ? deleteError.message : '删除章节失败');
     } finally {
       setIsDeletingChapter(false);
     }
@@ -598,14 +593,18 @@ export default function NovelEditorPage() {
   const currentWordCount = draftContent.trim().length;
   const targetWordCount = Math.max(200, projectPreferences.chapter_target_words || DEFAULT_PROJECT_PREFERENCES.chapter_target_words);
   const targetProgress = Math.min(100, Math.round((currentWordCount / targetWordCount) * 100));
+  const selectedChapterMeta = selectedChapter ? resolveChapterDirectoryMetadata(selectedChapter) : null;
+  const selectedStatusLine = selectedChapterWorkflow
+    ? `${selectedChapterWorkflow.sourceLabel} · ${selectedChapterWorkflow.saveDestinationLabel} · ${selectedChapterWorkflow.wordCount} 字`
+    : '请选择章节';
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100">
-        <div className="mx-auto flex min-h-screen max-w-7xl items-center justify-center px-6 py-10">
-          <div className="text-center">
-            <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-b-2 border-amber-400" />
-            <p className="text-slate-400">正在加载章节资产...</p>
+      <div className="nf-editor-shell">
+        <div className="nf-editor-page nf-editor-loading">
+          <div>
+            <div className="nf-editor-spinner" />
+            <p className="nf-muted">正在加载章节资产...</p>
           </div>
         </div>
       </div>
@@ -613,28 +612,26 @@ export default function NovelEditorPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="mx-auto max-w-7xl px-6 py-10">
-        <div className="mb-8 flex flex-col gap-4 border-b border-slate-800 pb-8 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h1 className="flex items-center text-4xl font-black tracking-tight text-white">
-              <BookOpen className="mr-4 h-9 w-9 text-amber-400" />
+    <div className="nf-editor-shell">
+      <div className="nf-editor-page">
+        <header className="nf-editor-hero">
+          <div className="min-w-0">
+            <h1 className="nf-editor-title">
+              <BookOpen className="h-8 w-8" />
               章节编辑器
             </h1>
-            <p className="mt-3 max-w-2xl text-slate-400">
-              编辑器现在支持创建新章节、切换章节时保护草稿，并在不离开页面的情况下刷新当前项目内容。
-            </p>
-            <p className="mt-3 text-sm text-slate-500">当前项目：{currentSession?.title || '当前没有激活项目'}</p>
+            <p className="nf-editor-subline">写作、整理和确认 AI 候选章节。</p>
+            <p className="nf-editor-meta">当前项目：{currentSession?.title || '当前没有激活项目'}</p>
           </div>
 
-          <div className="flex flex-wrap gap-3">
+          <div className="nf-editor-actions">
             <button
               type="button"
               onClick={() => {
                 void loadChapters({ preferredChapterId: selectedChapterId, silent: true });
               }}
               disabled={isRefreshingChapters}
-              className="inline-flex items-center justify-center rounded-2xl border border-slate-700 bg-slate-900 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+              className="nf-button"
             >
               <RefreshCw className={`mr-2 h-4 w-4 ${isRefreshingChapters ? 'animate-spin' : ''}`} />
               刷新章节
@@ -645,7 +642,7 @@ export default function NovelEditorPage() {
                 void handleCreateChapter();
               }}
               disabled={isCreatingChapter}
-              className="inline-flex items-center justify-center rounded-2xl border border-amber-400/30 bg-amber-400/10 px-5 py-3 text-sm font-semibold text-amber-200 transition hover:bg-amber-400/20 disabled:cursor-not-allowed disabled:opacity-60"
+              className="nf-button"
             >
               <FilePlus2 className="mr-2 h-4 w-4" />
               {isCreatingChapter ? '创建中...' : '新章节'}
@@ -654,7 +651,7 @@ export default function NovelEditorPage() {
               type="button"
               onClick={handleDeleteChapter}
               disabled={!selectedChapter || isDeletingChapter || isSaving}
-              className="inline-flex items-center justify-center rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-3 text-sm font-semibold text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+              className="nf-button nf-button-danger"
             >
               <Trash2 className="mr-2 h-4 w-4" />
               {isDeletingChapter ? '删除中...' : '删除章节'}
@@ -665,56 +662,69 @@ export default function NovelEditorPage() {
                 void handleSave();
               }}
               disabled={!selectedChapter || isSaving}
-              className="inline-flex items-center justify-center rounded-2xl bg-amber-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-60"
+              className="nf-button nf-button-primary"
             >
               <Save className="mr-2 h-4 w-4" />
               {isSaving ? '保存中...' : '保存章节'}
             </button>
           </div>
-        </div>
+        </header>
 
-        {error ? <div className="mb-6 rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-red-200">{error}</div> : null}
-        {saveMessage ? <div className="mb-6 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-5 py-4 text-emerald-200">{saveMessage}</div> : null}
+        {selectedChapter ? (
+          <div className="nf-editor-mobile-current">
+            <strong>{selectedChapterMeta?.displayTitle || selectedChapter.metadata.title}</strong>
+            <span>{selectedStatusLine}</span>
+          </div>
+        ) : null}
+
+        {error ? <div className="nf-editor-alert">{error}</div> : null}
+        {saveMessage ? <div className="nf-editor-alert success">{saveMessage}</div> : null}
 
         {chapters.length === 0 ? (
-          <div className="flex min-h-[420px] flex-col items-center justify-center rounded-3xl border-2 border-dashed border-slate-800 bg-slate-900/20 text-center">
-            <FileText className="mb-6 h-16 w-16 text-slate-700" />
-            <h2 className="mb-2 text-2xl font-bold text-slate-200">暂时还没有章节资产</h2>
-            <p className="max-w-md text-slate-500">
-              你可以先通过 AI 生成、导入处理管道内容，或者直接在这里创建第一章，并持续写入统一内容库。
-            </p>
+          <div className="nf-panel nf-panel-pad nf-editor-empty">
+            <div>
+              <FileText className="mx-auto mb-5 h-14 w-14 nf-muted" />
+              <h2 className="nf-panel-title">暂时还没有章节资产</h2>
+              <p className="nf-panel-subtitle">可以先创建第一章，或回到导入页写入原文资产。</p>
             <button
               type="button"
               onClick={() => {
                 void handleCreateChapter();
               }}
               disabled={isCreatingChapter}
-              className="mt-6 inline-flex items-center justify-center rounded-2xl bg-amber-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-60"
+                className="nf-button nf-button-primary mt-6"
             >
               <FilePlus2 className="mr-2 h-4 w-4" />
               {isCreatingChapter ? '正在创建第一章...' : '创建第一章'}
             </button>
+            </div>
           </div>
         ) : (
-          <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
-            <aside className="rounded-3xl border border-slate-800 bg-slate-900/70 p-4">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-white">章节列表</h2>
-                <span className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-400">{filteredChapters.length}/{chapters.length}</span>
+          <div className="nf-editor-layout">
+            <aside className={`nf-panel nf-editor-directory ${isDirectoryOpen ? 'is-open' : ''}`}>
+              <div className="nf-editor-panel-header">
+                <div className="min-w-0">
+                  <h2 className="nf-panel-title">章节目录</h2>
+                  <p className="nf-panel-subtitle">{filteredChapters.length}/{chapters.length} 个资产</p>
+                </div>
+                <button
+                  type="button"
+                  className="nf-icon-button nf-editor-mobile-toggle"
+                  onClick={() => setIsDirectoryOpen((current) => !current)}
+                  aria-label="展开或收起章节目录"
+                >
+                  <ChevronDown className="h-4 w-4" />
+                </button>
               </div>
 
-              <div className="mb-4 flex flex-wrap gap-2">
+              <div className="nf-editor-directory-body">
+                <div className="nf-editor-filter-row">
                 {EDITOR_CHAPTER_FILTERS.map((filter) => (
                   <button
                     key={filter.value}
                     type="button"
                     onClick={() => setChapterFilter(filter.value)}
-                    className={[
-                      'rounded-full border px-3 py-1.5 text-xs font-semibold transition',
-                      chapterFilter === filter.value
-                        ? 'border-amber-400/50 bg-amber-400/15 text-amber-100'
-                        : 'border-slate-800 bg-slate-950/40 text-slate-400 hover:border-slate-700 hover:text-slate-200',
-                    ].join(' ')}
+                      className={`nf-editor-filter ${chapterFilter === filter.value ? 'is-active' : ''}`}
                   >
                     {filter.label}
                   </button>
@@ -722,11 +732,12 @@ export default function NovelEditorPage() {
               </div>
 
                 {filteredChapters.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-950/40 p-4 text-sm text-slate-500">
+                  <div className="nf-panel nf-panel-pad nf-muted nf-small">
                     当前筛选下没有章节。
                   </div>
                 ) : null}
-              <div className="space-y-3">
+
+                <div className="nf-editor-chapter-list">
                 {filteredChapters.map((chapter, index) => {
                   const chapterMeta = resolveChapterDirectoryMetadata(chapter, index + 1);
                   const workflowState = getEditorChapterWorkflowState(chapter);
@@ -740,204 +751,236 @@ export default function NovelEditorPage() {
                       type="button"
                       onClick={() => handleSelectChapter(chapter.metadata.id)}
                       className={[
-                        'w-full rounded-2xl border p-4 text-left transition-all',
-                        chapterMeta.isDecorative ? 'opacity-60' : '',
-                        isActive
-                          ? chapterMeta.isDecorative
-                            ? 'border-amber-400/30 bg-slate-950/80 shadow-[0_0_20px_rgba(251,191,36,0.06)]'
-                            : 'border-amber-400/40 bg-amber-400/10 shadow-[0_0_20px_rgba(251,191,36,0.08)]'
-                          : chapterMeta.isDecorative
-                            ? 'border-dashed border-slate-800 bg-slate-950/30 hover:border-slate-700 hover:bg-slate-900/60'
-                            : 'border-slate-800 bg-slate-950/50 hover:border-slate-700 hover:bg-slate-900',
+                        'nf-editor-chapter-card',
+                        isActive ? 'is-active' : '',
+                        chapterMeta.isDecorative ? 'is-decorative' : '',
+                        workflowState.isArchived ? 'is-archived' : '',
                       ].join(' ')}
+                        title={chapterMeta.displayTitle}
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="text-[11px] text-slate-500">{chapterMeta.structureLabel}</p>
-                          <h3 className={`truncate font-semibold ${chapterMeta.isDecorative ? 'text-slate-300' : 'text-white'}`}>
+                        <div className="nf-editor-chapter-topline">
+                          <div className="min-w-0">
+                            <p className="nf-editor-chapter-structure">{chapterMeta.structureLabel}</p>
+                            <h3 className="nf-editor-chapter-title">
                             {chapterMeta.displayTitle}
                           </h3>
                           {chapterMeta.isSplitSegment && chapterMeta.originalTitle !== chapterMeta.displayTitle ? (
-                            <p className="mt-1 truncate text-xs text-slate-600">源自：{chapterMeta.originalTitle}</p>
+                              <p className="nf-editor-chapter-source">源自：{chapterMeta.originalTitle}</p>
                           ) : null}
-                          <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
-                            <span className="rounded-full border border-slate-700 px-2 py-1 text-slate-300">{chapterMeta.sourceLabel}</span>
+                            <div className="nf-editor-tag-row">
+                              <span className="nf-editor-tag">{chapterMeta.sourceLabel}</span>
                             {chapterMeta.saveDestinationLabel ? (
-                              <span className="rounded-full border border-violet-500/30 bg-violet-500/10 px-2 py-1 text-violet-200">
+                                <span className="nf-editor-tag primary">
                                 {chapterMeta.saveDestinationLabel}
                               </span>
                             ) : null}
-                            <span className={`rounded-full border px-2 py-1 ${chapterMeta.isDecorative ? 'border-slate-700 text-slate-500' : 'border-slate-700 text-slate-300'}`}>
+                              <span className="nf-editor-tag">
                               {chapterMeta.roleLabel}
                             </span>
-                            <span className="rounded-full border border-slate-700 px-2 py-1 text-slate-400">{chapterMeta.wordCount} 字</span>
+                              <span className="nf-editor-tag">{chapterMeta.wordCount} 字</span>
                             {workflowState.isArchived ? (
-                              <span className="rounded-full border border-slate-700 bg-slate-800 px-2 py-1 text-slate-300">已归档</span>
+                                <span className="nf-editor-tag">已归档</span>
                             ) : null}
                             {workflowState.hasPreviousSnapshot ? (
-                              <span className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-cyan-200">可恢复</span>
+                                <span className="nf-editor-tag warning">可恢复</span>
                             ) : null}
                             {chapterMeta.qualityFlagLabels.map((flag) => (
-                              <span key={flag} className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-amber-200">
+                                <span key={flag} className="nf-editor-tag warning">
                                 {flag}
                               </span>
                             ))}
                           </div>
-                          <p className="mt-2 line-clamp-3 text-sm text-slate-500">{preview || '暂无正文内容。'}</p>
+                            <p className="nf-editor-chapter-preview">{preview || '暂无正文内容。'}</p>
                         </div>
-                        <Sparkles className={`mt-1 h-4 w-4 shrink-0 ${isActive ? 'text-amber-300' : 'text-slate-600'}`} />
+                          <Sparkles className="mt-1 h-4 w-4 shrink-0" />
                       </div>
                     </button>
                   );
                 })}
               </div>
+              </div>
             </aside>
 
-            <section className="rounded-3xl border border-slate-800 bg-slate-900/70 p-6">
+            <section className="nf-editor-reader">
               {selectedChapter ? (
-                <div className="space-y-5">
-                  <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
-                    <div>
-                      <label className="mb-2 block text-sm font-medium text-slate-400">Chapter title</label>
+                <div>
+                  <div className="nf-editor-title-row">
+                    <div className="min-w-0">
+                      <label className="nf-editor-label">章节标题</label>
                       <input
                         type="text"
                         value={draftTitle}
                         onChange={(event) => setDraftTitle(event.target.value)}
-                        className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none transition focus:border-amber-400/50"
+                        className="nf-editor-title-input"
                       />
                     </div>
 
-                    <div className="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3">
-                      <p className="text-xs uppercase tracking-wide text-slate-500">Draft stats</p>
-                      <p className="mt-2 text-2xl font-bold text-white">{currentWordCount}</p>
-                      <p className="mt-2 text-xs text-slate-500">Target {targetWordCount} · Progress {targetProgress}%</p>
-                      <p className="mt-2 text-xs text-slate-500">Last updated: {selectedChapter.metadata.updated_at}</p>
-                      {hasUnsavedChanges ? <p className="mt-2 text-xs font-medium text-amber-300">Unsaved local edits</p> : null}
+                    <div className="nf-editor-stats-card">
+                      <p className="nf-small nf-muted">正文统计</p>
+                      <strong>{currentWordCount}</strong>
+                      <p className="nf-small nf-muted">目标 {targetWordCount} · {targetProgress}%</p>
+                      <div className="nf-editor-progress" aria-label={`目标进度 ${targetProgress}%`}>
+                        <span style={{ width: `${targetProgress}%` }} />
+                      </div>
+                      {hasUnsavedChanges ? <p className="nf-small" style={{ color: 'var(--nf-warning)', marginTop: 8 }}>有未保存修改</p> : null}
                     </div>
                   </div>
 
-                  {selectedChapterWorkflow ? (
-                    <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
-                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-slate-100">章节状态</p>
-                          <div className="mt-3 grid gap-2 text-xs text-slate-400 sm:grid-cols-2 lg:grid-cols-3">
-                            <span>来源：{selectedChapterWorkflow.sourceLabel}</span>
-                            <span>保存目的：{selectedChapterWorkflow.saveDestinationLabel}</span>
-                            <span>章节角色：{selectedChapterWorkflow.chapterRoleLabel}</span>
-                            <span>字数：{selectedChapterWorkflow.wordCount}</span>
-                            <span>AI 生成：{selectedChapterWorkflow.isAIGenerated ? '是' : '否'}</span>
-                            <span>候选版本：{selectedChapterWorkflow.isCandidate ? '是' : '否'}</span>
-                            <span>快照：{selectedChapterWorkflow.hasPreviousSnapshot ? '有 previous_snapshot' : '无'}</span>
-                            <span>归档：{selectedChapterWorkflow.isArchived ? '已归档' : '未归档'}</span>
-                          </div>
+                  <div className="nf-editor-inline-status">
+                    <span>最后更新：{selectedChapter.metadata.updated_at}</span>
+                    {selectedChapterMeta?.saveDestinationLabel ? <span>{selectedChapterMeta.saveDestinationLabel}</span> : null}
+                    {selectedChapterMeta?.roleLabel ? <span>{selectedChapterMeta.roleLabel}</span> : null}
+                  </div>
+
+                  <div className="nf-editor-body-area">
+                    <label className="nf-editor-label">正文</label>
+                    <textarea
+                      value={draftContent}
+                      onChange={(event) => setDraftContent(event.target.value)}
+                      className="nf-editor-textarea"
+                      placeholder="在这里继续写这一章..."
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="nf-editor-empty-selection">选择一个章节开始写作。</div>
+              )}
+            </section>
+
+            <aside className="nf-panel nf-editor-inspector">
+              <div className="nf-editor-panel-header">
+                <div>
+                  <h2 className="nf-panel-title">章节状态</h2>
+                  <p className="nf-panel-subtitle">{selectedChapterWorkflow ? selectedStatusLine : '暂无选中章节'}</p>
+                </div>
+              </div>
+
+              <div className="nf-editor-inspector-body">
+                {selectedChapterWorkflow ? (
+                  <>
+                    <details className="nf-editor-action-card" open>
+                      <summary>
+                        <span>资产信息</span>
+                        <ChevronDown className="h-4 w-4" />
+                      </summary>
+                      <div className="nf-editor-action-body">
+                        <div className="nf-editor-info-grid">
+                          <div className="nf-editor-info-row"><span>来源</span><strong>{selectedChapterWorkflow.sourceLabel}</strong></div>
+                          <div className="nf-editor-info-row"><span>保存目的</span><strong>{selectedChapterWorkflow.saveDestinationLabel}</strong></div>
+                          <div className="nf-editor-info-row"><span>章节角色</span><strong>{selectedChapterWorkflow.chapterRoleLabel}</strong></div>
+                          <div className="nf-editor-info-row"><span>字数</span><strong>{selectedChapterWorkflow.wordCount}</strong></div>
+                          <div className="nf-editor-info-row"><span>AI 生成</span><strong>{selectedChapterWorkflow.isAIGenerated ? '是' : '否'}</strong></div>
+                          <div className="nf-editor-info-row"><span>候选版本</span><strong>{selectedChapterWorkflow.isCandidate ? '是' : '否'}</strong></div>
+                          <div className="nf-editor-info-row"><span>快照</span><strong>{selectedChapterWorkflow.hasPreviousSnapshot ? '可恢复' : '无'}</strong></div>
+                          <div className="nf-editor-info-row"><span>归档</span><strong>{selectedChapterWorkflow.isArchived ? '已归档' : '未归档'}</strong></div>
                         </div>
-                        <div className="flex flex-wrap gap-2">
+                      </div>
+                    </details>
+
+                    <details className="nf-editor-action-card" open>
+                      <summary>
+                        <span>继续创作</span>
+                        <ChevronDown className="h-4 w-4" />
+                      </summary>
+                      <div className="nf-editor-action-body">
+                        <div className="nf-editor-action-buttons">
                           {(['continue', 'rewrite', 'polish'] as EditorChapterAction[]).map((action) => (
                             <button
                               key={action}
                               type="button"
                               onClick={() => handleChatHandoff(action)}
-                              className="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:bg-slate-800"
+                              className="nf-button"
                             >
-                              <MessageSquareText className="mr-1.5 h-3.5 w-3.5" />
-                              {action === 'continue' ? '继续写这一章' : action === 'rewrite' ? '改写这一章' : '润色这一章'}
+                              <MessageSquareText className="h-4 w-4" />
+                              {action === 'continue' ? '继续写' : action === 'rewrite' ? '改写' : '润色'}
                             </button>
                           ))}
-                          {selectedChapterWorkflow.hasPreviousSnapshot ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                void handleRestorePreviousSnapshot();
-                              }}
-                              disabled={isSaving}
-                              className="inline-flex items-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
-                              恢复上一版
-                            </button>
-                          ) : null}
                         </div>
                       </div>
+                    </details>
 
-                      {selectedChapterWorkflow.previousSnapshot ? (
-                        <details className="mt-4 rounded-xl border border-slate-800 bg-slate-900/70 p-3">
-                          <summary className="cursor-pointer text-xs font-semibold text-cyan-100">查看 previous_snapshot</summary>
-                          <div className="mt-3 space-y-2 text-xs text-slate-400">
-                            <p>旧标题：{selectedChapterWorkflow.previousSnapshot.oldTitle || '未记录'}</p>
-                            <p>旧更新时间：{selectedChapterWorkflow.previousSnapshot.oldUpdatedAt || '未记录'}</p>
-                            <p className="line-clamp-4 whitespace-pre-wrap">
-                              {selectedChapterWorkflow.previousSnapshot.oldContent || '没有旧正文摘要。'}
-                            </p>
-                            {selectedChapterWorkflow.previousSnapshot.oldExtractedData ? (
-                              <pre className="max-h-36 overflow-auto rounded-lg bg-slate-950 p-3 text-[11px] text-slate-500">
-                                {JSON.stringify(selectedChapterWorkflow.previousSnapshot.oldExtractedData, null, 2).slice(0, 1200)}
-                              </pre>
-                            ) : null}
-                          </div>
-                        </details>
-                      ) : null}
-                    </div>
-                  ) : null}
-
-                  {canPromoteSelectedChapter ? (
-                    <div className="rounded-2xl border border-violet-500/30 bg-violet-500/10 p-4">
-                      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                        <div>
-                          <p className="text-sm font-semibold text-violet-100">AI 草稿/候选版本</p>
-                          <p className="mt-1 text-xs text-violet-200/70">
-                            只调整章节保存位置和目录标签，不修改正文内容，AI 来源会继续保留。
-                          </p>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {[
-                            ['formal_body', '转为正式正文'],
-                            ['formal_prologue', '转为正式序章'],
-                            ['extra', '转为番外'],
-                            ['alternate_version', '保留为候选版本'],
-                          ].map(([destination, label]) => (
+                    {canPromoteSelectedChapter ? (
+                      <details className="nf-editor-action-card" open>
+                        <summary>
+                          <span>AI 候选管理</span>
+                          <ChevronDown className="h-4 w-4" />
+                        </summary>
+                        <div className="nf-editor-action-body">
+                          <p className="nf-small nf-muted">只调整目录标签和保存目的，不修改正文。</p>
+                          <div className="nf-editor-action-buttons">
+                            {[
+                              ['formal_body', '转为正式正文'],
+                              ['formal_prologue', '转为正式序章'],
+                              ['extra', '转为番外'],
+                              ['alternate_version', '保留候选'],
+                            ].map(([destination, label]) => (
+                              <button
+                                key={destination}
+                                type="button"
+                                onClick={() => {
+                                  void handlePromoteAIChapter(destination as PromotableChapterDestination);
+                                }}
+                                disabled={isSaving}
+                                className="nf-button nf-button-primary"
+                              >
+                                {label}
+                              </button>
+                            ))}
                             <button
-                              key={destination}
                               type="button"
                               onClick={() => {
-                                void handlePromoteAIChapter(destination as PromotableChapterDestination);
+                                void handleArchiveSelectedChapter();
                               }}
                               disabled={isSaving}
-                              className="rounded-xl border border-violet-400/30 bg-slate-950/70 px-3 py-2 text-xs font-semibold text-violet-100 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                              className="nf-button"
                             >
-                              {label}
+                              <Archive className="h-4 w-4" />
+                              归档候选
                             </button>
-                          ))}
+                          </div>
+                        </div>
+                      </details>
+                    ) : null}
+
+                    {selectedChapterWorkflow.previousSnapshot ? (
+                      <details className="nf-editor-action-card warning" open>
+                        <summary>
+                          <span>previous_snapshot</span>
+                          <ChevronDown className="h-4 w-4" />
+                        </summary>
+                        <div className="nf-editor-action-body">
+                          <div className="nf-editor-info-grid">
+                            <div className="nf-editor-info-row"><span>旧标题</span><strong>{selectedChapterWorkflow.previousSnapshot.oldTitle || '未记录'}</strong></div>
+                            <div className="nf-editor-info-row"><span>旧更新时间</span><strong>{selectedChapterWorkflow.previousSnapshot.oldUpdatedAt || '未记录'}</strong></div>
+                          </div>
+                          <div className="nf-editor-snapshot-preview">
+                            {selectedChapterWorkflow.previousSnapshot.oldContent || '没有旧正文摘要。'}
+                          </div>
+                          {selectedChapterWorkflow.previousSnapshot.oldExtractedData ? (
+                            <pre className="nf-editor-json-preview">
+                              {JSON.stringify(selectedChapterWorkflow.previousSnapshot.oldExtractedData, null, 2).slice(0, 1200)}
+                            </pre>
+                          ) : null}
                           <button
                             type="button"
                             onClick={() => {
-                              void handleArchiveSelectedChapter();
+                              void handleRestorePreviousSnapshot();
                             }}
                             disabled={isSaving}
-                            className="inline-flex items-center rounded-xl border border-slate-600 bg-slate-950/70 px-3 py-2 text-xs font-semibold text-slate-100 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                            className="nf-button nf-button-danger"
                           >
-                            <Archive className="mr-1.5 h-3.5 w-3.5" />
-                            归档候选
+                            <RotateCcw className="h-4 w-4" />
+                            恢复上一版
                           </button>
                         </div>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <div>
-                    <label className="mb-2 block text-sm font-medium text-slate-400">Body content</label>
-                    <textarea
-                      value={draftContent}
-                      onChange={(event) => setDraftContent(event.target.value)}
-                      className="min-h-[520px] w-full rounded-3xl border border-slate-700 bg-slate-950 px-5 py-4 font-mono text-sm leading-7 text-slate-100 outline-none transition focus:border-amber-400/50"
-                      placeholder="Continue writing this chapter here..."
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="flex min-h-[520px] items-center justify-center text-slate-500">Choose a chapter to start writing.</div>
-              )}
-            </section>
+                      </details>
+                    ) : null}
+                  </>
+                ) : (
+                  <div className="nf-panel nf-panel-pad nf-muted nf-small">选择章节后显示状态和版本操作。</div>
+                )}
+              </div>
+            </aside>
           </div>
         )}
       </div>
