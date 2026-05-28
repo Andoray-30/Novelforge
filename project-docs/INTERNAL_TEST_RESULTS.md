@@ -91,3 +91,9 @@ NovelForge is not yet ready for a complete internal-test signoff. The product sh
 On 2026-05-28 a minimal non-sensitive provider request was retried against the configured NewAPI-compatible endpoint using the server-side environment configuration. The result was still `401 Unauthorized`, with provider text indicating that the token state is unavailable.
 
 Because this check fails before any novel text is involved, the remaining full-chain smoke is blocked on provider credentials/model permission rather than on the latest UI changes.
+
+### Resumed Provider Check
+
+On 2026-05-29 the blocked Goal 19 run was resumed and the same minimal non-sensitive provider check was repeated before attempting another full UI smoke. The configured endpoint and model were still present, but the provider again returned `401 Unauthorized` with the message that the token state is unavailable.
+
+This is the first provider-auth recurrence after resuming the blocked goal. A full smoke was not rerun because it would necessarily fail at the writing/extraction model-call stage and would not produce the missing save/editor evidence.

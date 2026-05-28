@@ -5330,3 +5330,15 @@
   - `/ai-planning` 的共享页面标题同步标记为“AI 规划实验入口”，说明其已从普通内测路径隐藏。
 - 当前判断：
   - Goal 19 的 UI / 入口清理继续推进，但真实闭环验收仍卡在外部 provider 鉴权。
+
+### 2026-05-29 Goal 19 恢复后复验
+
+- 复核：
+  - 仓库仍为 `main...origin/main`，工作区干净。
+  - Goal 19 截图证据仍缺少 `save-card-real`、`editor-saved-candidate`、`mobile-workspace-smoke`，原因是写作链路尚未通过 provider。
+- provider 检查：
+  - 使用当前服务端 `.env` 的 NewAPI-compatible 配置做最小无敏感内容请求。
+  - 结果仍为 `401 Unauthorized`，provider 返回“该令牌状态不可用”。
+- 当前判断：
+  - 这是 Goal 19 从 blocked 状态恢复后的第 1 次同类阻塞复现。
+  - 暂不重跑完整 UI smoke，因为模型调用阶段必然失败，无法产生真实 save card / editor 候选证据。
