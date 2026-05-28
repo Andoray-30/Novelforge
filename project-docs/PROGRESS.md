@@ -5342,3 +5342,12 @@
 - 当前判断：
   - 这是 Goal 19 从 blocked 状态恢复后的第 1 次同类阻塞复现。
   - 暂不重跑完整 UI smoke，因为模型调用阶段必然失败，无法产生真实 save card / editor 候选证据。
+
+### 2026-05-29 Goal 19 恢复后第二次 provider 复验
+
+- provider 检查：
+  - 再次使用当前服务端 `.env` 的 NewAPI-compatible 配置做最小无敏感内容请求。
+  - 结果仍为 `401 Unauthorized`，provider 返回“该令牌状态不可用”。
+- 当前判断：
+  - 这是 Goal 19 从 blocked 状态恢复后的第 2 次同类阻塞复现。
+  - 完整 UI smoke 仍不应伪造通过；缺失的 `save-card-real`、`editor-saved-candidate`、`mobile-workspace-smoke` 需要在 provider 恢复后补齐。
