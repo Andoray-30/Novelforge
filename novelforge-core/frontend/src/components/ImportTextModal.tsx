@@ -221,7 +221,7 @@ export default function ImportTextModal({
               lineHeight: 1.6,
             }}
           >
-            当前未配置浏览器端 OpenAI Key，导入会使用服务端默认模型配置；如果服务端配置失效，任务会直接失败。
+            导入会使用服务端托管的模型配置；如果服务端 provider 凭据或模型权限失效，深度分析可能失败。
           </div>
         )}
 

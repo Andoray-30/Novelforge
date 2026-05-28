@@ -85,3 +85,9 @@ NovelForge is not yet ready for a complete internal-test signoff. The product sh
    - save card visible,
    - candidate saved,
    - editor opens the saved candidate.
+
+### Follow-up Provider Check
+
+On 2026-05-28 a minimal non-sensitive provider request was retried against the configured NewAPI-compatible endpoint using the server-side environment configuration. The result was still `401 Unauthorized`, with provider text indicating that the token state is unavailable.
+
+Because this check fails before any novel text is involved, the remaining full-chain smoke is blocked on provider credentials/model permission rather than on the latest UI changes.

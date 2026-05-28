@@ -35,8 +35,8 @@ function getRouteMeta(pathname: string): RouteMeta {
       };
     case '/ai-planning':
       return {
-        title: 'AI 规划',
-        description: '生成大纲、角色和世界观资产。',
+        title: 'AI 规划实验入口',
+        description: '实验功能已从普通内测路径隐藏，请优先使用导入、提取和主工作台写作闭环。',
       };
     case '/extract':
       return {
