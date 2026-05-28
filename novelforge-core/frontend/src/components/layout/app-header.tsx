@@ -6,8 +6,7 @@ import Link from 'next/link';
 import { BookOpen, FolderKanban, Library, LogOut, Menu, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/lib/hooks/use-app-store';
-import { contentService } from '@/lib/api/novelforge-api';
-import { authService } from '@/lib/api/novelforge-api';
+import { authService, contentService } from '@/lib/api/novelforge-api';
 import type { Novel } from '@/types';
 
 type ProjectOption = {
@@ -42,8 +41,8 @@ export function AppHeader({
   showMenuButton = true,
   actions,
 }: AppHeaderProps) {
-  const selectedNovelId = useAppStore((s) => s.selectedNovelId);
-  const setSelectedNovelId = useAppStore((s) => s.setSelectedNovelId);
+  const selectedNovelId = useAppStore((state) => state.selectedNovelId);
+  const setSelectedNovelId = useAppStore((state) => state.setSelectedNovelId);
   const [novels, setNovels] = React.useState<Novel[]>([]);
 
   React.useEffect(() => {
@@ -65,11 +64,9 @@ export function AppHeader({
     return () => {
       cancelled = true;
     };
-  }, [currentSessionId, setSelectedNovelId, selectedNovelId]);
+  }, [currentSessionId, selectedNovelId, setSelectedNovelId]);
 
-  const novelOptions = React.useMemo(() => {
-    return [{ id: '', title: '全部小说' }, ...novels];
-  }, [novels]);
+  const novelOptions = React.useMemo(() => [{ id: '', title: '全部小说' }, ...novels], [novels]);
 
   return (
     <header

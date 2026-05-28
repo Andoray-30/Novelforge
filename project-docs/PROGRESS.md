@@ -5232,3 +5232,58 @@
   - 角色详情页 `/characters/[id]` 仍未纳入本轮重构。
   - 真实长篇项目下，角色卡和世界观卡的信息密度还需要继续根据实际资产质量调参。
   - `analytics` 仍沿用原路径名，产品文案已改为项目状态总览；后续可考虑路由层增加 `/dashboard` 别名。
+
+## 2026-05-28 Goal 18C：支撑页面、导航语义与全站空 / 错 / Loading 状态收口
+
+- 目标：
+  - 把登录、设置、角色详情、全局导航和基础状态页纳入 `nf-*` 主题体系。
+  - 保留现有认证、设置和角色数据逻辑，只收敛用户可见语义与视觉一致性。
+- 已完成：
+  - 全局导航：
+    - 左侧导航统一为：工作台、导入、编辑器、角色、世界观、项目状态、设置。
+    - `/analytics` 文案改为“项目状态”，新增 `/dashboard -> /analytics` 路由别名，兼容旧链接。
+    - 顶部项目 / 小说切换文案清理为可读中文，项目状态标签去除乱码。
+  - 登录页：
+    - 重构为 light / dark / system 可用的单管理员登录页。
+    - 错误文案改为面向管理员的中文说明，不暴露技术堆栈。
+  - 设置页：
+    - 重新分组为运行状态、公开部署状态、Fast / Pro 模型映射、项目偏好、管理员 / 会话、高级 provider 诊断。
+    - 浏览器端 provider 覆盖被降级到高级诊断语义，默认强调服务端托管 AI Key。
+  - 角色详情页：
+    - 接入资料库风格和 light / dark token。
+    - 内容分为 Profile、Writing hooks、Relationships、Evidence、档案摘要和高级 extracted_data。
+    - 加载、错误、空关系状态都使用统一状态组件。
+  - 全站状态组件：
+    - 新增 `EmptyState`、`ErrorState`、`LoadingState`，供权限检查、角色详情、空资产和错误状态复用。
+- 截图验收：
+  - 截图目录：`project-docs/screenshots/goal18c/`
+  - 已生成并人工抽查：
+    - `login-light-desktop.png`
+    - `login-dark-desktop.png`
+    - `settings-light-desktop.png`
+    - `settings-dark-desktop.png`
+    - `settings-mobile.png`
+    - `character-detail-light-desktop.png`
+    - `character-detail-mobile.png`
+    - `empty-state-light.png`
+    - `error-state-dark.png`
+    - `dashboard-alias-or-nav-light.png`
+  - 截图说明：
+    - 使用临时 mock API 和本地 Chrome / CDP 生成，截图是真实 Next.js 页面渲染。
+    - 截图不是权限检查页、空白页或 loading 页。
+    - mock fixture 使用虚构项目数据，不包含样本文本、密钥或生产数据。
+    - Chrome 临时 profile 清理时出现一次 `CrashpadMetrics-active.pma` 文件锁警告，但截图完成且 3018 / 9228 端口已确认关闭。
+- 测试：
+  - `cmd /c npx tsc --noEmit --incremental false`
+    - passed
+  - `cmd /c npm test -- --run`
+    - `25 files / 104 tests passed`
+  - `cmd /c npm run build`
+    - passed
+- 当前判断：
+  - Goal 18C 已完成支撑页面和导航语义第一轮收口：登录、设置、角色详情、项目状态入口和基础状态页不再明显掉回旧 UI。
+  - 当前仍不是最终 UI 定稿，但已经具备内测前的一致产品壳。
+- 后续风险 / 待办：
+  - `/ai-planning` 等实验入口仍需要决定隐藏、降级或重构。
+  - 深层组件和少数旧错误文案仍建议在真实内测 smoke 中继续巡检。
+  - 下一轮应回到真实闭环验收：登录 -> 导入 -> 看质量 -> AI 写作 -> 保存 -> editor 查看。

@@ -2,13 +2,26 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Character, ContentItem, ImportanceLevel } from '@/types';
+import { ArrowLeft, BookOpen, Database, MessageSquareText, Quote, RefreshCw, UserRound } from 'lucide-react';
+import type { Character, ContentItem, ImportanceLevel } from '@/types';
 import { contentService } from '@/lib/api';
 import { useSessions } from '@/lib/hooks/use-sessions';
 import { useAppStore } from '@/lib/hooks/use-app-store';
+import { EmptyState, ErrorState, LoadingState } from '@/components/layout/support-state';
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function asString(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : [];
+}
 
 function parseCharacter(item: ContentItem): Character | null {
   const payload = item.extracted_data;
@@ -17,83 +30,55 @@ function parseCharacter(item: ContentItem): Character | null {
   }
 
   const data = payload as Record<string, unknown>;
-  const creativeSignals = data.creative_signals && typeof data.creative_signals === 'object'
-    ? data.creative_signals as Record<string, unknown>
-    : {};
-  const name = typeof data.name === 'string' && data.name.trim().length > 0
-    ? data.name
-    : item.metadata.title;
-
+  const creativeSignals = asRecord(data.creative_signals);
+  const name = asString(data.name).trim().length > 0 ? asString(data.name) : item.metadata.title;
+  const normalizedRole = asString(data.role).toLowerCase().split('.').pop();
   const importance =
     data.importance === 'critical' || data.importance === 'high' || data.importance === 'medium' || data.importance === 'low'
       ? (data.importance as ImportanceLevel)
-      : String(data.role || '').toLowerCase().split('.').pop() === 'protagonist'
+      : normalizedRole === 'protagonist'
         ? 'critical'
-        : String(data.role || '').toLowerCase().split('.').pop() === 'antagonist'
+        : normalizedRole === 'antagonist'
           ? 'high'
           : 'medium';
 
   return {
     id: item.metadata.id,
     name,
-    description: typeof data.description === 'string' ? data.description : item.content,
-    personality: typeof data.personality === 'string' ? data.personality : '',
-    background: typeof data.background === 'string' ? data.background : '',
-    role: typeof data.role === 'string' ? data.role.split('.').pop() || data.role : 'supporting',
+    description: asString(data.description) || item.content,
+    personality: asString(data.personality),
+    background: asString(data.background),
+    role: normalizedRole || 'supporting',
     age: typeof data.age === 'number' ? data.age : undefined,
-    gender: typeof data.gender === 'string' ? data.gender : undefined,
-    appearance: typeof data.appearance === 'string' ? data.appearance : undefined,
-    occupation: typeof data.occupation === 'string' ? data.occupation : undefined,
-    abilities: Array.isArray(data.abilities) ? data.abilities.filter((value): value is string => typeof value === 'string') : [],
-    tags: Array.isArray(data.tags) ? data.tags.filter((value): value is string => typeof value === 'string') : item.metadata.tags,
-    aliases: Array.isArray(data.aliases) ? data.aliases.filter((value): value is string => typeof value === 'string') : [],
-    goals: [
-      ...(Array.isArray(data.goals) ? data.goals.filter((value): value is string => typeof value === 'string') : []),
-      ...(Array.isArray(creativeSignals.desires) ? creativeSignals.desires.filter((value): value is string => typeof value === 'string') : []),
-    ],
-    desires: [
-      ...(Array.isArray(data.desires) ? data.desires.filter((value): value is string => typeof value === 'string') : []),
-      ...(Array.isArray(creativeSignals.desires) ? creativeSignals.desires.filter((value): value is string => typeof value === 'string') : []),
-    ],
-    fears: [
-      ...(Array.isArray(data.fears) ? data.fears.filter((value): value is string => typeof value === 'string') : []),
-      ...(Array.isArray(creativeSignals.wounds) ? creativeSignals.wounds.filter((value): value is string => typeof value === 'string') : []),
-    ],
-    wounds: [
-      ...(Array.isArray(data.wounds) ? data.wounds.filter((value): value is string => typeof value === 'string') : []),
-      ...(Array.isArray(creativeSignals.wounds) ? creativeSignals.wounds.filter((value): value is string => typeof value === 'string') : []),
-    ],
-    conflicts: Array.isArray(data.conflicts) ? data.conflicts.filter((value): value is string => typeof value === 'string') : [],
-    personality_tension: typeof data.personality_tension === 'string'
-      ? data.personality_tension
-      : Array.isArray(creativeSignals.emotional_states)
-        ? creativeSignals.emotional_states.find((value): value is string => typeof value === 'string')
-        : undefined,
-    character_arc: typeof data.character_arc === 'string' ? data.character_arc : undefined,
-    relationship_hooks: Array.isArray(data.relationship_hooks) ? data.relationship_hooks.filter((value): value is string => typeof value === 'string') : [],
-    entity_type: typeof data.entity_type === 'string' ? data.entity_type : undefined,
+    gender: asString(data.gender) || undefined,
+    appearance: asString(data.appearance) || undefined,
+    occupation: asString(data.occupation) || undefined,
+    abilities: asStringArray(data.abilities),
+    tags: asStringArray(data.tags).length > 0 ? asStringArray(data.tags) : item.metadata.tags,
+    aliases: asStringArray(data.aliases),
+    goals: [...asStringArray(data.goals), ...asStringArray(creativeSignals.desires)],
+    desires: [...asStringArray(data.desires), ...asStringArray(creativeSignals.desires)],
+    fears: [...asStringArray(data.fears), ...asStringArray(creativeSignals.fears), ...asStringArray(creativeSignals.wounds)],
+    wounds: [...asStringArray(data.wounds), ...asStringArray(creativeSignals.wounds)],
+    conflicts: asStringArray(data.conflicts),
+    personality_tension: asString(data.personality_tension) || asStringArray(creativeSignals.emotional_states)[0],
+    character_arc: asString(data.character_arc) || undefined,
+    relationship_hooks: asStringArray(data.relationship_hooks),
+    entity_type: asString(data.entity_type) || undefined,
     relationships: Array.isArray(data.relationships)
       ? data.relationships
           .filter((value): value is Record<string, unknown> => typeof value === 'object' && value !== null)
           .map((relationship) => ({
-            target_name: typeof relationship.target_name === 'string' ? relationship.target_name : '',
-            relationship: typeof relationship.relationship === 'string' ? relationship.relationship : 'other',
-            description: typeof relationship.description === 'string' ? relationship.description : '',
+            target_name: asString(relationship.target_name),
+            relationship: asString(relationship.relationship) || 'other',
+            description: asString(relationship.description),
           }))
           .filter((relationship) => relationship.target_name.length > 0)
       : [],
-    example_dialogues: Array.isArray(data.example_dialogues)
-      ? data.example_dialogues.filter((value): value is string => typeof value === 'string')
-      : [],
-    example_messages: Array.isArray(data.example_messages)
-      ? data.example_messages.filter((value): value is string => typeof value === 'string')
-      : [],
-    behavior_examples: Array.isArray(data.behavior_examples)
-      ? data.behavior_examples.filter((value): value is string => typeof value === 'string')
-      : [],
-    source_contexts: Array.isArray(data.source_contexts)
-      ? data.source_contexts.filter((value): value is string => typeof value === 'string')
-      : [],
+    example_dialogues: asStringArray(data.example_dialogues),
+    example_messages: asStringArray(data.example_messages),
+    behavior_examples: asStringArray(data.behavior_examples),
+    source_contexts: asStringArray(data.source_contexts),
     importance,
   };
 }
@@ -138,27 +123,51 @@ function labelGender(value?: string): string {
 
 function splitTraits(value: string): string[] {
   return value
-    .split(/[，、,；;。\n]/)
+    .split(/[，,、；;\n]/)
     .map((item) => item.trim())
     .filter(Boolean);
 }
 
 function DetailSection({
   title,
+  icon,
   children,
 }: {
   title: string;
+  icon?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
-    <div className="space-y-2">
-      <h3 className="text-sm font-semibold tracking-wide text-slate-300">{title}</h3>
-      <div className="text-sm leading-7 text-slate-200">{children}</div>
+    <section className="nf-panel nf-panel-pad">
+      <div className="nf-panel-title">
+        {icon}
+        {title}
+      </div>
+      <div className="mt-3 text-sm leading-7 text-[var(--nf-text-muted)]">{children}</div>
+    </section>
+  );
+}
+
+function Pill({ children }: { children: React.ReactNode }) {
+  return <span className="nf-chip">{children}</span>;
+}
+
+function SignalList({ items, empty }: { items: string[]; empty: string }) {
+  if (items.length === 0) {
+    return <p className="text-[var(--nf-text-subtle)]">{empty}</p>;
+  }
+  return (
+    <div className="grid gap-2">
+      {items.slice(0, 6).map((item, index) => (
+        <div key={`${item}-${index}`} className="rounded-xl border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] px-3 py-2 text-[var(--nf-text)]">
+          {item}
+        </div>
+      ))}
     </div>
   );
 }
 
-const CharacterDetailPage: React.FC = () => {
+export default function CharacterDetailPage() {
   const params = useParams();
   const router = useRouter();
   const { currentSession, currentSessionId } = useSessions();
@@ -166,8 +175,10 @@ const CharacterDetailPage: React.FC = () => {
   const id = typeof params.id === 'string' ? params.id : Array.isArray(params.id) ? params.id[0] : undefined;
 
   const [character, setCharacter] = useState<Character | null>(null);
+  const [contentItem, setContentItem] = useState<ContentItem | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => {
     const loadCharacter = async () => {
@@ -183,366 +194,231 @@ const CharacterDetailPage: React.FC = () => {
       try {
         const item = await contentService.getContentItem(id);
 
-        if (
-          selectedNovelId &&
-          item.metadata.parent_id &&
-          item.metadata.parent_id !== selectedNovelId
-        ) {
-          setError('该角色不属于当前小说，请先切换到对应小说后再查看。');
+        if (selectedNovelId && item.metadata.parent_id && item.metadata.parent_id !== selectedNovelId) {
+          setError('这个角色不属于当前小说。请先切换到对应小说后再查看。');
           setCharacter(null);
+          setContentItem(null);
           return;
         }
 
         const parsedCharacter = parseCharacter(item);
         if (!parsedCharacter) {
-          setError('该角色缺少结构化侧写数据，暂时无法展示详情。');
+          setError('这个角色缺少结构化档案数据，暂时无法展示详情。');
           setCharacter(null);
+          setContentItem(item);
           return;
         }
 
         setCharacter(parsedCharacter);
+        setContentItem(item);
       } catch (err) {
         setError(err instanceof Error ? err.message : '加载角色详情失败。');
         setCharacter(null);
+        setContentItem(null);
       } finally {
         setIsLoading(false);
       }
     };
 
     void loadCharacter();
-  }, [currentSessionId, id, selectedNovelId]);
+  }, [currentSessionId, id, refreshTick, selectedNovelId]);
 
   const personalityTraits = useMemo(
     () => splitTraits(character?.personality || ''),
-    [character?.personality]
+    [character?.personality],
+  );
+  const writingHooks = useMemo(
+    () => [
+      ...(character?.relationship_hooks ?? []),
+      ...(character?.personality_tension ? [character.personality_tension] : []),
+      ...(character?.character_arc ? [character.character_arc] : []),
+    ],
+    [character],
+  );
+  const evidence = useMemo(
+    () => [
+      ...(character?.source_contexts ?? []),
+      ...(character?.behavior_examples ?? []),
+      ...(character?.example_dialogues ?? []),
+      ...(character?.example_messages ?? []),
+    ],
+    [character],
   );
 
   if (isLoading) {
-    return (
-      <div className="min-h-full bg-slate-950 px-6 py-10 text-slate-100">
-        <div className="mx-auto max-w-6xl">
-          <Card className="border-slate-800 bg-slate-900/80">
-            <CardContent className="flex items-center justify-center py-16">
-              <div className="text-center">
-                <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-violet-500 border-t-transparent" />
-                <p className="text-sm text-slate-400">正在加载角色档案...</p>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    );
+    return <LoadingState title="正在加载角色档案..." description="正在从内容库读取结构化角色资料。" />;
   }
 
   if (error || !character) {
     return (
-      <div className="min-h-full bg-slate-950 px-6 py-10 text-slate-100">
-        <div className="mx-auto max-w-4xl">
-          <Card className="border-red-500/20 bg-red-500/10">
-            <CardContent className="space-y-4 py-12 text-center">
-              <h2 className="text-2xl font-semibold text-white">角色详情暂不可用</h2>
-              <p className="text-sm leading-7 text-red-100/80">
-                {error || `未找到 ID 为 ${id} 的角色资产。`}
-              </p>
-              <div>
-                <Button
-                  variant="outline"
-                  className="border-white/10 bg-white/5 text-slate-100 hover:bg-white/10"
-                  onClick={() => router.push('/characters')}
-                >
-                  返回角色列表
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+      <ErrorState
+        title="角色详情暂不可用"
+        description={error || `未找到 ID 为 ${id} 的角色资产。`}
+      >
+        <button type="button" className="nf-button nf-button-primary" onClick={() => router.push('/characters')}>
+          返回角色档案馆
+        </button>
+        <button type="button" className="nf-button" onClick={() => setRefreshTick((current) => current + 1)}>
+          刷新
+        </button>
+      </ErrorState>
     );
   }
 
+  const goalsAndDesires = [...(character.goals ?? []), ...(character.desires ?? [])];
+  const woundsAndFears = [...(character.wounds ?? []), ...(character.fears ?? []), ...(character.conflicts ?? [])];
+
   return (
-    <div className="min-h-full bg-slate-950 px-6 py-8 text-slate-100">
-      <div className="mx-auto max-w-7xl space-y-8">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <div className="nf-editor-shell">
+      <div className="nf-editor-page">
+        <section className="nf-editor-hero">
           <div>
-            <p className="mb-2 text-sm text-slate-400">
+            <div className="nf-kicker">Character Profile</div>
+            <h1 className="nf-editor-title">
+              <UserRound size={28} />
+              {character.name}
+            </h1>
+            <p className="nf-editor-subline">
+              {character.description || '这个角色还缺少可写摘要。'}
+            </p>
+            <p className="nf-editor-meta">
               当前项目：{currentSession?.title || '未选择项目'}
             </p>
-            <h1 className="text-4xl font-extrabold tracking-tight text-white">{character.name}</h1>
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-400">
-              查看当前项目中已保存的角色侧写、关系、对白与行为证据。该页面只读取结构化资产，不再依赖将 JSON 塞入正文后反解析。
-            </p>
           </div>
-
-          <div className="flex flex-wrap gap-3">
-            <Button
-              disabled
-              className="bg-violet-600/80 text-white hover:bg-violet-600 disabled:opacity-70"
-            >
-              编辑角色（即将接入真实编辑流）
-            </Button>
-            <Button
-              variant="outline"
-              className="border-white/10 bg-white/5 text-slate-100 hover:bg-white/10"
-              onClick={() => router.push('/characters')}
-            >
-              返回列表
-            </Button>
+          <div className="nf-editor-actions">
+            <button type="button" className="nf-button" onClick={() => router.push('/characters')}>
+              <ArrowLeft size={16} />
+              返回档案馆
+            </button>
+            <button type="button" className="nf-button" onClick={() => setRefreshTick((current) => current + 1)}>
+              <RefreshCw size={16} />
+              刷新
+            </button>
           </div>
-        </div>
+        </section>
 
-        <div className="grid gap-6 xl:grid-cols-[2fr,1fr]">
-          <Card className="border-slate-800 bg-slate-900/80">
-            <CardContent className="space-y-8 pt-6">
-              <div className="flex flex-col gap-6 md:flex-row md:items-start">
-                <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-slate-800 text-3xl font-black text-white">
-                  {character.name.charAt(0) || '角'}
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_330px]">
+          <main className="space-y-5">
+            <DetailSection title="Profile" icon={<UserRound size={16} />}>
+              <div className="flex flex-wrap gap-2">
+                <Pill>{labelRole(character.role)}</Pill>
+                <Pill>{labelImportance(character.importance)}</Pill>
+                <Pill>性别 {labelGender(character.gender)}</Pill>
+                {character.age ? <Pill>{character.age} 岁</Pill> : null}
+                {character.occupation ? <Pill>{character.occupation}</Pill> : null}
+              </div>
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <div>
+                  <div className="mb-2 font-semibold text-[var(--nf-text)]">欲望 / 目标</div>
+                  <SignalList items={goalsAndDesires} empty="暂无明确欲望或目标。" />
                 </div>
-                <div className="min-w-0 space-y-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="text-3xl font-bold text-white">{character.name}</h2>
-                    <Badge className="border-violet-400/20 bg-violet-500/15 text-violet-100">
-                      {labelImportance(character.importance)}
-                    </Badge>
-                    <Badge variant="outline" className="border-slate-700 text-slate-300">
-                      {labelRole(character.role)}
-                    </Badge>
-                  </div>
-                  <p className="text-sm leading-7 text-slate-300">
-                    {character.description || '暂无角色描述。'}
-                  </p>
+                <div>
+                  <div className="mb-2 font-semibold text-[var(--nf-text)]">伤痕 / 恐惧</div>
+                  <SignalList items={woundsAndFears} empty="暂无明确伤痕或恐惧。" />
                 </div>
               </div>
+            </DetailSection>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <DetailSection title="目标 / 欲望">
-                  {[...(character.goals ?? []), ...(character.desires ?? [])].length > 0 ? (
-                    <div className="space-y-2">
-                      {[...(character.goals ?? []), ...(character.desires ?? [])].slice(0, 4).map((item, index) => (
-                        <div key={`${item}-${index}`} className="rounded-xl border border-violet-400/20 bg-violet-400/10 px-3 py-2 text-violet-100">
-                          {item}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="text-slate-500">暂无明确目标。</span>
-                  )}
-                </DetailSection>
+            <DetailSection title="Writing hooks" icon={<SparkIcon />}>
+              <SignalList items={writingHooks} empty="暂无关系钩子、人物弧线或内在张力。" />
+            </DetailSection>
 
-                <DetailSection title="恐惧 / 冲突">
-                  {[...(character.fears ?? []), ...(character.wounds ?? []), ...(character.conflicts ?? [])].length > 0 ? (
-                    <div className="space-y-2">
-                      {[...(character.fears ?? []), ...(character.wounds ?? []), ...(character.conflicts ?? [])].slice(0, 4).map((item, index) => (
-                        <div key={`${item}-${index}`} className="rounded-xl border border-rose-400/20 bg-rose-400/10 px-3 py-2 text-rose-100">
-                          {item}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="text-slate-500">暂无明确冲突。</span>
-                  )}
-                </DetailSection>
-              </div>
-
-              {character.personality_tension || character.character_arc ? (
-                <DetailSection title="创作弧光">
-                  <div className="space-y-3">
-                    {character.personality_tension ? (
-                      <p className="rounded-2xl border border-blue-400/20 bg-blue-400/10 px-4 py-3 text-blue-100">
-                        {character.personality_tension}
-                      </p>
-                    ) : null}
-                    {character.character_arc ? (
-                      <p className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 text-emerald-100">
-                        {character.character_arc}
-                      </p>
-                    ) : null}
-                  </div>
-                </DetailSection>
-              ) : null}
-
-              <DetailSection title="角色背景">
-                {character.background || '暂无背景信息。'}
-              </DetailSection>
-
-              {character.appearance ? (
-                <DetailSection title="外貌与气质">
-                  {character.appearance}
-                </DetailSection>
-              ) : null}
-
-              <div className="grid gap-6 md:grid-cols-2">
-                <DetailSection title="能力">
-                  {character.abilities.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                      {character.abilities.map((ability, index) => (
-                        <Badge
-                          key={`${ability}-${index}`}
-                          variant="outline"
-                          className="border-cyan-500/20 bg-cyan-500/10 text-cyan-100"
-                        >
-                          {ability}
-                        </Badge>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="text-slate-500">暂无能力信息。</span>
-                  )}
-                </DetailSection>
-
-                <DetailSection title="标签">
-                  {character.tags.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                      {character.tags.map((tag, index) => (
-                        <Badge
-                          key={`${tag}-${index}`}
-                          className="border-amber-500/20 bg-amber-500/15 text-amber-100"
-                        >
-                          {tag}
-                        </Badge>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="text-slate-500">暂无标签。</span>
-                  )}
-                </DetailSection>
-              </div>
-
-              <DetailSection title="性格特征">
-                {personalityTraits.length > 0 ? (
-                  <div className="flex flex-wrap gap-2">
-                    {personalityTraits.map((trait, index) => (
-                      <Badge
-                        key={`${trait}-${index}`}
-                        variant="outline"
-                        className="border-slate-700 bg-slate-950/60 text-slate-200"
-                      >
-                        {trait}
-                      </Badge>
-                    ))}
-                  </div>
-                ) : (
-                  <span className="text-slate-500">暂无性格特征。</span>
-                )}
-              </DetailSection>
-
-              {character.behavior_examples && character.behavior_examples.length > 0 ? (
-                <DetailSection title="行为表现">
-                  <div className="space-y-3">
-                    {character.behavior_examples.map((example, index) => (
-                      <div
-                        key={`${example}-${index}`}
-                        className="rounded-2xl border border-slate-800 bg-slate-950/70 px-4 py-3"
-                      >
-                        {example}
+            <DetailSection title="Relationships" icon={<MessageSquareText size={16} />}>
+              {character.relationships.length > 0 ? (
+                <div className="grid gap-3 md:grid-cols-2">
+                  {character.relationships.map((relationship, index) => (
+                    <div key={`${relationship.target_name}-${index}`} className="rounded-2xl border border-[var(--nf-border)] bg-[var(--nf-surface)] p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="font-semibold text-[var(--nf-text)]">{relationship.target_name}</div>
+                        <Pill>{relationship.relationship || '未标注'}</Pill>
                       </div>
+                      <p className="mt-2 text-sm leading-6 text-[var(--nf-text-muted)]">
+                        {relationship.description || '暂无关系描述。'}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState
+                  title="暂无关系信息"
+                  description="这个角色还没有可写的人物关系。建议回到角色档案馆或工作台补强关系。"
+                  icon={<MessageSquareText size={34} />}
+                >
+                  <button type="button" className="nf-button" onClick={() => router.push('/characters')}>
+                    查看角色档案馆
+                  </button>
+                </EmptyState>
+              )}
+            </DetailSection>
+
+            <DetailSection title="Evidence" icon={<Quote size={16} />}>
+              <SignalList items={evidence} empty="暂无原文证据、示例对白或行为片段。" />
+            </DetailSection>
+          </main>
+
+          <aside className="space-y-4">
+            <DetailSection title="档案摘要" icon={<BookOpen size={16} />}>
+              <div className="space-y-3">
+                <div className="rounded-2xl border border-[var(--nf-border)] bg-[var(--nf-surface)] p-4">
+                  <div className="text-xs font-semibold text-[var(--nf-text-subtle)]">性格特征</div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {personalityTraits.length > 0 ? personalityTraits.map((trait, index) => (
+                      <Pill key={`${trait}-${index}`}>{trait}</Pill>
+                    )) : <span className="text-sm text-[var(--nf-text-muted)]">暂无性格特征。</span>}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-[var(--nf-border)] bg-[var(--nf-surface)] p-4">
+                  <div className="text-xs font-semibold text-[var(--nf-text-subtle)]">别名</div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {character.aliases && character.aliases.length > 0 ? character.aliases.map((alias) => (
+                      <Pill key={alias}>{alias}</Pill>
+                    )) : <span className="text-sm text-[var(--nf-text-muted)]">暂无别名。</span>}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-[var(--nf-border)] bg-[var(--nf-surface)] p-4">
+                  <div className="text-xs font-semibold text-[var(--nf-text-subtle)]">能力 / 标签</div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {[...character.abilities, ...character.tags].slice(0, 10).map((item) => (
+                      <Pill key={item}>{item}</Pill>
                     ))}
+                    {[...character.abilities, ...character.tags].length === 0 ? (
+                      <span className="text-sm text-[var(--nf-text-muted)]">暂无能力或标签。</span>
+                    ) : null}
                   </div>
-                </DetailSection>
-              ) : null}
-
-              {character.source_contexts && character.source_contexts.length > 0 ? (
-                <DetailSection title="原文证据">
-                  <div className="space-y-3">
-                    {character.source_contexts.map((context, index) => (
-                      <blockquote
-                        key={`${context}-${index}`}
-                        className="rounded-2xl border-l-4 border-violet-500/60 bg-slate-950/80 px-4 py-3 text-slate-300"
-                      >
-                        {context}
-                      </blockquote>
-                    ))}
-                  </div>
-                </DetailSection>
-              ) : null}
-            </CardContent>
-          </Card>
-
-          <div className="space-y-6">
-            <Card className="border-slate-800 bg-slate-900/80">
-              <CardHeader>
-                <CardTitle className="text-white">统计信息</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-slate-400">示例对白</span>
-                  <span className="font-semibold text-white">{character.example_dialogues?.length || 0}</span>
                 </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-slate-400">角色定位</span>
-                  <span className="font-semibold text-white">{labelRole(character.role)}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-slate-400">年龄</span>
-                  <span className="font-semibold text-white">{character.age ?? '未标注'}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-slate-400">性别</span>
-                  <span className="font-semibold text-white">{labelGender(character.gender)}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-slate-400">职业</span>
-                  <span className="font-semibold text-white">{character.occupation || '未标注'}</span>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-slate-800 bg-slate-900/80">
-              <CardHeader>
-                <CardTitle className="text-white">人际关系</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {character.relationships.length > 0 ? (
-                  <div className="space-y-4">
-                    {character.relationships.map((relationship, index) => (
-                      <div
-                        key={`${relationship.target_name}-${index}`}
-                        className="rounded-2xl border border-slate-800 bg-slate-950/70 px-4 py-4"
-                      >
-                        <div className="flex items-center justify-between gap-4">
-                          <span className="font-semibold text-white">{relationship.target_name}</span>
-                          <Badge variant="outline" className="border-emerald-500/20 text-emerald-100">
-                            {relationship.relationship || '未标注'}
-                          </Badge>
-                        </div>
-                        <p className="mt-2 text-sm leading-6 text-slate-400">
-                          {relationship.description || '暂无关系描述。'}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-slate-500">暂无关系信息。</p>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-
-        <Card className="border-slate-800 bg-slate-900/80">
-          <CardHeader>
-            <CardTitle className="text-white">示例对白</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {character.example_dialogues && character.example_dialogues.length > 0 ? (
-              <div className="space-y-4">
-                {character.example_dialogues.map((message, index) => (
-                  <div
-                    key={`${message}-${index}`}
-                    className="rounded-2xl border border-slate-800 bg-slate-950/80 px-4 py-4 text-sm leading-7 text-slate-200"
-                  >
-                    {message}
-                  </div>
-                ))}
               </div>
-            ) : (
-              <p className="text-sm text-slate-500">暂无示例对白。</p>
-            )}
-          </CardContent>
-        </Card>
+            </DetailSection>
+
+            <details className="nf-panel nf-panel-pad">
+              <summary className="cursor-pointer text-sm font-semibold text-[var(--nf-text)]">
+                高级详情：原始 extracted_data
+              </summary>
+              <pre className="mt-4 max-h-[420px] overflow-auto rounded-2xl border border-[var(--nf-border)] bg-[var(--nf-bg)] p-4 text-xs leading-5 text-[var(--nf-text-muted)]">
+                {JSON.stringify(contentItem?.extracted_data ?? {}, null, 2)}
+              </pre>
+            </details>
+
+            <div className="nf-panel nf-panel-pad">
+              <div className="nf-panel-title">
+                <Database size={16} />
+                下一步
+              </div>
+              <div className="mt-3 grid gap-2">
+                <button type="button" className="nf-button" onClick={() => router.push('/')}>
+                  带入 AI 写作
+                </button>
+                <button type="button" className="nf-button" onClick={() => router.push('/extract')}>
+                  补强提取质量
+                </button>
+              </div>
+            </div>
+          </aside>
+        </div>
       </div>
     </div>
   );
-};
+}
 
-export default CharacterDetailPage;
+function SparkIcon() {
+  return <span className="text-[var(--nf-accent)]">✦</span>;
+}

@@ -3,15 +3,16 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { cn } from '@/lib/utils';
 import {
   FileSearch,
   FileText,
   Globe,
   Home,
+  LayoutDashboard,
   Settings,
   Users,
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 export interface NavigationItem {
   title: string;
@@ -22,28 +23,16 @@ export interface NavigationItem {
 
 const navigationItems: NavigationItem[] = [
   {
-    title: '主页',
+    title: '工作台',
     href: '/',
     icon: Home,
-    description: '工作区首页与项目仪表盘。',
+    description: '聊天、保存资产并管理当前项目。',
   },
   {
-    title: '提取',
+    title: '导入',
     href: '/extract',
     icon: FileSearch,
     description: '导入文本并提取统一资产。',
-  },
-  {
-    title: '角色',
-    href: '/characters',
-    icon: Users,
-    description: '查看和管理角色资产。',
-  },
-  {
-    title: '世界',
-    href: '/world',
-    icon: Globe,
-    description: '查看世界观与时间线资产。',
   },
   {
     title: '编辑器',
@@ -52,10 +41,28 @@ const navigationItems: NavigationItem[] = [
     description: '打开并编辑章节资产。',
   },
   {
+    title: '角色',
+    href: '/characters',
+    icon: Users,
+    description: '查看和管理角色资料库。',
+  },
+  {
+    title: '世界观',
+    href: '/world',
+    icon: Globe,
+    description: '查看世界观、时间线和设定资料。',
+  },
+  {
+    title: '项目状态',
+    href: '/analytics',
+    icon: LayoutDashboard,
+    description: '查看项目质量、资产和下一步建议。',
+  },
+  {
     title: '设置',
     href: '/settings',
     icon: Settings,
-    description: '管理模型与项目偏好。',
+    description: '管理部署状态和项目偏好。',
   },
 ];
 
@@ -79,6 +86,7 @@ export function AppSidebar({
   const isActiveRoute = React.useCallback(
     (href: string) => {
       if (href === '/') return pathname === '/';
+      if (href === '/analytics') return pathname === '/analytics' || pathname === '/dashboard';
       return pathname === href || pathname?.startsWith(`${href}/`);
     },
     [pathname],
@@ -140,7 +148,7 @@ export function AppSidebar({
 
       {!isCollapsed ? (
         <div className="border-t border-[var(--nf-border)] px-4 py-3 text-xs text-[var(--nf-text-subtle)]">
-          导航、项目上下文和后台任务集中在一个界面中。
+          导航、项目上下文和后台任务集中在同一个界面中。
         </div>
       ) : null}
     </aside>

@@ -4,6 +4,7 @@ import * as React from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { AppSidebar } from '@/components/layout/app-sidebar';
 import { MainLayout } from '@/components/layout/main-layout';
+import { LoadingState } from '@/components/layout/support-state';
 import { ThemeToggle } from '@/components/layout/theme-toggle';
 import { useSessions } from '@/lib/hooks/use-sessions';
 import { authService, contentService } from '@/lib/api/novelforge-api';
@@ -22,14 +23,14 @@ function getRouteMeta(pathname: string): RouteMeta {
   if (pathname.startsWith('/characters/')) {
     return {
       title: '角色详情',
-      description: '查看当前项目中已保存的角色资产。',
+      description: '查看当前项目中已保存的角色档案。',
     };
   }
 
   switch (pathname) {
     case '/':
       return {
-        title: '创作工作区',
+        title: '工作台',
         description: '聊天、保存资产，并管理当前项目。',
       };
     case '/ai-planning':
@@ -39,7 +40,7 @@ function getRouteMeta(pathname: string): RouteMeta {
       };
     case '/extract':
       return {
-        title: '导入与提取',
+        title: '导入',
         description: '把原始文本转成统一项目资产。',
       };
     case '/characters':
@@ -58,14 +59,15 @@ function getRouteMeta(pathname: string): RouteMeta {
         description: '打开并续写章节资产。',
       };
     case '/analytics':
+    case '/dashboard':
       return {
-        title: '分析',
-        description: '查看真实项目指标与任务状态。',
+        title: '项目状态',
+        description: '查看项目质量、资产和下一步建议。',
       };
     case '/settings':
       return {
         title: '设置',
-        description: '管理模型托管与项目偏好。',
+        description: '管理部署状态、模型映射和项目偏好。',
       };
     default:
       return {
@@ -232,19 +234,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [currentSessionId, projectAssetStats, sessions]);
 
   const handleCreateProject = React.useCallback(async () => {
-    await createSession('新建项目');
+    await createSession('新创作项目');
   }, [createSession]);
 
   if (pathname === '/login') return <>{children}</>;
 
   if (!authChecked || !isAuthenticated) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[var(--nf-bg)] text-[var(--nf-text)]">
-        <div className="rounded-2xl border border-[var(--nf-border)] bg-[var(--nf-surface)] px-5 py-4 text-sm shadow-[var(--nf-shadow)]">
-          正在检查访问权限...
-        </div>
-      </div>
-    );
+    return <LoadingState title="正在检查访问权限..." description="如果长时间停留在这里，请刷新页面或重新登录。" />;
   }
 
   return (
