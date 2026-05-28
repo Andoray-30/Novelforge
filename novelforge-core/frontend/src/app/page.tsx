@@ -2157,7 +2157,19 @@ function isTransientProviderError(error: unknown): boolean {
   return /HTTP\s+(500|502|503|504)|timeout|timed?\s*out|socket|ECONNRESET|network|fetch failed/i.test(message);
 }
 
+function isProviderAuthError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /HTTP\s*401|401\s+Unauthorized|Unauthorized|invalid api key|incorrect api key|authentication|鉴权|认证/i.test(message);
+}
+
 function formatChatErrorMessage(error: unknown): { message: string; transient: boolean } {
+  if (isProviderAuthError(error)) {
+    return {
+      transient: false,
+      message: 'AI provider 鉴权失败，请检查服务端 OPENAI_API_KEY / OPENAI_BASE_URL / OPENAI_MODEL 配置后重试。系统没有保存本次失败输出。',
+    };
+  }
+
   const transient = isTransientProviderError(error);
   if (transient) {
     return {

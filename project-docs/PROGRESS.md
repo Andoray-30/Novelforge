@@ -5287,3 +5287,32 @@
   - `/ai-planning` 等实验入口仍需要决定隐藏、降级或重构。
   - 深层组件和少数旧错误文案仍建议在真实内测 smoke 中继续巡检。
   - 下一轮应回到真实闭环验收：登录 -> 导入 -> 看质量 -> AI 写作 -> 保存 -> editor 查看。
+
+## 2026-05-28 Goal 19：真实内测闭环验收第一轮
+
+- 目标：
+  - 不继续堆新功能，验证真实内测路径：打开项目 / 导入 -> 提取资产 -> 查看质量 -> AI 写作 -> 保存候选 -> editor 查看。
+  - 同时清理最影响内测可用感的深层入口和 provider 错误提示。
+- 已完成：
+  - 新增 `project-docs/INTERNAL_TEST_RESULTS.md`，记录真实 smoke 环境、输入来源摘要、截图、提取结果、失败点和下一步要求。
+  - 新增真实渲染截图目录：`project-docs/screenshots/goal19/`。
+  - 工作台聊天错误处理新增 provider 鉴权失败识别，用户会看到中文配置提示，不再只看到原始 401 或长时间等待。
+  - `/ai-planning` 降级为实验入口说明页，避免内测用户误入未闭环的旧规划工具。
+- 真实 smoke 结果：
+  - 本地服务启动并通过浏览器自动化完成导入和主要页面巡检。
+  - 导入任务完成，但深度分析状态为 `failed`。
+  - 资产计数：chapters=1、characters=0、relationships=0、timeline=0、world=1。
+  - 外部 provider 返回 `401 Unauthorized`，因此写作、保存卡片和 editor 候选查看没有完成。
+- 截图：
+  - `extract-diagnostics-real.png`
+  - `dashboard-real-quality.png`
+  - `characters-real.png`
+  - `world-real.png`
+  - `workspace-after-import.png`
+- 当前判断：
+  - Goal 19 不是通过状态，而是一次有价值的真实阻塞定位。
+  - 当前不能声明内测闭环可用；必须先修复服务端 provider 凭据 / 模型权限，再从干净项目复跑。
+- 后续风险 / 待办：
+  - 配置有效服务端 provider 后，重新验证 AI 写作、save_asset 卡片、候选保存和 editor 定位。
+  - `.env` 需要具备部署式管理员登录配置，避免真实验收跳过登录。
+  - 真实长篇导入仍需复查角色、关系、时间线和世界观质量，不能只以页面可打开作为通过标准。

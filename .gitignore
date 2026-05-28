@@ -101,6 +101,7 @@ Desktop.ini
 .cursor/
 .copilot/
 .qwen/
+.codex-tmp/
 
 # -----------------------------------------------------------
 # Node.js（前端 node_modules 由 novelforge-core/.gitignore 处理，
