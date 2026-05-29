@@ -1,5 +1,76 @@
 # NovelForge Internal Test Results
 
+## 2026-05-29 Goal 20 Long Import And Readiness Smoke
+
+Status: passed for configuration/readiness evidence, with extraction quality correctly downgraded to `low_quality`.
+
+Verified chain:
+
+`local provider config -> long import smoke -> extraction diagnostics -> dashboard quality semantics -> optional AI prologue candidate save card`
+
+### Environment
+
+- Workspace: local NovelForge development environment.
+- Backend: local FastAPI service on `127.0.0.1:8001`.
+- Frontend: local Next.js service on `127.0.0.1:3010`.
+- Browser verification: Playwright fallback after the in-app browser runtime failed to start.
+- Provider: NewAPI-compatible server-side configuration.
+- Base URL: `https://fast-newapi.sync-api.xyz:8848/v1`.
+- Model path: Fast/Pro mapping from server `.env`.
+- Auth note: local `.env` still does not define persistent `NOVELFORGE_ADMIN_PASSWORD` / `NOVELFORGE_SESSION_SECRET`. Goal 20 adds startup and settings-page warnings for this.
+
+### Long Text Source
+
+- Source: local ignored long sample.
+- Original text is not stored in this document and is not committed.
+- Script-created input copies and raw smoke JSON are treated as local artifacts only.
+
+### Import Result
+
+- Session id: `smoke_import_20260529_144209`.
+- Analysis status: `low_quality`.
+- Chapters: 10.
+- Characters: 15.
+- Relationships: 15.
+- Timeline events: 30.
+- World assets: 1.
+- Failed chapters: 0.
+- Unresolved relationship endpoints: 1.
+- Timeline mismatch events: 0.
+- Quality issues:
+  - `关系端点无法映射到角色池：帝`
+
+### Quality Interpretation
+
+- Chapter detection succeeded and long chapters were split into numbered fragments.
+- Counts meet the internal minimum for long-form asset coverage.
+- The relationship graph still has a closure issue, so the system correctly reports `low_quality` instead of claiming the import is fully completed for writing readiness.
+- Dashboard copy now explains that extraction success means assets entered the content library, while writing readiness is a stricter quality signal.
+- No obvious mojibake appeared in the UTF-8 parsed result or rendered pages.
+
+### Optional Writing Result
+
+- A real provider call generated a long-project prologue candidate.
+- The assistant response included a `save_asset` candidate chapter suggestion.
+- The UI rendered the save card; this run did not promote the candidate to a formal chapter.
+
+### Screenshots
+
+Captured screenshots are stored in `project-docs/screenshots/goal20/`:
+
+- `settings-auth-config-warning.png`
+- `dashboard-quality-explained.png`
+- `long-project-quality.png`
+- `long-import-diagnostics.png`
+- `extract-completed-next-step.png`
+- `optional-long-save-card.png`
+
+### Remaining Risks
+
+- Relationship endpoint normalization still needs a follow-up so short aliases like `帝` close back to the canonical role.
+- Project quality currently flags relationship usability as insufficient even when raw relationship count is high; this is conservative, but the next pass should make the exact missing relationship signals easier to act on.
+- Persistent admin auth values still need to be set in the real internal-test environment.
+
 ## 2026-05-29 Goal 19 Real Smoke Rerun
 
 Status: passed for the core product chain, with deployment-configuration warning.

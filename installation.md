@@ -36,28 +36,41 @@ pip install -e ".[dev]"
 
 Create `novelforge-core/.env` and fill in your provider settings.
 You can start from `novelforge-core/.env.example`.
+Do not commit `.env` or real provider keys.
 
-Minimal example:
+Local development example:
 
 ```env
-OPENAI_API_KEY=your-api-key
-OPENAI_BASE_URL=https://newapi.sync-api.xyz/v1
-OPENAI_MODEL=Pro/deepseek-ai/DeepSeek-V3.2
+OPENAI_API_KEY=replace-with-your-server-key
+OPENAI_BASE_URL=https://fast-newapi.sync-api.xyz:8848/v1
+OPENAI_MODEL=gemini-3.5-flash
+NOVELFORGE_FAST_MODEL=gemini-3.5-flash
+NOVELFORGE_PRO_MODEL=gemini-3.1-pro-preview
+FRONTEND_ORIGIN=http://localhost:3010
+NOVELFORGE_DATA_DIR=./data
 STORAGE_TYPE=content_db
 USE_CONTENT_DATABASE=true
 ```
 
-Public deployment also requires:
+Internal/public deployment also requires a single-admin password and session secret:
 
 ```env
 NOVELFORGE_PUBLIC_DEPLOYMENT=true
-NOVELFORGE_ADMIN_PASSWORD=change-this-password
+NOVELFORGE_AUTH_REQUIRED=true
+NOVELFORGE_ADMIN_PASSWORD=replace-with-a-strong-password
 NOVELFORGE_SESSION_SECRET=replace-with-a-long-random-string
 FRONTEND_ORIGIN=https://your-frontend-domain.example
 NOVELFORGE_ALLOW_RUNTIME_OPENAI_OVERRIDES=false
 ```
 
+Generate a session secret locally:
+
+```powershell
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
 In public deployment, the browser-side API key override is disabled and all protected APIs require the admin login cookie.
+The backend also performs startup checks for `NOVELFORGE_ADMIN_PASSWORD`, `NOVELFORGE_SESSION_SECRET`, `OPENAI_API_KEY`, `FRONTEND_ORIGIN`, `NOVELFORGE_DATA_DIR`, and content database storage.
 
 Data should be persistent. Set `NOVELFORGE_DATA_DIR`, `CONTENT_DATABASE_PATH`, `DATABASE_PATH`, and `FILE_STORAGE_DIR` to a directory that survives restarts. Back up the whole data directory before upgrades.
 

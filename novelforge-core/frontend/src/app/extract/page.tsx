@@ -156,9 +156,11 @@ function buildSummaryFromTaskResult(result: unknown, sessionId: string | null): 
 }
 
 function getAnalysisStatusCopy(result: NovelImportTaskResult | null): string {
-  if (!result?.analysis_status) return '提取完成，结构化资产已写入当前项目。';
-  if (result.analysis_status === 'completed') return '章节已导入，结构化资产已完成。';
-  return '导入已完成，但部分深度分析结果需要复核。';
+  if (!result?.analysis_status) return '提取完成：结构化资产已写入当前项目，创作就绪需要继续看质量诊断。';
+  if (result.analysis_status === 'completed') {
+    return '提取完成：章节与结构化资产已写入内容库。若项目质量仍显示需要修复，说明资产已生成但还不足以稳定支撑高质量写作。';
+  }
+  return '导入已完成，但部分深度分析结果需要复核。可以开始写作，但建议先处理角色、关系或世界观诊断。';
 }
 
 function getStageStatusLabel(status: NovelImportTaskResult['analysis_stage_results'] extends infer T
@@ -1105,7 +1107,7 @@ export default function ExtractPage() {
               <div className="nf-kicker">Step 3</div>
               <h2 className="mt-1 text-lg font-extrabold text-[var(--nf-text)]">质量诊断</h2>
               <p className="mt-2 text-sm leading-6 text-[var(--nf-text-muted)]">
-                摘要默认展示，候选数、端点、失败章节等详细日志折叠。低质量项会给出可执行修复入口。
+                “提取完成”表示资产已入库；“创作就绪”表示这些资产足够支撑更稳定的 AI 写作。低质量项会给出可执行修复入口。
               </p>
             </div>
             <span className="inline-flex min-h-10 items-center rounded-xl border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] px-3 text-xs font-bold text-[var(--nf-text-muted)]">
@@ -1278,7 +1280,7 @@ export default function ExtractPage() {
               <div className="nf-kicker">Step 4</div>
               <h2 className="mt-1 text-lg font-extrabold text-[var(--nf-text)]">下一步行动</h2>
               <p className="mt-2 text-sm leading-6 text-[var(--nf-text-muted)]">
-                导入完成后，直接进入写作、章节整理或资产复核。低质量项目不会阻止写作，但会提醒你先修复关键资产。
+                导入完成后可以直接进入写作、章节整理或资产复核。若质量仍需修复，建议先补强关系、角色或世界观以提升生成文本的情绪张力。
               </p>
             </div>
             <ArrowRight className="hidden h-5 w-5 text-[var(--nf-accent)] md:block" />

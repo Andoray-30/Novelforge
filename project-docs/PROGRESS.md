@@ -5384,3 +5384,38 @@
 - 当前判断：
   - Goal 19 的核心真实闭环已经跑通：导入 -> 提取 -> 质量诊断 -> AI 写作 -> save_asset -> 用户确认保存 -> editor 候选管理。
   - 仍保留两个风险：本地 `.env` 尚未配置持久管理员密码 / session secret；项目状态页的“创作就绪”质量提示比导入质量闸门更严格，后续需要解释或统一语义。
+
+### 2026-05-29 Goal 20 内测发布准备与质量语义收口
+
+- 配置收口：
+  - 本地 provider 已切换到新的 NewAPI-compatible base URL，`/v1/models` 通过 Node 客户端返回 200。
+  - `.env.example` 与安装文档补齐内测/公开部署必需项：管理员密码、session secret、服务端 AI Key、Fast/Pro 模型映射、前端来源和持久数据目录。
+  - 后端启动时在本地开发模式下也会用中文 warning 提醒缺少 `NOVELFORGE_ADMIN_PASSWORD` / `NOVELFORGE_SESSION_SECRET`；公开部署模式仍保持严格失败。
+  - `/api/auth/me` 只暴露安全布尔状态，设置页能显示内测配置缺项，不泄露密钥。
+- 质量语义：
+  - Dashboard / Extract 文案明确区分：
+    - “提取完成”= 资产已生成并写入内容库。
+    - “创作就绪”= 资产质量足以支撑更稳定的 AI 写作。
+  - 当导入完成但项目质量仍为 `needs_repair` / `insufficient` 时，页面会解释可以开始写作，但建议先修复关系、角色或世界观。
+  - 未放宽任何质量 gate。
+- 长篇复验：
+  - 使用本地未提交长篇样本，原文不提交。
+  - `session_id=smoke_import_20260529_144209`
+  - `analysis_status=low_quality`
+  - `chapters=10`, `characters=15`, `relationships=15`, `timeline=30`, `world=1`
+  - `failed_chapters=0`, `timeline_mismatch_events=0`
+  - 质量问题：1 个关系端点未映射到角色池（`帝`）。
+  - 判断：长篇提取数量达到内部可用下限，但关系闭环仍有缺口；系统正确降级为 `low_quality`，没有误报 completed。
+- 写作复验：
+  - 基于长篇复验项目发起 800-1500 字序章候选请求，provider 成功返回。
+  - 对话中产生 save_asset 候选章节保存建议；本轮不转正式章节。
+- 截图：
+  - `project-docs/screenshots/goal20/settings-auth-config-warning.png`
+  - `project-docs/screenshots/goal20/dashboard-quality-explained.png`
+  - `project-docs/screenshots/goal20/long-project-quality.png`
+  - `project-docs/screenshots/goal20/long-import-diagnostics.png`
+  - `project-docs/screenshots/goal20/extract-completed-next-step.png`
+  - `project-docs/screenshots/goal20/optional-long-save-card.png`
+- 当前判断：
+  - NovelForge 已具备稳定自用 / 小范围内测的基础闭环，但长篇质量仍不是“完全交付级”。
+  - 下一轮应优先修复关系端点归一和 project quality 的 relationship usability 判定，使“长篇低质量原因”更少、更可解释。

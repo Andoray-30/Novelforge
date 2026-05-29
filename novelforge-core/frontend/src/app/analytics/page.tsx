@@ -102,6 +102,19 @@ function qualityStatusLabel(status: string): string {
   return '未知';
 }
 
+function qualitySemanticCopy(status: string): string {
+  if (status === 'ready') {
+    return '提取完成代表资产已写入内容库；当前资产质量也达到创作就绪，可以进入 AI 写作、生成候选并确认写回。';
+  }
+  if (status === 'needs_repair') {
+    return '提取完成代表资产已写入内容库；当前可以开始写作，但建议先修复关系、角色或世界观以提升序章质量。';
+  }
+  if (status === 'insufficient') {
+    return '提取完成不等于创作就绪；当前缺少关键资产，AI 仍可聊天，但不建议直接生成正式候选。';
+  }
+  return '项目还没有足够资产可判断。先导入小说或生成基础章节，再查看创作就绪状态。';
+}
+
 function formatAssetType(type: string): string {
   const labels: Record<string, string> = {
     outline: '大纲',
@@ -223,15 +236,24 @@ export default function AnalyticsPage() {
       });
     }
     if (suggestions.length === 0) {
-      suggestions.push({
-        title: '进入 AI 写作闭环',
-        detail: '当前资产已经足够开始生成候选序章，再由用户确认写回。',
-        action: '开始写作',
-        onClick: () => router.push('/'),
-      });
+      if (projectQualitySummary.overall_status === 'ready') {
+        suggestions.push({
+          title: '进入 AI 写作闭环',
+          detail: '当前资产已经足够开始生成候选序章，再由用户确认写回。',
+          action: '开始写作',
+          onClick: () => router.push('/'),
+        });
+      } else {
+        suggestions.push({
+          title: '可以写作，建议先修复质量',
+          detail: '提取完成说明资产已入库；创作就绪要求更高，薄弱关系、低信息角色和弱世界观会影响文本张力。',
+          action: '查看诊断',
+          onClick: () => router.push('/extract'),
+        });
+      }
     }
     return suggestions.slice(0, 4);
-  }, [chapters.length, characters.length, relationships.length, router, worlds.length]);
+  }, [chapters.length, characters.length, projectQualitySummary.overall_status, relationships.length, router, worlds.length]);
 
   const openRecentAsset = (item: ContentItem) => {
     const result = resolveContentItemReopen(item, selectedNovelId);
@@ -358,7 +380,7 @@ export default function AnalyticsPage() {
                   <div className="nf-kicker">Quality</div>
                   <h2 className="text-2xl font-semibold text-[var(--nf-text)]">项目质量状态</h2>
                   <p className="mt-2 text-sm leading-7 text-[var(--nf-text-muted)]">
-                    {qualityStatusLabel(projectQualitySummary.overall_status)}。质量状态用于提示当前资产是否足够支撑 AI 写作，不会阻止用户继续创作。
+                    {qualitySemanticCopy(projectQualitySummary.overall_status)}
                   </p>
                 </div>
                 <span className={`rounded-full border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] px-3 py-1 text-xs font-semibold ${statusTone(projectQualitySummary.overall_status)}`}>

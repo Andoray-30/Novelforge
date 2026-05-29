@@ -329,6 +329,14 @@ export const authService = {
     mode?: string | null;
     public_deployment: boolean;
     runtime_openai_overrides_allowed: boolean;
+    admin_password_configured: boolean;
+    session_secret_configured: boolean;
+    provider_key_configured: boolean;
+    frontend_origin_configured: boolean;
+    data_dir_configured: boolean;
+    data_dir?: string;
+    storage_type?: string | null;
+    content_database_enabled: boolean;
   }> => novelforgeClient.get('/api/auth/me'),
 };
 

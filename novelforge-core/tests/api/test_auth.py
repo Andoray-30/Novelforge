@@ -24,6 +24,8 @@ def test_protected_api_requires_admin_session_when_auth_enabled(monkeypatch):
     me = client.get("/api/auth/me")
     assert me.status_code == 200
     assert me.json()["authenticated"] is True
+    assert me.json()["admin_password_configured"] is True
+    assert me.json()["session_secret_configured"] is True
 
 
 def test_public_deployment_config_validation_requires_secure_settings(monkeypatch):
@@ -47,6 +49,28 @@ def test_public_deployment_config_validation_requires_secure_settings(monkeypatc
     assert "OPENAI_API_KEY" in message
     assert "FRONTEND_ORIGIN=https://your-frontend-domain" in message
     assert "STORAGE_TYPE=content_db" in message
+
+
+def test_auth_me_exposes_safe_deployment_readiness(monkeypatch):
+    monkeypatch.setattr(api_module.config, "auth_required", False, raising=False)
+    monkeypatch.setattr(api_module.config, "admin_password", None, raising=False)
+    monkeypatch.setattr(api_module.config, "session_secret", None, raising=False)
+    monkeypatch.setattr(api_module.config, "api_key", "provider-key", raising=False)
+    monkeypatch.setattr(api_module.config, "data_dir", "./data", raising=False)
+    monkeypatch.setattr(api_module.config, "storage_type", "content_db", raising=False)
+    monkeypatch.setattr(api_module.config, "use_content_database", True, raising=False)
+
+    client = TestClient(api_module.app)
+    response = client.get("/api/auth/me")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["authenticated"] is True
+    assert payload["admin_password_configured"] is False
+    assert payload["session_secret_configured"] is False
+    assert payload["provider_key_configured"] is True
+    assert payload["storage_type"] == "content_db"
+    assert payload["content_database_enabled"] is True
 
 
 def test_ai_mode_is_allowed_when_runtime_overrides_are_disabled(monkeypatch):

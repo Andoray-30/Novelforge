@@ -18,6 +18,7 @@ import html
 import secrets
 import time
 import asyncio
+import logging
 from enum import Enum
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -97,6 +98,7 @@ ai_planning_service = get_ai_planning_service(ai_service)
 SESSION_COOKIE_NAME = "novelforge_session"
 SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 CHAT_STORAGE_TYPE = "file"
+logger = logging.getLogger(__name__)
 
 
 class AuthLoginRequest(BaseModel):
@@ -199,6 +201,40 @@ def _validate_public_deployment_config() -> None:
             probe.unlink(missing_ok=True)
         except OSError as exc:
             raise RuntimeError(f"公开部署数据目录不可写: {label} -> {target}") from exc
+
+
+def _auth_config_readiness() -> Dict[str, Any]:
+    """Return safe deployment readiness flags without exposing secret values."""
+    data_dir = Path(getattr(config, "data_dir", "./data"))
+    return {
+        "admin_password_configured": bool(getattr(config, "admin_password", None)),
+        "session_secret_configured": bool(getattr(config, "session_secret", None)),
+        "provider_key_configured": bool(getattr(config, "api_key", None)),
+        "frontend_origin_configured": bool((getattr(config, "frontend_origin", "") or "").strip()),
+        "data_dir": str(data_dir),
+        "data_dir_configured": bool(getattr(config, "data_dir", None)),
+        "storage_type": getattr(config, "storage_type", None),
+        "content_database_enabled": bool(getattr(config, "use_content_database", False)),
+    }
+
+
+def _warn_internal_deployment_readiness() -> None:
+    if getattr(config, "public_deployment", False):
+        return
+    readiness = _auth_config_readiness()
+    missing = [
+        name
+        for name, configured in [
+            ("NOVELFORGE_ADMIN_PASSWORD", readiness["admin_password_configured"]),
+            ("NOVELFORGE_SESSION_SECRET", readiness["session_secret_configured"]),
+        ]
+        if not configured
+    ]
+    if missing:
+        logger.warning(
+            "内测发布提示：%s 未配置。本地开发可以继续；内测或公开部署前必须配置管理员密码和 session secret。",
+            ", ".join(missing),
+        )
 
 # Create extractor orchestrator.
 extractor_orchestrator = UnifiedExtractor(
@@ -822,6 +858,7 @@ async def _normalize_content_item_for_write(item: ContentItem) -> ContentItem:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _validate_public_deployment_config()
+    _warn_internal_deployment_readiness()
     yield
 
 
@@ -924,12 +961,14 @@ async def logout():
 @app.get("/api/auth/me")
 async def get_current_auth(request: Request):
     authenticated = _request_is_authenticated(request)
+    readiness = _auth_config_readiness()
     return {
         "authenticated": authenticated,
         "auth_required": _auth_is_enabled(),
         "mode": "admin" if authenticated else None,
         "public_deployment": bool(getattr(config, "public_deployment", False)),
         "runtime_openai_overrides_allowed": bool(getattr(config, "allow_runtime_openai_overrides", True)),
+        **readiness,
     }
 
 # AI planning endpoints.

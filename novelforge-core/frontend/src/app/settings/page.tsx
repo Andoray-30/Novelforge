@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, KeyRound, Lock, RefreshCw, Server, Settings2, ShieldCheck, SlidersHorizontal, Zap } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, KeyRound, Lock, RefreshCw, Server, Settings2, ShieldCheck, SlidersHorizontal, Zap } from 'lucide-react';
 import {
   DEFAULT_PROJECT_PREFERENCES,
   loadProjectPreferences,
@@ -84,6 +84,16 @@ export default function SettingsPage() {
 
   const publicDeployment = authStatus?.public_deployment ?? false;
   const runtimeOverridesAllowed = authStatus?.runtime_openai_overrides_allowed ?? false;
+  const deploymentWarnings = useMemo(() => {
+    if (!authStatus) return [];
+    const warnings: string[] = [];
+    if (!authStatus.admin_password_configured) warnings.push('缺少 NOVELFORGE_ADMIN_PASSWORD');
+    if (!authStatus.session_secret_configured) warnings.push('缺少 NOVELFORGE_SESSION_SECRET');
+    if (!authStatus.provider_key_configured) warnings.push('缺少 OPENAI_API_KEY');
+    if (publicDeployment && runtimeOverridesAllowed) warnings.push('公开部署应关闭浏览器模型覆盖');
+    if (!authStatus.content_database_enabled || authStatus.storage_type !== 'content_db') warnings.push('建议使用 content_db 内容库');
+    return warnings;
+  }, [authStatus, publicDeployment, runtimeOverridesAllowed]);
 
   return (
     <div className="nf-editor-shell">
@@ -121,6 +131,20 @@ export default function SettingsPage() {
 
         {saveMessage ? <div className="nf-editor-alert success">{saveMessage}</div> : null}
         {statusError ? <div className="nf-editor-alert">{statusError}</div> : null}
+        {deploymentWarnings.length > 0 ? (
+          <div className="nf-editor-alert flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+            <div>
+              <div className="font-semibold text-[var(--nf-text)]">内测发布配置尚未完整</div>
+              <p className="mt-1 text-sm leading-6 text-[var(--nf-text-muted)]">
+                本地开发可以继续；内测或公开部署前请补齐管理员密码、会话密钥、服务端 AI Key 和持久化内容库配置。
+              </p>
+              <ul className="mt-2 space-y-1 text-sm text-[var(--nf-text-muted)]">
+                {deploymentWarnings.map((warning) => <li key={warning}>• {warning}</li>)}
+              </ul>
+            </div>
+          </div>
+        ) : null}
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
           <main className="space-y-5">
@@ -129,11 +153,16 @@ export default function SettingsPage() {
               description="确认当前部署是否已启用认证、是否处于公开部署模式，以及浏览器端是否允许覆盖模型配置。"
               icon={<Server size={18} />}
             >
-              <div className="grid gap-3 md:grid-cols-3">
+              <div className="grid gap-3 md:grid-cols-4">
                 {[
                   { label: '访问认证', value: authStatus ? boolLabel(authStatus.auth_required) : '读取中' },
                   { label: '公开部署', value: authStatus ? boolLabel(publicDeployment) : '读取中' },
                   { label: '浏览器模型覆盖', value: authStatus ? boolLabel(runtimeOverridesAllowed) : '读取中' },
+                  { label: '服务端 AI Key', value: authStatus ? (authStatus.provider_key_configured ? '已配置' : '未配置') : '读取中' },
+                  { label: '管理员密码', value: authStatus ? (authStatus.admin_password_configured ? '已配置' : '未配置') : '读取中' },
+                  { label: '会话密钥', value: authStatus ? (authStatus.session_secret_configured ? '已配置' : '未配置') : '读取中' },
+                  { label: '内容库', value: authStatus ? (authStatus.content_database_enabled ? 'content_db' : authStatus.storage_type || '未启用') : '读取中' },
+                  { label: '数据目录', value: authStatus ? (authStatus.data_dir_configured ? authStatus.data_dir || '已配置' : '未配置') : '读取中' },
                 ].map((item) => (
                   <div key={item.label} className="nf-stat">
                     <span>{item.label}</span>
