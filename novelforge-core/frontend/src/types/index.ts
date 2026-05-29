@@ -408,6 +408,9 @@ export interface ImportAnalysisDiagnostics {
   dropped_candidates?: Array<Record<string, unknown>>;
   low_confidence_characters?: Array<Record<string, unknown>>;
   relationship_unresolved_endpoints?: Array<string | Record<string, unknown>>;
+  relationship_unresolved_details?: Array<Record<string, unknown>>;
+  relationship_endpoint_resolution?: Array<Record<string, unknown>>;
+  relationship_low_confidence_resolved_endpoints?: Array<Record<string, unknown>>;
   timeline_mismatch_events?: Array<Record<string, unknown>>;
   failed_chapters?: Array<Record<string, unknown>>;
   suspected_merged_characters?: Array<Record<string, unknown>>;
@@ -438,6 +441,9 @@ export interface NovelImportTaskResult {
   candidate_counts?: Record<string, number>;
   failed_chapters?: Array<Record<string, unknown>>;
   relationship_unresolved_endpoints?: Array<string | Record<string, unknown>>;
+  relationship_unresolved_details?: Array<Record<string, unknown>>;
+  relationship_endpoint_resolution?: Array<Record<string, unknown>>;
+  relationship_low_confidence_resolved_endpoints?: Array<Record<string, unknown>>;
   timeline_mismatch_events?: Array<Record<string, unknown>>;
 }
 

@@ -12,7 +12,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
@@ -104,6 +106,9 @@ class ImportAnalysisDiagnostics(BaseModel):
     dropped_candidates: List[Dict[str, Any]] = Field(default_factory=list)
     low_confidence_characters: List[Dict[str, Any]] = Field(default_factory=list)
     relationship_unresolved_endpoints: List[str] = Field(default_factory=list)
+    relationship_unresolved_details: List[Dict[str, Any]] = Field(default_factory=list)
+    relationship_endpoint_resolution: List[Dict[str, Any]] = Field(default_factory=list)
+    relationship_low_confidence_resolved_endpoints: List[Dict[str, Any]] = Field(default_factory=list)
     timeline_mismatch_events: List[Dict[str, str]] = Field(default_factory=list)
     failed_chapters: List[Dict[str, str]] = Field(default_factory=list)
 
@@ -119,12 +124,45 @@ class ChapterIndexMergeResult(BaseModel):
 ChapterIndexAnalysis = ChapterIndexMergeResult
 
 
+@dataclass
+class EndpointMatch:
+    raw_endpoint: str
+    normalized_endpoint: str
+    resolved_name: str
+    matched: bool
+    match_type: str
+    confidence: float
+    matched_character_id: str = ""
+    matched_character_name: str = ""
+    evidence: List[str] = field(default_factory=list)
+    needs_review: bool = False
+    reason: str = ""
+    candidates: List[str] = field(default_factory=list)
+
+    def to_diagnostic(self) -> Dict[str, Any]:
+        return {
+            "raw_endpoint": self.raw_endpoint,
+            "normalized_endpoint": self.normalized_endpoint,
+            "resolved_endpoint": self.resolved_name,
+            "match_type": self.match_type,
+            "confidence": round(self.confidence, 3),
+            "matched_character_id": self.matched_character_id,
+            "matched_character_name": self.matched_character_name,
+            "evidence": self.evidence[:2],
+            "needs_review": self.needs_review,
+            "reason": self.reason,
+            "candidates": self.candidates[:5],
+        }
+
+
 class ChapterIndexExtractor:
     """Extract and merge chapter-level novel understanding indices."""
 
     def __init__(self, ai_service: Any, config: Optional[ExtractionConfig] = None):
         self.ai_service = ai_service
-        self.config = config or ExtractionConfig(timeout=180.0, max_retries=2, retry_delay=1.0)
+        self.config = config or ExtractionConfig(timeout=180.0, max_retries=1, retry_delay=1.0)
+        self.chapter_concurrency = self._resolve_chapter_concurrency()
+        self.max_tokens = self._resolve_int_env("NOVELFORGE_CHAPTER_INDEX_MAX_TOKENS", default=2500, minimum=800, maximum=5000)
 
     async def extract_and_merge(self, chapters: List[Dict[str, Any]]) -> ChapterIndexMergeResult:
         sources = [self._coerce_chapter_source(chapter) for chapter in chapters if self._chapter_content(chapter)]
@@ -134,7 +172,13 @@ class ChapterIndexExtractor:
         if not sources:
             return ChapterIndexMergeResult(diagnostics=diagnostics)
 
-        tasks = [self._extract_chapter_index(source) for source in sources]
+        semaphore = asyncio.Semaphore(self.chapter_concurrency)
+
+        async def run_with_limit(source: ChapterSource) -> ChapterIndex:
+            async with semaphore:
+                return await self._extract_chapter_index(source)
+
+        tasks = [run_with_limit(source) for source in sources]
         raw_results = await asyncio.gather(*tasks, return_exceptions=True)
         indices: List[ChapterIndex] = []
         for source, result in zip(sources, raw_results):
@@ -152,6 +196,24 @@ class ChapterIndexExtractor:
     async def extract_chapter_indices(self, chapters: List[Dict[str, Any]]) -> ChapterIndexMergeResult:
         return await self.extract_and_merge(chapters)
 
+    @staticmethod
+    def _resolve_chapter_concurrency() -> int:
+        return ChapterIndexExtractor._resolve_int_env(
+            "NOVELFORGE_CHAPTER_INDEX_CONCURRENCY",
+            default=4,
+            minimum=1,
+            maximum=8,
+        )
+
+    @staticmethod
+    def _resolve_int_env(name: str, *, default: int, minimum: int, maximum: int) -> int:
+        raw = os.getenv(name, str(default))
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return default
+        return max(minimum, min(value, maximum))
+
     async def _extract_chapter_index(self, chapter: ChapterSource) -> ChapterIndex:
         prompt = self._build_chapter_prompt(chapter)
         last_error: Optional[Exception] = None
@@ -159,7 +221,7 @@ class ChapterIndexExtractor:
             try:
                 response = await self.ai_service.chat(
                     prompt,
-                    max_tokens=5000,
+                    max_tokens=self.max_tokens,
                     timeout=self.config.timeout,
                 )
                 return self._parse_chapter_response(response, chapter)
@@ -171,6 +233,13 @@ class ChapterIndexExtractor:
 
     def _build_chapter_prompt(self, chapter: ChapterSource) -> str:
         return f"""你是小说创作分析助手。请为单章建立结构化索引，目标是帮助后续 AI 写出动人、优美、有情绪张力的小说序章。
+
+输出要求：
+- 只输出一个 JSON object，从 {{ 开始，到 }} 结束。
+- 不要输出 markdown、解释、注释、代码块。
+- 保持精简：角色最多 5 个，互动最多 5 条，事件最多 4 个，世界观事实最多 5 条。
+- evidence 只摘原文短句，每条不超过 40 个中文字符；没有证据则不要编造。
+- 没有内容的数组输出 []，不要省略字段。
 
 章节：{chapter.title}
 顺序：{chapter.order}
@@ -434,24 +503,35 @@ class ChapterIndexExtractor:
             for candidate in index.chapter_interactions:
                 for raw_source in self._split_endpoint_names(candidate.source):
                     for raw_target in self._split_endpoint_names(candidate.target):
-                        source = self._resolve_character(raw_source, canonical)
-                        target = self._resolve_character(raw_target, canonical)
+                        source_match = self._resolve_character(raw_source, canonical, character_names, candidate.evidence)
+                        target_match = self._resolve_character(raw_target, canonical, character_names, candidate.evidence)
+                        source = source_match.resolved_name
+                        target = target_match.resolved_name
                         if source not in character_names and self._can_backfill_endpoint(source, candidate.evidence):
                             backfilled.append(self._build_backfilled_character(source, candidate.evidence, index.chapter_id))
                             character_names.add(source)
-                            canonical[self._normalize_name(source)] = source
+                            canonical.setdefault(self._normalize_name(source), []).append(
+                                self._alias_entry(source, source, match_type="backfilled", evidence=candidate.evidence)
+                            )
                         if target not in character_names and self._can_backfill_endpoint(target, candidate.evidence):
                             backfilled.append(self._build_backfilled_character(target, candidate.evidence, index.chapter_id))
                             character_names.add(target)
-                            canonical[self._normalize_name(target)] = target
+                            canonical.setdefault(self._normalize_name(target), []).append(
+                                self._alias_entry(target, target, match_type="backfilled", evidence=candidate.evidence)
+                            )
                         if source not in character_names:
                             diagnostics.relationship_unresolved_endpoints.append(raw_source)
+                            diagnostics.relationship_unresolved_details.append(source_match.to_diagnostic())
                             continue
                         if target not in character_names:
                             diagnostics.relationship_unresolved_endpoints.append(raw_target)
+                            diagnostics.relationship_unresolved_details.append(target_match.to_diagnostic())
                             continue
                         if source == target:
                             continue
+
+                        self._record_endpoint_resolution(source_match, diagnostics)
+                        self._record_endpoint_resolution(target_match, diagnostics)
 
                         key = "->".join(sorted([source, target])) + f":{self._to_relationship_type(candidate.relationship_type).value}"
                         existing = relationships.get(key)
@@ -477,6 +557,16 @@ class ChapterIndexExtractor:
             diagnostics.candidate_counts["relationship_backfilled_characters"] = len(backfilled)
 
         diagnostics.relationship_unresolved_endpoints = sorted(set(diagnostics.relationship_unresolved_endpoints))
+        diagnostics.relationship_unresolved_details = self._unique_diagnostic_items(diagnostics.relationship_unresolved_details)
+        diagnostics.relationship_endpoint_resolution = self._unique_diagnostic_items(diagnostics.relationship_endpoint_resolution)
+        diagnostics.relationship_low_confidence_resolved_endpoints = self._unique_diagnostic_items(
+            diagnostics.relationship_low_confidence_resolved_endpoints
+        )
+        diagnostics.candidate_counts["relationship_resolved_endpoints"] = len(diagnostics.relationship_endpoint_resolution)
+        diagnostics.candidate_counts["relationship_low_confidence_resolved_endpoints"] = len(
+            diagnostics.relationship_low_confidence_resolved_endpoints
+        )
+        diagnostics.candidate_counts["relationship_unresolved_endpoint_count"] = len(diagnostics.relationship_unresolved_endpoints)
         return sorted(relationships.values(), key=lambda edge: (-len(edge.evidence), edge.source, edge.target))
 
     def _merge_timeline_events(
@@ -644,29 +734,270 @@ class ChapterIndexExtractor:
         except ValueError:
             return RelationshipType.OTHER
 
-    def _character_alias_map(self, characters: List[Character]) -> tuple[Dict[str, str], set[str]]:
-        canonical: Dict[str, str] = {}
+    def _character_alias_map(self, characters: List[Character]) -> tuple[Dict[str, List[Dict[str, Any]]], set[str]]:
+        canonical: Dict[str, List[Dict[str, Any]]] = {}
         names: set[str] = set()
         for character in characters:
             name = self._normalize_name(character.name)
             if not name:
                 continue
-            canonical[name] = name
+            self._add_alias_entry(canonical, name, character, "canonical")
             names.add(name)
-            for alias in character.tags or []:
+            aliases = list(character.tags or [])
+            extraction_quality = getattr(character, "extraction_quality", None)
+            if isinstance(extraction_quality, dict):
+                aliases.extend(extraction_quality.get("aliases") or [])
+            extracted_data = getattr(character, "extracted_data", None)
+            if isinstance(extracted_data, dict):
+                aliases.extend(extracted_data.get("aliases") or [])
+            for alias in aliases:
                 normalized_alias = self._normalize_name(str(alias))
                 if normalized_alias:
-                    canonical[normalized_alias] = name
+                    self._add_alias_entry(canonical, normalized_alias, character, "explicit_alias")
+                    for variant in self._title_stripped_variants(normalized_alias):
+                        self._add_alias_entry(canonical, variant, character, "title_stripped_alias")
+            for variant in self._title_stripped_variants(name):
+                self._add_alias_entry(canonical, variant, character, "title_stripped_name")
         return canonical, names
 
-    def _resolve_character(self, name: str, canonical: Dict[str, str]) -> str:
+    def _resolve_character(
+        self,
+        name: str,
+        canonical: Dict[str, List[Dict[str, Any]]],
+        character_names: set[str],
+        evidence: Optional[List[str]] = None,
+    ) -> EndpointMatch:
         normalized = self._normalize_name(name)
-        if normalized in canonical:
-            return canonical[normalized]
-        for alias, target in canonical.items():
-            if len(alias) >= 2 and len(normalized) >= 2 and (alias.endswith(normalized) or normalized.endswith(alias)):
-                return target
-        return normalized
+        evidence_items = self._unique(evidence or [])[:3]
+        if not normalized:
+            return EndpointMatch(name, "", "", False, "empty", 0.0, evidence=evidence_items, reason="empty_endpoint")
+
+        exact = self._unique_alias_targets(canonical.get(normalized, []))
+        if len(exact) == 1:
+            entry = exact[0]
+            return self._matched_endpoint(name, normalized, entry, self._confidence_for_match_type(entry["match_type"]), evidence_items)
+        if len(exact) > 1:
+            return EndpointMatch(
+                name,
+                normalized,
+                normalized,
+                False,
+                "ambiguous_exact_alias",
+                0.0,
+                evidence=evidence_items,
+                reason="alias_maps_to_multiple_characters",
+                candidates=[entry["canonical_name"] for entry in exact],
+            )
+
+        if len(normalized) >= 2:
+            fuzzy_entries: List[Dict[str, Any]] = []
+            for alias, entries in canonical.items():
+                if len(alias) < 2:
+                    continue
+                if alias.endswith(normalized) or normalized.endswith(alias) or alias.startswith(normalized) or normalized.startswith(alias):
+                    fuzzy_entries.extend(entries)
+            fuzzy_targets = self._unique_alias_targets(fuzzy_entries)
+            if len(fuzzy_targets) == 1:
+                return self._matched_endpoint(name, normalized, fuzzy_targets[0], 0.82, evidence_items, "unique_partial_alias")
+            if len(fuzzy_targets) > 1:
+                return EndpointMatch(
+                    name,
+                    normalized,
+                    normalized,
+                    False,
+                    "ambiguous_partial_alias",
+                    0.0,
+                    evidence=evidence_items,
+                    reason="partial_alias_matches_multiple_characters",
+                    candidates=[entry["canonical_name"] for entry in fuzzy_targets],
+                )
+
+        if self._is_safe_single_char_endpoint(normalized):
+            single_entries = self._single_char_alias_candidates(normalized, canonical, evidence_items)
+            single_targets = self._unique_alias_targets(single_entries)
+            if len(single_targets) == 1:
+                entry = single_targets[0]
+                confidence = 0.86 if self._evidence_mentions_name(entry["canonical_name"], evidence_items) else 0.74
+                return self._matched_endpoint(
+                    name,
+                    normalized,
+                    entry,
+                    confidence,
+                    evidence_items,
+                    "unique_single_char_alias",
+                    needs_review=confidence < 0.8,
+                )
+            if len(single_targets) > 1:
+                return EndpointMatch(
+                    name,
+                    normalized,
+                    normalized,
+                    False,
+                    "ambiguous_single_char_alias",
+                    0.0,
+                    evidence=evidence_items,
+                    reason="single_char_matches_multiple_characters",
+                    candidates=[entry["canonical_name"] for entry in single_targets],
+                )
+
+        return EndpointMatch(
+            name,
+            normalized,
+            normalized,
+            normalized in character_names,
+            "canonical_name" if normalized in character_names else "unresolved",
+            1.0 if normalized in character_names else 0.0,
+            matched_character_name=normalized if normalized in character_names else "",
+            matched_character_id=normalized if normalized in character_names else "",
+            evidence=evidence_items,
+            reason="" if normalized in character_names else "no_matching_character_alias",
+        )
+
+    def _record_endpoint_resolution(self, match: EndpointMatch, diagnostics: ImportAnalysisDiagnostics) -> None:
+        if not match.matched:
+            return
+        diagnostic = match.to_diagnostic()
+        diagnostics.relationship_endpoint_resolution.append(diagnostic)
+        if match.needs_review or match.confidence < 0.8:
+            diagnostics.relationship_low_confidence_resolved_endpoints.append(diagnostic)
+
+    def _matched_endpoint(
+        self,
+        raw: str,
+        normalized: str,
+        entry: Dict[str, Any],
+        confidence: float,
+        evidence: List[str],
+        match_type_override: Optional[str] = None,
+        needs_review: bool = False,
+    ) -> EndpointMatch:
+        match_type = match_type_override or entry["match_type"]
+        return EndpointMatch(
+            raw_endpoint=raw,
+            normalized_endpoint=normalized,
+            resolved_name=entry["canonical_name"],
+            matched=True,
+            match_type=match_type,
+            confidence=confidence,
+            matched_character_id=entry.get("character_id") or entry["canonical_name"],
+            matched_character_name=entry["canonical_name"],
+            evidence=evidence,
+            needs_review=needs_review,
+        )
+
+    def _add_alias_entry(
+        self,
+        alias_map: Dict[str, List[Dict[str, Any]]],
+        alias: str,
+        character: Character,
+        match_type: str,
+    ) -> None:
+        normalized_alias = self._normalize_name(alias)
+        canonical_name = self._normalize_name(character.name)
+        if not normalized_alias or not canonical_name:
+            return
+        entry = self._alias_entry(
+            normalized_alias,
+            canonical_name,
+            match_type=match_type,
+            character_id=str(getattr(character, "id", "") or canonical_name),
+            evidence=getattr(character, "source_contexts", []) or [],
+        )
+        existing = alias_map.setdefault(normalized_alias, [])
+        if not any(item["canonical_name"] == canonical_name and item["match_type"] == match_type for item in existing):
+            existing.append(entry)
+
+    @staticmethod
+    def _alias_entry(
+        alias: str,
+        canonical_name: str,
+        match_type: str,
+        character_id: str = "",
+        evidence: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        return {
+            "alias": alias,
+            "canonical_name": canonical_name,
+            "character_id": character_id or canonical_name,
+            "match_type": match_type,
+            "evidence": list(evidence or [])[:2],
+        }
+
+    @staticmethod
+    def _unique_alias_targets(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        seen: set[str] = set()
+        unique: List[Dict[str, Any]] = []
+        for entry in entries:
+            name = str(entry.get("canonical_name") or "")
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            unique.append(entry)
+        return unique
+
+    @staticmethod
+    def _confidence_for_match_type(match_type: str) -> float:
+        if match_type == "canonical":
+            return 1.0
+        if match_type == "explicit_alias":
+            return 0.95
+        if match_type.startswith("title_stripped"):
+            return 0.88
+        if match_type == "backfilled":
+            return 0.8
+        return 0.82
+
+    @staticmethod
+    def _title_stripped_variants(name: str) -> List[str]:
+        suffixes = (
+            "老师",
+            "先生",
+            "小姐",
+            "前辈",
+            "学长",
+            "学姐",
+            "哥哥",
+            "姐姐",
+            "店长",
+            "社长",
+            "队长",
+            "殿下",
+            "陛下",
+            "大人",
+            "同学",
+        )
+        variants: List[str] = []
+        for suffix in suffixes:
+            if name.endswith(suffix) and len(name) > len(suffix) + 1:
+                variants.append(name[: -len(suffix)])
+        return variants
+
+    @staticmethod
+    def _is_safe_single_char_endpoint(name: str) -> bool:
+        if len(name) != 1 or not ("\u4e00" <= name <= "\u9fff"):
+            return False
+        stop_chars = {"我", "你", "他", "她", "它", "谁", "其", "这", "那", "和", "与", "的", "了", "们"}
+        return name not in stop_chars
+
+    def _single_char_alias_candidates(
+        self,
+        name: str,
+        canonical: Dict[str, List[Dict[str, Any]]],
+        evidence: List[str],
+    ) -> List[Dict[str, Any]]:
+        if not evidence:
+            return []
+        matches: List[Dict[str, Any]] = []
+        for alias, entries in canonical.items():
+            if len(alias) < 2:
+                continue
+            if alias.startswith(name) or alias.endswith(name):
+                matches.extend(entries)
+        return matches
+
+    def _evidence_mentions_name(self, name: str, evidence: List[str]) -> bool:
+        normalized_name = self._normalize_name(name)
+        return any(normalized_name and normalized_name in self._normalize_name(item) for item in evidence)
 
     def _split_endpoint_names(self, value: str) -> List[str]:
         text = str(value or "").strip()
@@ -747,6 +1078,18 @@ class ChapterIndexExtractor:
                 continue
             seen.add(text)
             result.append(text)
+        return result
+
+    @staticmethod
+    def _unique_diagnostic_items(values: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        seen: set[str] = set()
+        result: List[Dict[str, Any]] = []
+        for value in values:
+            key = json.dumps(value, ensure_ascii=False, sort_keys=True)
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(value)
         return result
 
     def _join_best(self, values: List[Any]) -> str:

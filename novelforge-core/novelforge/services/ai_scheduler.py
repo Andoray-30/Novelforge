@@ -1075,6 +1075,9 @@ class AITaskScheduler:
             "candidate_counts": diagnostics.get("candidate_counts", {}),
             "failed_chapters": diagnostics.get("failed_chapters", []),
             "relationship_unresolved_endpoints": diagnostics.get("relationship_unresolved_endpoints", []),
+            "relationship_unresolved_details": diagnostics.get("relationship_unresolved_details", []),
+            "relationship_endpoint_resolution": diagnostics.get("relationship_endpoint_resolution", []),
+            "relationship_low_confidence_resolved_endpoints": diagnostics.get("relationship_low_confidence_resolved_endpoints", []),
             "timeline_mismatch_events": diagnostics.get("timeline_mismatch_events", []),
         }
 
@@ -1153,7 +1156,7 @@ class AITaskScheduler:
     def _normalize_import_name(name: str) -> str:
         return re.sub(r"[\s·・•（）()《》<>『』「」\[\]]+", "", (name or "").strip())
 
-    def _split_long_import_chapter(self, chapter: Any, max_chars: int = 18000) -> List[Any]:
+    def _split_long_import_chapter(self, chapter: Any, max_chars: int = 2500) -> List[Any]:
         from ..types.text_processing import Chapter
 
         content = getattr(chapter, "content", "") or ""
@@ -1217,7 +1220,7 @@ class AITaskScheduler:
 
         return parts or [chapter]
 
-    def _expand_long_import_chapters(self, chapters: List[Any], max_chars: int = 18000) -> List[Any]:
+    def _expand_long_import_chapters(self, chapters: List[Any], max_chars: int = 2500) -> List[Any]:
         expanded: List[Any] = []
         for chapter in chapters:
             expanded.extend(self._split_long_import_chapter(chapter, max_chars=max_chars))
@@ -1636,7 +1639,7 @@ class AITaskScheduler:
                 )
             ]
         
-        chapters_to_save = self._expand_long_import_chapters(chapters_to_save, max_chars=18000)
+        chapters_to_save = self._expand_long_import_chapters(chapters_to_save, max_chars=2500)
 
         # 2. 保存章节 (分阶段汇报进度)
         task.message = f"解析完成，正在保存 {len(chapters_to_save)} 个章节..."

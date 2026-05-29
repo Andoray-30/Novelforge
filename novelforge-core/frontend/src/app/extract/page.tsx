@@ -101,6 +101,9 @@ const CANDIDATE_COUNT_LABELS: Record<string, string> = {
   chapter_event_candidates: '事件候选',
   chapter_world_fact_candidates: '世界观候选',
   relationship_backfilled_characters: '关系回补角色',
+  relationship_resolved_endpoints: '已归一关系端点',
+  relationship_low_confidence_resolved_endpoints: '低置信归一端点',
+  relationship_unresolved_endpoint_count: '未闭合关系端点',
   merged_characters: '合并角色',
   saved_characters: '落库角色',
   merged_relationships: '合并关系',
@@ -194,7 +197,11 @@ function getIssuePreview(value: unknown): string {
   if (typeof value === 'string') return value;
   if (value && typeof value === 'object') {
     const payload = value as Record<string, unknown>;
-    return String(payload.title || payload.name || payload.endpoint || payload.description_preview || payload.error || JSON.stringify(payload));
+    const endpoint =
+      payload.raw_endpoint && payload.matched_character_name
+        ? `${payload.raw_endpoint} -> ${payload.matched_character_name}`
+        : payload.raw_endpoint || payload.endpoint || payload.resolved_endpoint;
+    return String(endpoint || payload.title || payload.name || payload.description_preview || payload.error || JSON.stringify(payload));
   }
   return String(value ?? '');
 }
@@ -296,6 +303,14 @@ function buildQualityRepairGroups(result: NovelImportTaskResult | null): Quality
       items: normalizeRepairItems(result.relationship_unresolved_endpoints || diagnostics?.relationship_unresolved_endpoints || diagnostics?.unresolved_relationship_edges),
     },
     {
+      key: 'relationship_low_confidence_resolved',
+      title: '低置信关系归一',
+      description: '这些关系端点已自动归一到角色池，但匹配依赖单字简称或较弱证据，建议人工复核后再用于核心写作。',
+      severity: 'medium',
+      recommendedTask: 'relationship_backfill',
+      items: normalizeRepairItems(result.relationship_low_confidence_resolved_endpoints || diagnostics?.relationship_low_confidence_resolved_endpoints),
+    },
+    {
       key: 'weak_relationships',
       title: '弱证据关系',
       description: '关系存在但证据或张力不足，适合回补证据、阶段变化和关系动机。',
@@ -387,6 +402,10 @@ function buildDiagnosticAreas(result: NovelImportTaskResult | null, summary: Sav
   const failedChapters = countDiagnosticItems(result?.failed_chapters || diagnostics?.failed_chapters);
   const weakRelationships = countDiagnosticItems(diagnostics?.weak_relationships);
   const unresolvedRelationships = countDiagnosticItems(result?.relationship_unresolved_endpoints || diagnostics?.relationship_unresolved_endpoints || diagnostics?.unresolved_relationship_edges);
+  const lowConfidenceResolvedRelationships = countDiagnosticItems(
+    result?.relationship_low_confidence_resolved_endpoints || diagnostics?.relationship_low_confidence_resolved_endpoints
+  );
+  const resolvedRelationshipEndpoints = countDiagnosticItems(result?.relationship_endpoint_resolution || diagnostics?.relationship_endpoint_resolution);
   const timelineMismatch = countDiagnosticItems(result?.timeline_mismatch_events || diagnostics?.timeline_mismatch_events);
   const lowConfidenceCharacters = countDiagnosticItems(diagnostics?.low_confidence_characters);
   const weakWorldFacts = countDiagnosticItems(diagnostics?.weak_world_facts);
@@ -428,10 +447,20 @@ function buildDiagnosticAreas(result: NovelImportTaskResult | null, summary: Sav
     {
       key: 'relationships',
       title: '关系',
-      status: unresolvedRelationships > 0 ? 'danger' : weakRelationships > 0 || relationshipCount < 3 ? 'warning' : relationshipCount > 0 ? 'ready' : 'empty',
+      status: unresolvedRelationships > 0 ? 'danger' : weakRelationships > 0 || lowConfidenceResolvedRelationships > 0 || relationshipCount < 3 ? 'warning' : relationshipCount > 0 ? 'ready' : 'empty',
       stat: relationshipCount > 0 ? `${relationshipCount} 条关系` : '暂无关系',
-      detail: unresolvedRelationships > 0 ? `${unresolvedRelationships} 个端点未闭合` : weakRelationships > 0 ? `${weakRelationships} 条关系需要补强` : '关系可用于驱动情绪张力。',
-      actions: unresolvedRelationships > 0 || weakRelationships > 0 ? ['回补关系证据', '优先修复主角关系'] : ['用关系生成序章冲突'],
+      detail: unresolvedRelationships > 0
+        ? `${unresolvedRelationships} 个端点未闭合`
+        : lowConfidenceResolvedRelationships > 0
+          ? `${lowConfidenceResolvedRelationships} 个端点已自动归一但需要复核`
+          : weakRelationships > 0
+            ? `${weakRelationships} 条关系需要补强`
+            : resolvedRelationshipEndpoints > 0
+              ? `已归一 ${resolvedRelationshipEndpoints} 个关系端点，当前无未闭合端点`
+              : '关系可用于驱动情绪张力。',
+      actions: unresolvedRelationships > 0 || weakRelationships > 0 || lowConfidenceResolvedRelationships > 0
+        ? ['回补关系证据', '复核低置信端点', '优先修复主角关系']
+        : ['用关系生成序章冲突'],
     },
     {
       key: 'world',

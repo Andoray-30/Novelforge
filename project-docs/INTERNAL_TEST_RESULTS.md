@@ -248,3 +248,91 @@ This is the first provider-auth recurrence after resuming the blocked goal. A fu
 On 2026-05-29 the minimal non-sensitive provider check was repeated again. The configured endpoint, key presence, and model were still detected, but the provider again returned `401 Unauthorized` with the same token-unavailable message.
 
 This is the second provider-auth recurrence after resuming the blocked goal. The next identical recurrence should be treated as a renewed blocked state unless the provider credential or model permission changes.
+
+## Goal 21 Long-Form Extraction Retest and Provider Strategy
+
+Date: 2026-05-29
+
+### Purpose
+
+Goal 21 was intended to verify whether short relationship endpoints such as `帝` can be safely normalized to character assets, then rerun a long-form import smoke without relaxing quality gates.
+
+### Code-Level Result
+
+The relationship endpoint normalization path was improved and covered by tests:
+
+- unique single-character aliases can resolve when supported by evidence,
+- ambiguous single-character aliases remain unresolved,
+- explicit aliases take priority over fuzzy matching,
+- unresolved endpoints remain visible in diagnostics,
+- endpoint audit data now records match type, confidence, matched character, evidence, and review needs.
+
+Relevant backend tests passed during this run:
+
+- `test_chapter_index_extractor.py`
+- `test_ai_scheduler_import.py`
+- `test_relationship_extractor.py`
+- `test_rate_limiter.py`
+
+### Real Provider Observations
+
+The provider layer, not the relationship normalizer, became the dominant blocker:
+
+- `gemini-3.5-flash` was visible from `/models`, but chat responses produced empty content or route/provider errors in extraction probes.
+- `deepseek-ai/deepseek-v4-pro` and `deepseek-ai/deepseek-v4-flash` returned usable content in some calls, but long-form batch extraction produced many `504 Gateway Time-out` responses.
+- `mimo-v2.5-pro` was faster on small probes, but returned empty structured extraction arrays for a chapter-index prompt.
+- Reducing chunk size and output token budget improved request shape but did not make full long-form extraction stable enough.
+
+### Retest Metrics
+
+Representative real smoke attempts:
+
+- DeepSeek pro run:
+  - `chapters=18`
+  - `characters=6`
+  - `relationships=5`
+  - `timeline=4`
+  - `world=1`
+  - `status=partial`
+  - `failed_chapters=16`
+  - `relationship_unresolved_endpoints=[]`
+  - `relationship_endpoint_mapping_ratio=1.0`
+- DeepSeek flash run:
+  - `chapters=18`
+  - `characters=4`
+  - `relationships=2`
+  - `timeline=2`
+  - `world=1`
+  - `status=partial`
+  - `failed_chapters=16`
+  - `relationship_unresolved_endpoints=[]`
+  - `relationship_endpoint_mapping_ratio=1.0`
+- Light chunk run:
+  - `chapters=24`
+  - `characters=5`
+  - `relationships=4`
+  - `timeline=3`
+  - `world=1`
+  - `status=partial`
+  - `failed_chapters=21`
+  - `relationship_unresolved_endpoints=[]`
+  - `relationship_endpoint_mapping_ratio=1.0`
+
+The sample text, smoke JSON outputs, copied smoke input files, and logs were cleaned from the workspace and are not committed.
+
+### Assessment
+
+The short-endpoint relationship issue is materially improved, but Goal 21 is not complete. The system did not reach `ready` or a clean `needs_repair` state because too many chapter index calls failed at the provider layer.
+
+The current product risk is architectural: long-form import still depends on one model strategy running a full batch successfully. That is brittle across API gateways and time windows.
+
+### Required Next Step
+
+Implement model routing and resumable extraction before further public/internal readiness claims:
+
+1. Probe candidate models at runtime for non-empty chat, JSON compliance, extraction richness, latency, and current error rate.
+2. Route extraction, repair, writing, and judging to different model roles instead of fixed model names.
+3. Persist per-chapter index attempts so failed chapters can be retried without rerunning successful chapters.
+4. Keep local fallback as low-confidence diagnostic seed only; do not count it as ready-quality AI extraction.
+
+See `project-docs/EXTRACTION_PROVIDER_STRATEGY.md` for the full analysis.

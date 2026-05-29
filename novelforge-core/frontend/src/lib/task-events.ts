@@ -172,6 +172,10 @@ export function parseNovelImportTaskResult(result: unknown): NovelImportTaskResu
     candidate_counts: candidateCounts,
     failed_chapters: asRecordList(payload.failed_chapters) ?? diagnostics?.failed_chapters,
     relationship_unresolved_endpoints: asEndpointList(payload.relationship_unresolved_endpoints) ?? diagnostics?.relationship_unresolved_endpoints,
+    relationship_unresolved_details: asRecordList(payload.relationship_unresolved_details) ?? diagnostics?.relationship_unresolved_details,
+    relationship_endpoint_resolution: asRecordList(payload.relationship_endpoint_resolution) ?? diagnostics?.relationship_endpoint_resolution,
+    relationship_low_confidence_resolved_endpoints:
+      asRecordList(payload.relationship_low_confidence_resolved_endpoints) ?? diagnostics?.relationship_low_confidence_resolved_endpoints,
     timeline_mismatch_events: asRecordList(payload.timeline_mismatch_events) ?? diagnostics?.timeline_mismatch_events,
   }
 }

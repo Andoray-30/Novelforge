@@ -56,6 +56,7 @@ class RateLimiter:
         # 滑动窗口：记录请求时间戳和对应的 token 使用量
         self.request_times: deque[float] = deque()
         self.token_counts: deque[int] = deque()
+        self._lock = asyncio.Lock()
 
         # 统计信息
         self.total_requests = 0
@@ -68,19 +69,26 @@ class RateLimiter:
         Args:
             estimated_tokens: 预估的 token 使用量
         """
-        now = time.time()
+        while True:
+            async with self._lock:
+                now = time.time()
 
-        # 清理过期记录
-        self._cleanup_expired(now)
+                # 清理过期记录
+                self._cleanup_expired(now)
 
-        # 计算当前使用量
-        current_rpm = len(self.request_times)
-        current_tpm = sum(self.token_counts)
+                # 计算当前使用量
+                current_rpm = len(self.request_times)
+                current_tpm = sum(self.token_counts)
 
-        # 检查是否超限
-        if current_rpm >= self.rpm_limit or current_tpm + estimated_tokens >= self.tpm_limit:
-            # 计算需要等待的时间
-            wait_time = self._calculate_wait_time(estimated_tokens, now)
+                if current_rpm < self.rpm_limit and current_tpm + estimated_tokens < self.tpm_limit:
+                    # 记录请求
+                    self.request_times.append(time.time())
+                    self.token_counts.append(estimated_tokens)
+                    self.total_requests += 1
+                    return
+
+                # 计算需要等待的时间
+                wait_time = self._calculate_wait_time(estimated_tokens, now)
 
             if wait_time > 0:
                 # console.print(
@@ -89,13 +97,8 @@ class RateLimiter:
                 #     f"TPM: {current_tpm}/{self.tpm_limit})[/yellow]"
                 # )
                 await asyncio.sleep(wait_time)
-                # 重新清理过期记录，因为等待后可能有更多记录过期
-                self._cleanup_expired(time.time())
-
-        # 记录请求
-        self.request_times.append(time.time())
-        self.token_counts.append(estimated_tokens)
-        self.total_requests += 1
+            else:
+                await asyncio.sleep(0)
 
     def record(self, tokens_used: int) -> None:
         """

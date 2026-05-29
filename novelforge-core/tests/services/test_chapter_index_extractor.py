@@ -130,6 +130,179 @@ def test_chapter_index_splits_grouped_relationship_endpoints():
     assert "小夏/阿岚" not in names
 
 
+def test_chapter_index_concurrency_is_bounded(monkeypatch):
+    monkeypatch.setenv("NOVELFORGE_CHAPTER_INDEX_CONCURRENCY", "9")
+    assert build_extractor().chapter_concurrency == 8
+
+    monkeypatch.setenv("NOVELFORGE_CHAPTER_INDEX_CONCURRENCY", "0")
+    assert build_extractor().chapter_concurrency == 1
+
+    monkeypatch.setenv("NOVELFORGE_CHAPTER_INDEX_CONCURRENCY", "invalid")
+    assert build_extractor().chapter_concurrency == 4
+
+
+def test_chapter_index_max_tokens_is_configurable_and_bounded(monkeypatch):
+    monkeypatch.setenv("NOVELFORGE_CHAPTER_INDEX_MAX_TOKENS", "1200")
+    assert build_extractor().max_tokens == 1200
+
+    monkeypatch.setenv("NOVELFORGE_CHAPTER_INDEX_MAX_TOKENS", "9000")
+    assert build_extractor().max_tokens == 5000
+
+    monkeypatch.setenv("NOVELFORGE_CHAPTER_INDEX_MAX_TOKENS", "bad")
+    assert build_extractor().max_tokens == 2500
+
+
+def test_chapter_index_resolves_unique_single_character_alias_with_evidence():
+    extractor = build_extractor()
+    index = ChapterIndex(
+        chapter_id="chapter-1",
+        chapter_title="第一章",
+        chapter_order=1,
+        chapter_characters=[
+            ChapterCharacterCandidate(name="彩叶", evidence=["彩叶举起武器。"]),
+            ChapterCharacterCandidate(name="帝明", evidence=["帝明站在天守阁前。"]),
+        ],
+        chapter_interactions=[
+            ChapterInteractionCandidate(
+                source="彩叶",
+                target="帝",
+                relationship_type="rival",
+                description="彩叶与帝在天守阁决战。",
+                evidence=["彩叶与帝交锋，帝明的加速招式几乎撕开战局。"],
+            )
+        ],
+    )
+
+    result = extractor.merge_indices([index])
+
+    assert not result.diagnostics.relationship_unresolved_endpoints
+    assert result.relationships[0].target == "帝明"
+    match = next(
+        item
+        for item in result.diagnostics.relationship_endpoint_resolution
+        if item["raw_endpoint"] == "帝"
+    )
+    assert match["match_type"] == "unique_single_char_alias"
+    assert match["matched_character_name"] == "帝明"
+    assert match["confidence"] >= 0.8
+
+
+def test_chapter_index_does_not_resolve_ambiguous_single_character_alias():
+    extractor = build_extractor()
+    index = ChapterIndex(
+        chapter_id="chapter-1",
+        chapter_title="第一章",
+        chapter_order=1,
+        chapter_characters=[
+            ChapterCharacterCandidate(name="彩叶", evidence=["彩叶进入会场。"]),
+            ChapterCharacterCandidate(name="帝明", evidence=["帝明已经登场。"]),
+            ChapterCharacterCandidate(name="帝子", evidence=["帝子也站在同一侧。"]),
+        ],
+        chapter_interactions=[
+            ChapterInteractionCandidate(
+                source="彩叶",
+                target="帝",
+                relationship_type="rival",
+                description="彩叶与帝交锋。",
+                evidence=["彩叶与帝交锋。"],
+            )
+        ],
+    )
+
+    result = extractor.merge_indices([index])
+
+    assert "帝" in result.diagnostics.relationship_unresolved_endpoints
+    assert not result.relationships
+    detail = result.diagnostics.relationship_unresolved_details[0]
+    assert detail["match_type"] == "ambiguous_single_char_alias"
+    assert sorted(detail["candidates"]) == ["帝子", "帝明"]
+
+
+def test_chapter_index_prefers_explicit_alias_before_partial_matching():
+    extractor = build_extractor()
+    index = ChapterIndex(
+        chapter_id="chapter-1",
+        chapter_title="第一章",
+        chapter_order=1,
+        chapter_characters=[
+            ChapterCharacterCandidate(name="彩叶", evidence=["彩叶注视舞台。"]),
+            ChapterCharacterCandidate(name="月见八千代", aliases=["八千代"], evidence=["月见八千代出现在舞台中央。"]),
+            ChapterCharacterCandidate(name="八千代子", evidence=["八千代子也在后台等待。"]),
+        ],
+        chapter_interactions=[
+            ChapterInteractionCandidate(
+                source="彩叶",
+                target="八千代",
+                relationship_type="mentor",
+                description="八千代给了彩叶希望。",
+                evidence=["八千代温柔地握住彩叶的手。"],
+            )
+        ],
+    )
+
+    result = extractor.merge_indices([index])
+
+    assert result.relationships[0].target == "月见八千代"
+    match = next(item for item in result.diagnostics.relationship_endpoint_resolution if item["raw_endpoint"] == "八千代")
+    assert match["match_type"] == "explicit_alias"
+    assert match["confidence"] >= 0.9
+
+
+def test_chapter_index_marks_weak_single_character_resolution_for_review():
+    extractor = build_extractor()
+    index = ChapterIndex(
+        chapter_id="chapter-1",
+        chapter_title="第一章",
+        chapter_order=1,
+        chapter_characters=[
+            ChapterCharacterCandidate(name="彩叶", evidence=["彩叶按住剑柄。"]),
+            ChapterCharacterCandidate(name="帝明", evidence=["帝明已经先一步登上高台。"]),
+        ],
+        chapter_interactions=[
+            ChapterInteractionCandidate(
+                source="彩叶",
+                target="帝",
+                relationship_type="rival",
+                description="彩叶被帝压迫到退无可退。",
+                evidence=["彩叶被帝一步步逼退。"],
+            )
+        ],
+    )
+
+    result = extractor.merge_indices([index])
+
+    match = next(item for item in result.diagnostics.relationship_endpoint_resolution if item["raw_endpoint"] == "帝")
+    assert match["match_type"] == "unique_single_char_alias"
+    assert match["matched_character_name"] == "帝明"
+    assert match["needs_review"] is True
+    assert result.diagnostics.relationship_low_confidence_resolved_endpoints == [match]
+
+
+def test_chapter_index_keeps_unresolved_endpoint_when_no_evidence_allows_backfill():
+    extractor = build_extractor()
+    index = ChapterIndex(
+        chapter_id="chapter-1",
+        chapter_title="第一章",
+        chapter_order=1,
+        chapter_characters=[ChapterCharacterCandidate(name="林墨", evidence=["林墨关上门。"])],
+        chapter_interactions=[
+            ChapterInteractionCandidate(
+                source="林墨",
+                target="陌生人",
+                relationship_type="other",
+                description="林墨感觉有人在看他。",
+                evidence=[],
+            )
+        ],
+    )
+
+    result = extractor.merge_indices([index])
+
+    assert "陌生人" in result.diagnostics.relationship_unresolved_endpoints
+    assert not result.relationships
+    assert result.diagnostics.relationship_unresolved_details[0]["reason"] == "no_matching_character_alias"
+
+
 def test_chapter_index_timeline_events_preserve_own_title_description_pairs():
     extractor = build_extractor()
     index = ChapterIndex(

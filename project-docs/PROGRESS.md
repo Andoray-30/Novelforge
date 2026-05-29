@@ -5419,3 +5419,28 @@
 - 当前判断：
   - NovelForge 已具备稳定自用 / 小范围内测的基础闭环，但长篇质量仍不是“完全交付级”。
   - 下一轮应优先修复关系端点归一和 project quality 的 relationship usability 判定，使“长篇低质量原因”更少、更可解释。
+
+### 2026-05-29 Goal 21 关系端点归一与模型网关复盘
+
+- 关系端点归一：
+  - 章节级关系合并增加端点审计字段：`match_type`、`confidence`、`matched_character_id`、`matched_character_name`、`evidence`、`needs_review`。
+  - 支持 tags / aliases / `extracted_data.aliases`、称谓剥离、唯一候选且有证据的中文单字简称匹配。
+  - 多候选或证据不足的短端点仍保留 unresolved，不强行乱连。
+  - 新增单测覆盖：`帝` 类唯一短别名映射、多候选不乱映射、alias 优先、unresolved 保留。
+- 稳定性修复：
+  - RateLimiter 增加 async lock，修复并发请求同时越过 RPM 检查导致 429 的竞态。
+  - 章节 index 增加环境变量可调并发与 max_tokens。
+  - 长章切分阈值收紧，降低单次提取请求体积。
+  - Extract 页面增加“已归一关系端点 / 低置信归一端点 / 未闭合关系端点”诊断展示。
+- 真实复验观察：
+  - `gemini-3.5-flash`：`/models` 可见，但 chat 返回空 content 或 provider 路由失败，不适合作为当前章节提取主模型。
+  - `deepseek-ai/deepseek-v4-pro` / `deepseek-ai/deepseek-v4-flash`：可返回结构化结果，但长篇批量章节 index 中大量 504，结果多为 `partial`。
+  - `mimo-v2.5-pro`：速度较快，但章节 index 小样本返回空数组，不适合作为结构化提取主模型。
+  - 已观察到关系端点闭合改善：多轮 partial smoke 中 `relationship_unresolved_endpoints=[]`、`relationship_endpoint_mapping_ratio=1.0`。
+  - 仍未达到长篇 ready：失败章节过多，角色/关系/时间线覆盖不足。
+- 当前判断：
+  - Goal 21 的“短端点归一”方向已取得代码和测试层进展，但完整目标尚未完成。
+  - 真实 blocker 已从“帝 端点未闭合”转为“模型网关/模型能力不稳定导致章节 index 覆盖率不足”。
+  - 不应继续盲目固定某个模型重跑。下一轮应先实现模型测速、模型路由、可恢复章节 index。
+- 新增分析文档：
+  - `project-docs/EXTRACTION_PROVIDER_STRATEGY.md`
