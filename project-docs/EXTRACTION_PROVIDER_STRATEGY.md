@@ -313,12 +313,16 @@ P2 已完成第一步“attempt 可观测化”，先把失败章节从一个笼
 - 导入任务 / 修复 preview 任务会创建 `chapter_index_run_<task_id>` 存储记录，并在每次 attempt / 每章 status 完成后立即写入：
   - 这让任务中途崩溃时，已完成章节的 attempt 诊断不再完全依赖最终 result。
   - 最终 `analysis_diagnostics.chapter_index_run_key` 会指向该记录。
+- 前端提取页已接入失败章节重跑诊断：
+  - `ImportAnalysisDiagnostics` 类型支持 `chapter_index_attempts / chapter_index_status / chapter_index_run_key`。
+  - “重跑章节索引”在未手动选择单章时，会把 `needs_retry` 章节、失败章节和 run key 提交给后端。
+  - 后端会基于这些字段缩小重跑范围，避免再次对整本书发起无差别提取。
 
 当前边界：
 
 - attempt 目前写入统一 StorageManager key，尚未拆成正式数据库表。
 - merge 仍主要读取当前任务内的成功结果；还没有从多轮历史 `chapter_index_run_*` 记录合并成功章节。
-- 下一步应把前端“继续重跑失败章节”按钮接入这些诊断字段，并让 merge 能复用历史成功章结果。
+- 下一步应让 merge 能复用历史成功章结果，并把 `chapter_index_run_*` 提升为更稳定的可查询数据结构。
 
 ### P3：多模型提取流水线
 

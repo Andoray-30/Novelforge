@@ -18,6 +18,9 @@ describe('parseNovelImportTaskResult', () => {
           relationship_endpoint_mapping_ratio: 0.75,
         },
         failed_chapters: [{ title: '第二章', error: 'timeout' }],
+        chapter_index_status: [{ chapter_id: 'chapter-2', status: 'failed', needs_retry: true }],
+        chapter_index_attempts: [{ chapter_id: 'chapter-2', error_type: 'timeout' }],
+        chapter_index_run_key: 'chapter_index_run_task-1',
         relationship_unresolved_endpoints: ['UnknownTarget'],
         timeline_mismatch_events: [{ title: '错配事件', description_preview: '描述' }],
         dropped_candidates: [{ name: '抽象概念', reason: 'invalid_character_name' }],
@@ -32,6 +35,9 @@ describe('parseNovelImportTaskResult', () => {
     expect(result?.candidate_counts?.chapter_character_candidates).toBe(27);
     expect(result?.candidate_counts?.relationship_endpoint_mapping_ratio).toBe(0.75);
     expect(result?.failed_chapters?.[0]?.title).toBe('第二章');
+    expect(result?.chapter_index_status?.[0]?.chapter_id).toBe('chapter-2');
+    expect(result?.chapter_index_attempts?.[0]?.error_type).toBe('timeout');
+    expect(result?.analysis_diagnostics?.chapter_index_run_key).toBe('chapter_index_run_task-1');
     expect(result?.relationship_unresolved_endpoints?.[0]).toBe('UnknownTarget');
     expect(result?.timeline_mismatch_events?.[0]?.title).toBe('错配事件');
     expect(result?.analysis_diagnostics?.dropped_candidates?.[0]?.name).toBe('抽象概念');

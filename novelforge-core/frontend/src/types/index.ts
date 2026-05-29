@@ -413,6 +413,9 @@ export interface ImportAnalysisDiagnostics {
   relationship_low_confidence_resolved_endpoints?: Array<Record<string, unknown>>;
   timeline_mismatch_events?: Array<Record<string, unknown>>;
   failed_chapters?: Array<Record<string, unknown>>;
+  chapter_index_attempts?: Array<Record<string, unknown>>;
+  chapter_index_status?: Array<Record<string, unknown>>;
+  chapter_index_run_key?: string;
   suspected_merged_characters?: Array<Record<string, unknown>>;
   organization_as_character?: Array<Record<string, unknown>>;
   unresolved_relationship_edges?: Array<string | Record<string, unknown>>;
@@ -440,6 +443,8 @@ export interface NovelImportTaskResult {
   analysis_diagnostics?: ImportAnalysisDiagnostics;
   candidate_counts?: Record<string, number>;
   failed_chapters?: Array<Record<string, unknown>>;
+  chapter_index_attempts?: Array<Record<string, unknown>>;
+  chapter_index_status?: Array<Record<string, unknown>>;
   relationship_unresolved_endpoints?: Array<string | Record<string, unknown>>;
   relationship_unresolved_details?: Array<Record<string, unknown>>;
   relationship_endpoint_resolution?: Array<Record<string, unknown>>;

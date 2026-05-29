@@ -122,6 +122,9 @@ const CANDIDATE_COUNT_LABELS: Record<string, string> = {
   weak_relationships: '弱证据关系',
   timeline_mismatch_events: '时间线待复核',
   weak_world_facts: '世界观分类不足',
+  chapter_index_attempts: '章节索引尝试',
+  chapter_index_failed_attempts: '失败尝试',
+  chapter_index_needs_retry: '需重跑章节',
 };
 
 function hasAcceptedExtension(fileName: string): boolean {
@@ -229,6 +232,49 @@ function normalizeRepairItems(items?: Array<string | Record<string, unknown>>): 
   return Array.isArray(items) ? items.filter(Boolean) : [];
 }
 
+function getRetryableChapterIndexStatus(result: NovelImportTaskResult | null): Array<Record<string, unknown>> {
+  const statusItems = result?.chapter_index_status || result?.analysis_diagnostics?.chapter_index_status;
+  if (!Array.isArray(statusItems)) return [];
+  return statusItems.filter((item): item is Record<string, unknown> => {
+    if (!item || typeof item !== 'object') return false;
+    return item.needs_retry === true || item.status === 'failed';
+  });
+}
+
+function buildChapterIndexRerunPayload(
+  result: NovelImportTaskResult | null,
+  group?: QualityRepairGroup
+): Record<string, unknown> {
+  const diagnostics = result?.analysis_diagnostics;
+  const groupItems = group?.recommendedTask === 'chapter_index_rerun'
+    ? group.items.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+    : [];
+  const retryableStatus = group?.key === 'failed_chapters'
+    ? getRetryableChapterIndexStatus(result)
+    : groupItems.length > 0
+      ? groupItems
+      : getRetryableChapterIndexStatus(result);
+  const failedChapters = normalizeRepairItems(result?.failed_chapters || diagnostics?.failed_chapters)
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object');
+  const payload: Record<string, unknown> = {
+    chapter_index_run_key: diagnostics?.chapter_index_run_key,
+    chapter_index_status: retryableStatus,
+    failed_chapters: failedChapters,
+    analysis_diagnostics: {
+      chapter_index_run_key: diagnostics?.chapter_index_run_key,
+      chapter_index_status: retryableStatus,
+      failed_chapters: failedChapters,
+    },
+  };
+  const chapterIds = [...retryableStatus, ...failedChapters]
+    .map((item) => item.chapter_id || item.id)
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+  if (chapterIds.length > 0) {
+    payload.chapter_ids = Array.from(new Set(chapterIds));
+  }
+  return payload;
+}
+
 function mergeDiagnostics(
   base: ImportAnalysisDiagnostics | undefined,
   recovered: ImportAnalysisDiagnostics | undefined
@@ -284,7 +330,7 @@ function buildQualityRepairGroups(result: NovelImportTaskResult | null): Quality
       description: '这些章节没有完成章节级索引，会直接影响角色、关系、时间线召回。',
       severity: 'high',
       recommendedTask: 'chapter_index_rerun',
-      items: normalizeRepairItems(result.failed_chapters || diagnostics?.failed_chapters),
+      items: normalizeRepairItems(result.failed_chapters || diagnostics?.failed_chapters || getRetryableChapterIndexStatus(result)),
     },
     {
       key: 'suspected_mojibake_assets',
@@ -912,7 +958,7 @@ export default function ExtractPage() {
     };
   }, [completedResult?.parent_id, completedResult?.session_id, currentSessionId, savedSummary?.sessionId]);
 
-  const submitRepairTask = async (taskType: RepairTaskType) => {
+  const submitRepairTask = async (taskType: RepairTaskType, group?: QualityRepairGroup) => {
     const sessionId = completedResult?.session_id || savedSummary?.sessionId || currentSessionId;
     if (!sessionId) {
       setRepairMessage('请先选择或完成一个项目导入。');
@@ -925,6 +971,9 @@ export default function ExtractPage() {
         session_id: sessionId,
         parent_id: completedResult?.parent_id || null,
         chapter_id: selectedRepairChapterId || null,
+        ...(taskType === 'chapter_index_rerun' && !selectedRepairChapterId
+          ? buildChapterIndexRerunPayload(analysisResult, group)
+          : {}),
         source: 'extract_quality_panel',
       });
       if (!response.success || !response.task_id) throw new Error(response.message || '重跑任务提交失败');
@@ -1246,7 +1295,7 @@ export default function ExtractPage() {
                             <h4 className="text-sm font-bold">{group.title}</h4>
                             <p className="mt-1 text-xs leading-5 text-[var(--nf-text-muted)]">{group.description}</p>
                           </div>
-                          <button type="button" className="nf-button" disabled={repairSubmitting !== null} onClick={() => void submitRepairTask(group.recommendedTask)}>
+                          <button type="button" className="nf-button" disabled={repairSubmitting !== null} onClick={() => void submitRepairTask(group.recommendedTask, group)}>
                             <Wrench className="h-4 w-4" />
                             {repairTaskLabel(group.recommendedTask)}
                           </button>

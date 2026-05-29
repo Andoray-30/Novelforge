@@ -5484,13 +5484,19 @@
   - 导入任务与章节修复 preview 任务会创建 `chapter_index_run_<task_id>` 存储记录。
   - 每次 attempt 和每章最终 status 会即时写入该 run key，最终结果通过 `analysis_diagnostics.chapter_index_run_key` 暴露。
   - 这让长篇任务中途崩溃时，已完成章节的模型、延迟、错误类型和候选数量不再完全丢失。
+- 前端接线：
+  - `ImportAnalysisDiagnostics` 与 `parseNovelImportTaskResult(...)` 支持 `chapter_index_attempts / chapter_index_status / chapter_index_run_key`。
+  - Extract 页面提交 `chapter_index_rerun` 时，如果用户未手动选择单章，会自动携带 `needs_retry` 章节诊断、失败章节和 run key。
+  - 这样“重跑章节索引”会优先进入后端的失败章过滤逻辑，而不是默认全书重跑。
 - 测试：
   - 新增章节 index attempt 成功/失败诊断测试。
   - 新增章节修复按失败诊断筛选重跑章节测试。
   - 新增导入章节 index 即时持久化 run state 测试。
+  - 新增/更新前端 task-events 诊断透传测试。
   - `compileall` 通过。
   - 后端相关测试在工作区临时目录下通过：`49 passed`。
+  - 前端 `npx.cmd tsc --noEmit --incremental false` 通过。
+  - 前端 Vitest：`25 passed / 104 passed`。
 - 当前边界：
   - attempt 目前落在 StorageManager key 中，尚未独立落入正式数据库中间表。
-  - 前端“继续重跑失败章节”按钮尚未接入这些字段。
   - merge 还不能自动复用上一轮成功章节结果，下一轮应补“多轮成功结果合并”或先补前端重跑入口。

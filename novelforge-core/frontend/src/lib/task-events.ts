@@ -171,6 +171,8 @@ export function parseNovelImportTaskResult(result: unknown): NovelImportTaskResu
     analysis_diagnostics: diagnostics,
     candidate_counts: candidateCounts,
     failed_chapters: asRecordList(payload.failed_chapters) ?? diagnostics?.failed_chapters,
+    chapter_index_attempts: asRecordList(payload.chapter_index_attempts) ?? diagnostics?.chapter_index_attempts,
+    chapter_index_status: asRecordList(payload.chapter_index_status) ?? diagnostics?.chapter_index_status,
     relationship_unresolved_endpoints: asEndpointList(payload.relationship_unresolved_endpoints) ?? diagnostics?.relationship_unresolved_endpoints,
     relationship_unresolved_details: asRecordList(payload.relationship_unresolved_details) ?? diagnostics?.relationship_unresolved_details,
     relationship_endpoint_resolution: asRecordList(payload.relationship_endpoint_resolution) ?? diagnostics?.relationship_endpoint_resolution,
