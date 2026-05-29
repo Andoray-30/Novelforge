@@ -5476,11 +5476,15 @@
   - `ExtractionService.extract_chapter_index_assets(...)`
   - 导入深度分析结果
   - 章节级修复 preview 结果
+- 章节重跑范围：
+  - `_load_repair_chapters(...)` 现在支持从 `analysis_diagnostics.chapter_index_status`、`failed_chapters` 或显式 `chapter_ids` 中筛出需要重跑的章节。
+  - 这避免章节修复任务默认把整本书重新发给模型，降低 504 / 429 风险。
 - 测试：
   - 新增章节 index attempt 成功/失败诊断测试。
+  - 新增章节修复按失败诊断筛选重跑章节测试。
   - `compileall` 通过。
-  - 后端相关测试在工作区临时目录下通过：`46 passed`。
+  - 后端相关测试在工作区临时目录下通过：`48 passed`。
 - 当前边界：
   - attempt 目前随任务结果保存，尚未独立落入数据库中间表。
-  - 还未实现“只重跑 `needs_retry=true` 章节”的自动选择。
+  - 前端“继续重跑失败章节”按钮尚未接入这些字段。
   - 下一轮应把 attempt 存储从任务结果提升为可查询、可增量复跑的数据层。

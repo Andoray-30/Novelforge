@@ -331,6 +331,8 @@ class AITaskScheduler:
         if not self.content_manager:
             raise ValueError("导入修复任务缺少内容库管理器")
 
+        target_chapter_ids = self._repair_target_chapter_ids(parameters)
+
         chapter_id = parameters.get("chapter_id")
         if isinstance(chapter_id, str) and chapter_id.strip():
             chapter = await self.content_manager.get_content(chapter_id.strip())
@@ -359,6 +361,8 @@ class AITaskScheduler:
         ))
         chapters = []
         for index, chapter in enumerate(result.items, start=1):
+            if target_chapter_ids and chapter.metadata.id not in target_chapter_ids:
+                continue
             payload = chapter.extracted_data if isinstance(chapter.extracted_data, dict) else {}
             chapters.append({
                 "id": chapter.metadata.id,
@@ -368,6 +372,46 @@ class AITaskScheduler:
             })
         chapters.sort(key=lambda item: item.get("chapter_index") or 0)
         return chapters
+
+    def _repair_target_chapter_ids(self, parameters: Dict[str, Any]) -> set[str]:
+        targets: set[str] = set()
+
+        raw_chapter_ids = parameters.get("chapter_ids")
+        if isinstance(raw_chapter_ids, list):
+            for chapter_id in raw_chapter_ids:
+                if isinstance(chapter_id, str) and chapter_id.strip():
+                    targets.add(chapter_id.strip())
+
+        failed_chapters = parameters.get("failed_chapters")
+        if isinstance(failed_chapters, list):
+            for item in failed_chapters:
+                if not isinstance(item, dict):
+                    continue
+                chapter_id = item.get("chapter_id") or item.get("id")
+                if isinstance(chapter_id, str) and chapter_id.strip():
+                    targets.add(chapter_id.strip())
+
+        chapter_index_status = parameters.get("chapter_index_status")
+        if isinstance(chapter_index_status, list):
+            for item in chapter_index_status:
+                if not isinstance(item, dict):
+                    continue
+                needs_retry = item.get("needs_retry") or item.get("status") == "failed"
+                if not needs_retry:
+                    continue
+                chapter_id = item.get("chapter_id") or item.get("id")
+                if isinstance(chapter_id, str) and chapter_id.strip():
+                    targets.add(chapter_id.strip())
+
+        diagnostics = parameters.get("analysis_diagnostics")
+        if isinstance(diagnostics, dict):
+            nested_parameters = {
+                "failed_chapters": diagnostics.get("failed_chapters"),
+                "chapter_index_status": diagnostics.get("chapter_index_status"),
+            }
+            targets.update(self._repair_target_chapter_ids(nested_parameters))
+
+        return targets
 
     def _build_relationship_repair_key(self, relationship: Dict[str, Any]) -> Optional[str]:
         source = self._normalize_import_name(str(relationship.get("source") or ""))

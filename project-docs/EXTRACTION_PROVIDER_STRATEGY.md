@@ -304,12 +304,17 @@ P2 已完成第一步“attempt 可观测化”，先把失败章节从一个笼
   - `chapter_index_attempts`
   - `chapter_index_failed_attempts`
   - `chapter_index_needs_retry`
+- 章节级修复任务已支持根据上一轮诊断缩小重跑范围：
+  - `chapter_index_status[].needs_retry=true`
+  - `chapter_index_status[].status=failed`
+  - `failed_chapters[].chapter_id`
+  - 显式 `chapter_ids`
 
 当前边界：
 
 - attempt 目前随导入任务结果持久化，尚未拆成独立数据库表。
 - 任务中途进程崩溃时，已完成章节的 attempt 仍可能来不及落库。
-- 下一步应把成功/失败 attempt 在每章结束后立即写入可查询存储，并让 rerun 默认只选择 `needs_retry=true` 的章节。
+- 下一步应把成功/失败 attempt 在每章结束后立即写入可查询存储，并把前端“继续重跑失败章节”按钮接入这些诊断字段。
 
 ### P3：多模型提取流水线
 

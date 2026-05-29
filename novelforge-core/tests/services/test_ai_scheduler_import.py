@@ -817,6 +817,133 @@ def test_import_repair_task_loads_saved_chapters_and_returns_preview(monkeypatch
     assert result["relationships"][0]["source"] == "林墨"
 
 
+def test_import_repair_task_filters_retryable_chapters_from_diagnostics(monkeypatch):
+    import novelforge.services.extraction_service as extraction_module
+
+    class FakeExtractionService:
+        def __init__(self):
+            self.received_chapters = None
+
+        async def extract_chapter_index_assets(self, chapters):
+            self.received_chapters = chapters
+            return {
+                "characters": [],
+                "relationships": [],
+                "timeline_events": [],
+                "world_setting": None,
+                "analysis_diagnostics": {
+                    "candidate_counts": {},
+                    "failed_chapters": [],
+                    "chapter_index_status": [],
+                },
+            }
+
+    service = FakeExtractionService()
+    monkeypatch.setattr(extraction_module, "get_extraction_service", lambda *args, **kwargs: service)
+
+    content_manager = RecordingContentManager()
+    for index in range(1, 4):
+        asyncio.run(content_manager.create_content(ContentItem(
+            metadata=ContentMetadata(
+                id=f"chapter-{index}",
+                title=f"第{index}章",
+                type=ContentType.CHAPTER,
+                parent_id="novel-retry",
+                session_id="session-retry",
+            ),
+            content=f"正文 {index}",
+            extracted_data={"chapter_index": index},
+        )))
+
+    scheduler = build_scheduler(content_manager=content_manager, storage_manager=MemoryStorageManager())
+    task = Task(
+        id="rerun-diagnostics-task",
+        type="chapter_index_rerun",
+        status=TaskStatus.RUNNING,
+        priority=TaskPriority.MEDIUM,
+        parameters={
+            "session_id": "session-retry",
+            "parent_id": "novel-retry",
+            "analysis_diagnostics": {
+                "chapter_index_status": [
+                    {"chapter_id": "chapter-1", "status": "success", "needs_retry": False},
+                    {"chapter_id": "chapter-2", "status": "failed", "needs_retry": True},
+                    {"chapter_id": "chapter-3", "status": "success", "needs_retry": False},
+                ]
+            },
+        },
+        created_at=datetime.now(),
+    )
+
+    result = asyncio.run(scheduler._process_import_repair_task(task))
+
+    assert [chapter["id"] for chapter in service.received_chapters] == ["chapter-2"]
+    assert result["chapters_count"] == 1
+
+
+def test_import_repair_task_filters_explicit_failed_chapters(monkeypatch):
+    import novelforge.services.extraction_service as extraction_module
+
+    class FakeExtractionService:
+        def __init__(self):
+            self.received_chapters = None
+
+        async def extract_chapter_index_assets(self, chapters):
+            self.received_chapters = chapters
+            return {
+                "characters": [],
+                "relationships": [],
+                "timeline_events": [],
+                "world_setting": None,
+                "analysis_diagnostics": {},
+            }
+
+    service = FakeExtractionService()
+    monkeypatch.setattr(extraction_module, "get_extraction_service", lambda *args, **kwargs: service)
+
+    content_manager = RecordingContentManager()
+    asyncio.run(content_manager.create_content(ContentItem(
+        metadata=ContentMetadata(
+            id="chapter-ok",
+            title="已成功章",
+            type=ContentType.CHAPTER,
+            parent_id="novel-failed-filter",
+            session_id="session-failed-filter",
+        ),
+        content="成功正文",
+        extracted_data={"chapter_index": 1},
+    )))
+    asyncio.run(content_manager.create_content(ContentItem(
+        metadata=ContentMetadata(
+            id="chapter-failed",
+            title="失败章",
+            type=ContentType.CHAPTER,
+            parent_id="novel-failed-filter",
+            session_id="session-failed-filter",
+        ),
+        content="失败正文",
+        extracted_data={"chapter_index": 2},
+    )))
+
+    scheduler = build_scheduler(content_manager=content_manager, storage_manager=MemoryStorageManager())
+    task = Task(
+        id="rerun-failed-filter-task",
+        type="chapter_index_rerun",
+        status=TaskStatus.RUNNING,
+        priority=TaskPriority.MEDIUM,
+        parameters={
+            "session_id": "session-failed-filter",
+            "parent_id": "novel-failed-filter",
+            "failed_chapters": [{"chapter_id": "chapter-failed", "error_type": "gateway_timeout"}],
+        },
+        created_at=datetime.now(),
+    )
+
+    asyncio.run(scheduler._process_import_repair_task(task))
+
+    assert [chapter["id"] for chapter in service.received_chapters] == ["chapter-failed"]
+
+
 def test_import_repair_task_reports_preview_diff_against_existing_assets(monkeypatch):
     import novelforge.services.extraction_service as extraction_module
 
