@@ -17,6 +17,7 @@ import hmac
 import html
 import secrets
 import time
+import asyncio
 from enum import Enum
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -100,6 +101,11 @@ CHAT_STORAGE_TYPE = "file"
 
 class AuthLoginRequest(BaseModel):
     password: str = Field(..., min_length=1)
+
+
+class SuggestPromptsRequest(BaseModel):
+    session_id: Optional[str] = None
+    openai_config: Optional[Any] = None
 
 
 def _auth_is_enabled() -> bool:
@@ -974,6 +980,22 @@ async def build_world_setting(request: WorldBuildingRequest):
             detail=f"世界构建失败: {str(e)}"
         )
 
+
+@app.post("/api/ai/suggest-prompts", response_model=List[str])
+async def suggest_prompts(request: SuggestPromptsRequest):
+    """Return stable prompt chips for the writing workspace."""
+    suggestions = [
+        "基于当前资产生成一个有情绪张力的序章。",
+        "梳理主角和关键关系，找出最适合开篇的冲突。",
+        "从当前章节继续写一段候选正文。",
+        "把薄弱关系补成可写作的人物羁绊。",
+        "根据世界观设定设计一个关键场景。",
+        "检查当前项目还缺哪些创作素材。",
+    ]
+    if request.session_id:
+        suggestions.insert(1, "读取当前项目资产后，给我三个开篇方案。")
+    return suggestions[:8]
+
 # Workflow management endpoints.
 
 @app.post("/api/workflow/start-process")
@@ -1400,18 +1422,27 @@ async def send_chat_message_stream(request: ChatRequest):
         storage_type=CHAT_STORAGE_TYPE,
     )
 
-    agent_preparation = await _get_writing_agent_runtime().prepare(
-        user_message=request.message,
-        context=request.context,
-        conversation=conversation,
-        base_system_prompt=_build_chat_system_prompt(request.context),
-        ai_service=runtime_ai_service,
-    )
-
     async def event_generator():
         assistant_content = ""
         assistant_thinking = ""
         try:
+            yield f"data: {json.dumps({'type': 'status', 'stage': 'preparing_context', 'message': 'preparing_agent_context'}, ensure_ascii=False)}\n\n"
+            preparation_task = asyncio.create_task(
+                _get_writing_agent_runtime().prepare(
+                    user_message=request.message,
+                    context=request.context,
+                    conversation=conversation,
+                    base_system_prompt=_build_chat_system_prompt(request.context),
+                    ai_service=runtime_ai_service,
+                )
+            )
+            while True:
+                try:
+                    agent_preparation = await asyncio.wait_for(asyncio.shield(preparation_task), timeout=10.0)
+                    break
+                except asyncio.TimeoutError:
+                    yield f"data: {json.dumps({'type': 'status', 'stage': 'preparing_context', 'message': 'waiting_for_agent_context'}, ensure_ascii=False)}\n\n"
+
             yield f"data: {json.dumps({'type': 'agent_trace', 'trace': agent_preparation.trace}, ensure_ascii=False)}\n\n"
             async for event in runtime_ai_service.chat_stream(
                 prompt=request.message,

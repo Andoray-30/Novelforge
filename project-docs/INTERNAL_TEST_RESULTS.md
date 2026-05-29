@@ -1,5 +1,79 @@
 # NovelForge Internal Test Results
 
+## 2026-05-29 Goal 19 Real Smoke Rerun
+
+Status: passed for the core product chain, with deployment-configuration warning.
+
+Verified chain:
+
+`login -> clean project -> import controlled text -> extraction -> extract diagnostics -> dashboard -> characters/world -> workspace -> real AI writing -> save_asset card -> confirm save -> editor saved candidate -> mobile workspace smoke`
+
+### Environment
+
+- Workspace: local NovelForge development environment.
+- Backend: local FastAPI service on `127.0.0.1:8001`.
+- Frontend: local Next.js service on `127.0.0.1:3010`.
+- Browser verification: headless Chrome through CDP fallback.
+- Provider: NewAPI-compatible server-side configuration.
+- Base URL: `https://fast-newapi.sync-api.xyz:8848/v1`.
+- Model: `gemini-3.5-flash`.
+- Auth note: local `.env` still does not define `NOVELFORGE_ADMIN_PASSWORD`, so the smoke injected a process-only admin password to exercise the login UI. Public/internal deployment should set `NOVELFORGE_ADMIN_PASSWORD` and `NOVELFORGE_SESSION_SECRET` before release.
+
+### Test Text
+
+- Source: synthetic controlled text generated only for this smoke run.
+- The text is not the root sample novel and is not committed.
+- Original text is intentionally not stored in this document.
+- SHA-256: `598f900222eac08c85698fd015b695815530b4ccb187e6f5d1b319aed016b581`.
+
+### Import Result
+
+- Run id: `goal19-20260529015029`.
+- Session id: `42cac0a0-d332-4703-a813-e6605d945453`.
+- Novel parent id: `novel_42cac0a0-d332-4703-a813-e6605d945453`.
+- Import task id: `1780019444851559`.
+- Task status: `completed`.
+- Analysis status: `completed`.
+- Chapters: 6.
+- Characters: 10.
+- Relationships: 15.
+- Timeline events: 20.
+- World assets: 1.
+- Analysis quality issues: none.
+
+### Writing And Save Result
+
+- AI writing status: `save_card`.
+- Saved chapter id: `96db28b2-c137-4b65-9c5d-c50f936d46a5`.
+- Editor candidate actions visible: yes.
+- `previous_snapshot` entry: not applicable in this run because the saved chapter was a new alternate candidate, not an overwrite/recovery path.
+- Writing quality quick read: the generated candidate uses the imported setting and characters, produces an emotional opening scene, and is suitable as an AI candidate version rather than an immediately final chapter.
+
+### Screenshots
+
+Captured screenshots are stored in `project-docs/screenshots/goal19/`:
+
+- `workspace-after-import.png`
+- `extract-diagnostics-real.png`
+- `dashboard-real-quality.png`
+- `characters-real.png`
+- `world-real.png`
+- `save-card-real.png`
+- `editor-saved-candidate.png`
+- `mobile-workspace-smoke.png`
+
+### Fixes Made During This Rerun
+
+- Fixed the streaming chat endpoint so it starts the response promptly and sends heartbeat status events while preparing agent context or waiting for the model. This prevents the browser/Next proxy from sitting on an idle connection during long real-model calls.
+- Added the missing `/api/ai/suggest-prompts` backend endpoint used by the chat input, removing a real 404 from the workspace runtime path.
+- Fixed chapter detection after preprocessing: headings after sentence-ending lines are no longer discarded, and headings embedded in normal sentence lines are rejected when they contain sentence punctuation. This changed the controlled import from 1 detected chapter to 6.
+
+### Remaining Risks
+
+- The dashboard quality panel is stricter than the import quality gate. Even when import analysis completed, it may still flag character/relationship writing readiness as needing repair. This is useful but should be aligned in a later pass so users understand the difference between extraction success and prose-readiness.
+- Local deployment still needs persistent admin auth env values. The smoke proves the login UI, but release config must set real admin/session secrets.
+- This was a synthetic-text smoke. The long sample novel should still be rerun before claiming long-form extraction quality.
+
 ## 2026-05-28 Goal 19 Real Smoke
 
 Status: partial, blocked by external provider authentication.

@@ -554,13 +554,21 @@ class AIService:
         timeout: float = 120.0,
     ):
         """Best-effort streaming chat yielding incremental thinking/content events."""
-        full_text = await self.chat(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=timeout,
+        chat_task = asyncio.create_task(
+            self.chat(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout=timeout,
+            )
         )
+        while True:
+            try:
+                full_text = await asyncio.wait_for(asyncio.shield(chat_task), timeout=10.0)
+                break
+            except asyncio.TimeoutError:
+                yield {"type": "status", "stage": "model_call", "message": "waiting_for_model"}
 
         thinking_match = re.search(r"<think>([\s\S]*?)</think>", full_text)
         thinking = thinking_match.group(1).strip() if thinking_match else ""

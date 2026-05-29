@@ -113,10 +113,6 @@ class RegexBasedChapterDetector(ChapterDetector):
                     line_start = text.rfind('\n', 0, start_pos) + 1
                     if text[line_start:start_pos].strip():
                         continue
-                    previous_line_start = text.rfind('\n', 0, max(line_start - 1, 0)) + 1
-                    previous_line = text[previous_line_start:line_start].strip()
-                    if previous_line and '。' in previous_line:
-                        continue
 
                 positions.append((start_pos, end_pos, title))
                 processed_positions.add(start_pos)
@@ -204,6 +200,9 @@ class RegexBasedChapterDetector(ChapterDetector):
         
         # 检查长度
         if len(title) < 2 or len(title) > 100:
+            return False
+
+        if re.search(r'[。！？?!；;]', title):
             return False
         
         # 检查是否包含章节关键词

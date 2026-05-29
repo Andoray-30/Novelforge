@@ -44,3 +44,22 @@ def test_enhanced_detector_handles_volume_headings_with_optional_title():
     assert chapters[0].content == "正文第一段。"
     assert chapters[1].title == "第一章 开始"
     assert chapters[1].content == "正文第二段。"
+
+
+def test_enhanced_detector_keeps_headings_after_sentence_lines():
+    text = (
+        "第一章 雨夜档案馆\n"
+        "上一章正文第一段，以句号结束。\n"
+        "第二章 守夜人的债\n"
+        "第二章正文。\n"
+        "第三章 月桥钟声\n"
+        "第三章正文。"
+    )
+
+    chapters = EnhancedChapterDetector().detect_chapters(text)
+
+    assert [chapter.title for chapter in chapters] == [
+        "第一章 雨夜档案馆",
+        "第二章 守夜人的债",
+        "第三章 月桥钟声",
+    ]

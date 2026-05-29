@@ -5351,3 +5351,36 @@
 - 当前判断：
   - 这是 Goal 19 从 blocked 状态恢复后的第 2 次同类阻塞复现。
   - 完整 UI smoke 仍不应伪造通过；缺失的 `save-card-real`、`editor-saved-candidate`、`mobile-workspace-smoke` 需要在 provider 恢复后补齐。
+
+### 2026-05-29 Goal 19 真实闭环复跑通过核心链路
+
+- 配置变化：
+  - 本地 `.env` 已切换到新的 NewAPI-compatible base URL：`https://fast-newapi.sync-api.xyz:8848/v1`。
+  - 使用服务端模型配置 `gemini-3.5-flash` 跑真实模型调用；密钥只保存在本地 `.env`，未提交。
+- 本轮修复：
+  - 修复 `/api/chat/send-message-stream`：流式接口会先返回状态帧，并在 agent 上下文准备 / 模型等待阶段发送心跳，避免真实模型调用时 Next 代理长时间空闲导致 `socket hang up`。
+  - 新增 `/api/ai/suggest-prompts`：补齐聊天输入组件已经调用的提示建议接口，避免工作台运行时 404。
+  - 修复章节检测：预处理把空行压成单换行后，旧规则会因为“上一行有句号”误丢第二章以后的标题；现已允许合法新行标题，同时拒绝带句末标点的正文误匹配。
+  - 新增 `test_enhanced_detector_keeps_headings_after_sentence_lines` 锁定该切章回归。
+- 真实 smoke 结果：
+  - run id：`goal19-20260529015029`
+  - import task：`1780019444851559`
+  - analysis_status：`completed`
+  - 资产计数：chapters=6、characters=10、relationships=15、timeline=20、world=1
+  - analysis_quality_issues：空
+  - AI 写作：真实模型返回 save_asset 卡
+  - 保存章节：`96db28b2-c137-4b65-9c5d-c50f936d46a5`
+  - editor：可定位保存候选，候选操作入口可见
+  - mobile workspace smoke：已截图
+- 截图：
+  - `project-docs/screenshots/goal19/workspace-after-import.png`
+  - `project-docs/screenshots/goal19/extract-diagnostics-real.png`
+  - `project-docs/screenshots/goal19/dashboard-real-quality.png`
+  - `project-docs/screenshots/goal19/characters-real.png`
+  - `project-docs/screenshots/goal19/world-real.png`
+  - `project-docs/screenshots/goal19/save-card-real.png`
+  - `project-docs/screenshots/goal19/editor-saved-candidate.png`
+  - `project-docs/screenshots/goal19/mobile-workspace-smoke.png`
+- 当前判断：
+  - Goal 19 的核心真实闭环已经跑通：导入 -> 提取 -> 质量诊断 -> AI 写作 -> save_asset -> 用户确认保存 -> editor 候选管理。
+  - 仍保留两个风险：本地 `.env` 尚未配置持久管理员密码 / session secret；项目状态页的“创作就绪”质量提示比导入质量闸门更严格，后续需要解释或统一语义。
