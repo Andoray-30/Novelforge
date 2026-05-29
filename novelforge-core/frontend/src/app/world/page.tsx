@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft,
   BookOpen,
@@ -294,6 +294,8 @@ function buildWorldFactGroups(worldSettings: WorldSetting[], worldItems: Content
 
 export default function WorldSettingsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const directAssetId = searchParams.get('assetId');
   const { currentSession, currentSessionId } = useSessions();
   const selectedNovelId = useAppStore((state) => state.selectedNovelId);
   const [worldItems, setWorldItems] = useState<ContentItem[]>([]);
@@ -382,7 +384,7 @@ export default function WorldSettingsPage() {
     [selectedNovelId, timelineItems, worldItems],
   );
 
-  const openWorldAsset = (item: ContentItem | null | undefined) => {
+  const openWorldAsset = useCallback((item: ContentItem | null | undefined) => {
     if (!item) return;
     const result = resolveContentItemReopen(item, selectedNovelId);
     if (result.kind === 'error') {
@@ -396,7 +398,31 @@ export default function WorldSettingsPage() {
     setActiveArtifacts([result.artifact]);
     setArtifactPanelVisible(true);
     setSaveMessage(result.message);
-  };
+  }, [router, selectedNovelId]);
+
+  useEffect(() => {
+    if (!directAssetId) return;
+    let disposed = false;
+
+    const openDirectAsset = async () => {
+      try {
+        const item = await contentService.getById(directAssetId);
+        if (disposed) return;
+        if (currentSessionId && item.metadata.session_id && item.metadata.session_id !== currentSessionId) {
+          setError('该资产不属于当前项目，请先切换到对应项目后再查看。');
+          return;
+        }
+        openWorldAsset(item);
+      } catch (openError) {
+        if (!disposed) setError(openError instanceof Error ? openError.message : '打开写回资产失败');
+      }
+    };
+
+    void openDirectAsset();
+    return () => {
+      disposed = true;
+    };
+  }, [currentSessionId, directAssetId, openWorldAsset, selectedNovelId]);
 
   const bindWorldAssetToSelectedNovel = async (item: ContentItem) => {
     if (!selectedNovelId || !isUnassignedNovelScopedContentItem(item)) {

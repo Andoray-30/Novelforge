@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getChapterIndexRecoveryDetails, getRepairApplyWrittenAssets, getRepairPreviewWritebackDetails, getTaskSummary } from './task-summary'
+import { getChapterIndexRecoveryDetails, getRepairApplyWrittenAssetHref, getRepairApplyWrittenAssets, getRepairPreviewWritebackDetails, getTaskSummary } from './task-summary'
 
 describe('TaskCenter summaries', () => {
   it('shows reused chapter index history in repair previews', () => {
@@ -82,5 +82,11 @@ describe('TaskCenter summaries', () => {
       { id: 'time-1', type: 'timeline', title: '并肩前行' },
     ])
     expect(getTaskSummary({ type: 'import_repair_apply', status: 'COMPLETED', result })).toContain('新增修复资产 2 个')
+  })
+
+  it('routes written repair assets to their owning library page', () => {
+    expect(getRepairApplyWrittenAssetHref({ id: 'rel-1', type: 'relationship', title: '关系' })).toBe('/characters?assetId=rel-1')
+    expect(getRepairApplyWrittenAssetHref({ id: 'timeline 1', type: 'timeline', title: '时间线' })).toBe('/world?assetId=timeline%201')
+    expect(getRepairApplyWrittenAssetHref({ id: 'unknown', type: 'note', title: '未知' })).toBe('/analytics')
   })
 })

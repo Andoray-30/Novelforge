@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   AlertCircle,
   ArrowLeft,
@@ -217,6 +217,8 @@ function getAssetTypeLabel(type: string): string {
 
 export default function CharactersPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const directAssetId = searchParams.get('assetId');
   const { currentSession, currentSessionId } = useSessions();
   const selectedNovelId = useAppStore((state) => state.selectedNovelId);
   const [characters, setCharacters] = useState<Character[]>([]);
@@ -332,7 +334,7 @@ export default function CharactersPage() {
     [characterItems, relationshipItems, selectedNovelId],
   );
 
-  const openContentAsset = (item: ContentItem) => {
+  const openContentAsset = useCallback((item: ContentItem) => {
     const result = resolveContentItemReopen(item, selectedNovelId);
     if (result.kind === 'error') {
       setError(result.message);
@@ -345,7 +347,31 @@ export default function CharactersPage() {
     setActiveArtifacts([result.artifact]);
     setArtifactPanelVisible(true);
     setSaveMessage(result.message);
-  };
+  }, [router, selectedNovelId]);
+
+  useEffect(() => {
+    if (!directAssetId) return;
+    let disposed = false;
+
+    const openDirectAsset = async () => {
+      try {
+        const item = await contentService.getById(directAssetId);
+        if (disposed) return;
+        if (currentSessionId && item.metadata.session_id && item.metadata.session_id !== currentSessionId) {
+          setError('该资产不属于当前项目，请先切换到对应项目后再查看。');
+          return;
+        }
+        openContentAsset(item);
+      } catch (openError) {
+        if (!disposed) setError(openError instanceof Error ? openError.message : '打开写回资产失败');
+      }
+    };
+
+    void openDirectAsset();
+    return () => {
+      disposed = true;
+    };
+  }, [currentSessionId, directAssetId, openContentAsset, selectedNovelId]);
 
   const handleSaveArtifact = async (artifact: ArtifactData, updatedData: Record<string, unknown>) => {
     setError(null);

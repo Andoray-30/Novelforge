@@ -145,6 +145,17 @@ export function getRepairApplyWrittenAssets(resultValue: unknown): RepairApplyWr
     .filter((asset) => asset.id && asset.type)
 }
 
+export function getRepairApplyWrittenAssetHref(asset: RepairApplyWrittenAsset): string {
+  const encodedId = encodeURIComponent(asset.id)
+  if (asset.type === 'relationship' || asset.type === 'character') {
+    return `/characters?assetId=${encodedId}`
+  }
+  if (asset.type === 'timeline' || asset.type === 'world') {
+    return `/world?assetId=${encodedId}`
+  }
+  return '/analytics'
+}
+
 export function getTaskSummary(task: {
   type?: string
   status?: string

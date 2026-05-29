@@ -10,7 +10,7 @@ import { emitTaskLifecycleEvent } from '@/lib/task-events'
 import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress-bar'
 import { cn } from '@/lib/utils'
-import { getChapterIndexRecoveryDetails, getRepairApplyWrittenAssets, getRepairPreviewWritebackDetails, getTaskSummary, normalizeTaskStatus, REPAIR_PREVIEW_TASK_TYPES } from './task-summary'
+import { getChapterIndexRecoveryDetails, getRepairApplyWrittenAssetHref, getRepairApplyWrittenAssets, getRepairPreviewWritebackDetails, getTaskSummary, normalizeTaskStatus, REPAIR_PREVIEW_TASK_TYPES } from './task-summary'
 
 const TERMINAL_STATUSES = new Set(['COMPLETED', 'FAILED', 'CANCELLED'])
 const ACTIVE_STATUSES = new Set(['PENDING', 'RUNNING'])
@@ -336,6 +336,10 @@ export const TaskCenter = () => {
     }
   }
 
+  const openWrittenAsset = (asset: { id: string; type: string; title: string }) => {
+    router.push(getRepairApplyWrittenAssetHref(asset))
+  }
+
   return (
     <div className="fixed bottom-24 left-3 right-3 z-[60] flex max-h-[42vh] flex-col gap-2 overflow-y-auto animate-in slide-in-from-bottom-4 duration-300 md:bottom-6 md:left-auto md:right-6 md:w-full md:max-w-xs md:gap-3 md:overflow-visible md:animate-in md:slide-in-from-right-5">
       {tasks.map((task) => {
@@ -503,7 +507,15 @@ export const TaskCenter = () => {
                     {writtenAssets.length > 0 ? (
                       <ul className="mt-1 list-disc space-y-1 pl-4">
                         {writtenAssets.slice(0, 4).map((asset) => (
-                          <li key={asset.id}>{asset.type === 'relationship' ? '关系' : asset.type === 'timeline' ? '时间线' : asset.type}：{asset.title}</li>
+                          <li key={asset.id}>
+                            <button
+                              type="button"
+                              onClick={() => openWrittenAsset(asset)}
+                              className="text-left underline decoration-primary/40 underline-offset-2 transition hover:text-foreground"
+                            >
+                              {asset.type === 'relationship' ? '关系' : asset.type === 'timeline' ? '时间线' : asset.type}：{asset.title}
+                            </button>
+                          </li>
                         ))}
                         {writtenAssets.length > 4 ? <li>还有 {writtenAssets.length - 4} 个修复资产</li> : null}
                       </ul>

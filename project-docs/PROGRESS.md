@@ -5616,3 +5616,22 @@
 - 当前边界：
   - 目前是跳转到资产页，不是直接打开具体资产详情面板。
   - 下一步可把 `written_assets[].id` 与各页面 ArtifactPanel / 详情面板打通，做到点击某个写回资产后直接打开。
+
+### 2026-05-29 Goal 21 后续：写回资产直达详情
+
+- TaskCenter 写回完成卡中的新增修复资产现在可以直接点击：
+  - 关系 / 角色资产跳转到 `/characters?assetId=...`。
+  - 时间线 / 世界观资产跳转到 `/world?assetId=...`。
+- Characters / World 页面新增 `assetId` 查询参数处理：
+  - 页面加载后通过 `contentService.getById(...)` 读取指定资产。
+  - 校验资产 `session_id` 与当前项目一致。
+  - 复用现有 `ArtifactPanel` 打开资产，保持当前编辑 / 保存链路不变。
+- 新增 `getRepairApplyWrittenAssetHref(...)` helper，并补 TaskCenter 单测。
+- 测试：
+  - 前端 `npx.cmd tsc --noEmit --incremental false` 通过。
+  - TaskCenter Vitest：`5 passed`。
+  - 前端全量 Vitest：`27 passed / 111 passed`。
+  - 前端 build 通过，且 direct-open 相关 hook 依赖警告已清理。
+- 当前边界：
+  - 仍然是轻量 query 参数直达，不是完整资产详情路由重构。
+  - 后续可以把 direct-open 逻辑抽成共享 hook，供 Analytics / 主工作台统一复用。
