@@ -21,6 +21,12 @@ export interface RepairPreviewWritebackDetails {
   hasWritableAssets: boolean
 }
 
+export interface RepairApplyWrittenAsset {
+  id: string
+  type: string
+  title: string
+}
+
 function numberFromRecord(record: Record<string, unknown> | null, key: string): number | null {
   const value = record?.[key]
   return typeof value === 'number' && Number.isFinite(value) ? value : null
@@ -127,6 +133,18 @@ export function getRepairPreviewWritebackDetails(resultValue: unknown): RepairPr
   }
 }
 
+export function getRepairApplyWrittenAssets(resultValue: unknown): RepairApplyWrittenAsset[] {
+  const result = asRecord(resultValue)
+  const rawAssets = asRecordArray(result?.written_assets)
+  return rawAssets
+    .map((asset) => ({
+      id: typeof asset.id === 'string' ? asset.id : '',
+      type: typeof asset.type === 'string' ? asset.type : '',
+      title: typeof asset.title === 'string' && asset.title.trim() ? asset.title.trim() : typeof asset.id === 'string' ? asset.id : '未命名修复资产',
+    }))
+    .filter((asset) => asset.id && asset.type)
+}
+
 export function getTaskSummary(task: {
   type?: string
   status?: string
@@ -195,8 +213,9 @@ export function getTaskSummary(task: {
       : {}
     const relationships = typeof result.relationships_count === 'number' ? result.relationships_count : 0
     const timeline = typeof result.timeline_count === 'number' ? result.timeline_count : 0
+    const writtenAssets = getRepairApplyWrittenAssets(result)
     return normalizeTaskStatus(task.status) === 'COMPLETED'
-      ? `修复写回完成：关系 ${relationships} 条，时间线 ${timeline} 条。`
+      ? `修复写回完成：关系 ${relationships} 条，时间线 ${timeline} 条，新增修复资产 ${writtenAssets.length || relationships + timeline} 个。`
       : task.message || '修复写回正在处理中...'
   }
 

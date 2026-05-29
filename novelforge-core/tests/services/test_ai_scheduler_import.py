@@ -1319,6 +1319,11 @@ def test_import_repair_apply_task_writes_confirmed_preview_assets():
     assert result["write_mode"] == "confirmed"
     assert result["relationships_count"] == 1
     assert result["timeline_count"] == 1
+    assert len(result["created_content_ids"]) == 2
+    assert result["written_assets"][0]["type"] == "relationship"
+    assert result["written_assets"][0]["id"] == relationship_items[0].metadata.id
+    assert result["written_assets"][1]["type"] == "timeline"
+    assert result["written_assets"][1]["id"] == timeline_items[0].metadata.id
     assert relationship_items[0].metadata.tags[0] == "repair-preview"
     assert relationship_items[0].relations == {"source": ["林墨"], "target": ["周岚"]}
     assert timeline_items[0].relations == {"characters": ["林墨", "周岚"], "locations": ["雨城"]}
@@ -1384,6 +1389,8 @@ def test_import_repair_apply_task_skips_duplicate_relationship_and_timeline_asse
 
     assert result["relationships_count"] == 0
     assert result["timeline_count"] == 0
+    assert result["created_content_ids"] == []
+    assert result["written_assets"] == []
     assert len([item for item in content_manager.items if item.metadata.type == ContentType.RELATIONSHIP]) == 1
     assert len([item for item in content_manager.items if item.metadata.type == ContentType.TIMELINE]) == 1
 

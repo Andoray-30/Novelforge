@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { Loader2, CheckCircle2, AlertCircle, Info, X } from 'lucide-react'
 import { taskService } from '@/lib/api/novelforge-api'
 import { useAppStore } from '@/lib/hooks/use-app-store'
@@ -10,7 +10,7 @@ import { emitTaskLifecycleEvent } from '@/lib/task-events'
 import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress-bar'
 import { cn } from '@/lib/utils'
-import { getChapterIndexRecoveryDetails, getRepairPreviewWritebackDetails, getTaskSummary, normalizeTaskStatus, REPAIR_PREVIEW_TASK_TYPES } from './task-summary'
+import { getChapterIndexRecoveryDetails, getRepairApplyWrittenAssets, getRepairPreviewWritebackDetails, getTaskSummary, normalizeTaskStatus, REPAIR_PREVIEW_TASK_TYPES } from './task-summary'
 
 const TERMINAL_STATUSES = new Set(['COMPLETED', 'FAILED', 'CANCELLED'])
 const ACTIVE_STATUSES = new Set(['PENDING', 'RUNNING'])
@@ -51,6 +51,7 @@ function persistNotifiedTaskStates(states: Record<string, string>) {
 export const TaskCenter = () => {
   const { activeTasks, updateTask, removeTask, activeConversationId, currentSessionId } = useAppStore()
   const pathname = usePathname()
+  const router = useRouter()
   const tasks = Object.values(activeTasks)
 
   const timers = useRef<Record<string, NodeJS.Timeout>>({})
@@ -348,6 +349,11 @@ export const TaskCenter = () => {
         const writebackDetails = canApplyRepairPreview
           ? getRepairPreviewWritebackDetails(task.result)
           : null
+        const writtenAssets = isCompleted && task.type === 'import_repair_apply'
+          ? getRepairApplyWrittenAssets(task.result)
+          : []
+        const hasWrittenRelationships = writtenAssets.some((asset) => asset.type === 'relationship')
+        const hasWrittenTimeline = writtenAssets.some((asset) => asset.type === 'timeline')
 
         return (
           <Card
@@ -488,6 +494,49 @@ export const TaskCenter = () => {
                     >
                       {applyingRepairTaskId === task.id ? '提交中...' : writebackDetails?.hasWritableAssets === false ? '无新增可写回' : '确认写回修复资产'}
                     </button>
+                  </div>
+                ) : null}
+
+                {isCompleted && task.type === 'import_repair_apply' ? (
+                  <div className="mt-2 rounded-md border border-primary/15 bg-primary/5 p-2 text-[10px] text-muted-foreground">
+                    <div className="font-semibold text-foreground">已写入项目记忆库</div>
+                    {writtenAssets.length > 0 ? (
+                      <ul className="mt-1 list-disc space-y-1 pl-4">
+                        {writtenAssets.slice(0, 4).map((asset) => (
+                          <li key={asset.id}>{asset.type === 'relationship' ? '关系' : asset.type === 'timeline' ? '时间线' : asset.type}：{asset.title}</li>
+                        ))}
+                        {writtenAssets.length > 4 ? <li>还有 {writtenAssets.length - 4} 个修复资产</li> : null}
+                      </ul>
+                    ) : (
+                      <p className="mt-1">本次写回没有新增资产，可能都被判定为重复项。</p>
+                    )}
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {hasWrittenRelationships ? (
+                        <button
+                          type="button"
+                          onClick={() => router.push('/characters')}
+                          className="rounded-md border border-primary/20 bg-background px-2 py-1 font-semibold text-foreground transition hover:bg-primary/10"
+                        >
+                          查看关系
+                        </button>
+                      ) : null}
+                      {hasWrittenTimeline ? (
+                        <button
+                          type="button"
+                          onClick={() => router.push('/world')}
+                          className="rounded-md border border-primary/20 bg-background px-2 py-1 font-semibold text-foreground transition hover:bg-primary/10"
+                        >
+                          查看时间线
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => router.push('/analytics')}
+                        className="rounded-md border border-primary/20 bg-background px-2 py-1 font-semibold text-foreground transition hover:bg-primary/10"
+                      >
+                        查看质量
+                      </button>
+                    </div>
                   </div>
                 ) : null}
               </div>

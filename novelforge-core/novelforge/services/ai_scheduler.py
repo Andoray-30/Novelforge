@@ -895,6 +895,7 @@ class AITaskScheduler:
         repair_run_id = task.parameters.get("repair_run_id") or f"repair_{uuid.uuid4().hex[:12]}"
         relationships_written = 0
         timeline_written = 0
+        written_assets: List[Dict[str, Any]] = []
 
         from ..content.models import ContentItem, ContentMetadata
 
@@ -929,10 +930,11 @@ class AITaskScheduler:
                 if rel_key in existing_relationship_keys:
                     continue
                 rel_id = f"rel_{session_id}_{uuid.uuid4().hex[:8]}"
-                await self.content_manager.create_content(ContentItem(
+                rel_title = f"{rel_source} -> {rel_target} ({rel_type})"
+                created_id = await self.content_manager.create_content(ContentItem(
                     metadata=ContentMetadata(
                         id=rel_id,
-                        title=f"{rel_source} -> {rel_target} ({rel_type})",
+                        title=rel_title,
                         type="relationship",
                         session_id=session_id,
                         parent_id=parent_id if isinstance(parent_id, str) and parent_id.strip() else None,
@@ -948,6 +950,14 @@ class AITaskScheduler:
                     relations={"source": [rel_source], "target": [rel_target]},
                 ))
                 relationships_written += 1
+                written_assets.append({
+                    "id": created_id or rel_id,
+                    "type": "relationship",
+                    "title": rel_title,
+                    "repair_run_id": repair_run_id,
+                    "source": rel_source,
+                    "target": rel_target,
+                })
                 existing_relationship_keys.add(rel_key)
 
         if "timeline" in apply_types:
@@ -971,7 +981,7 @@ class AITaskScheduler:
                     f"【涉及角色】{', '.join(str(item) for item in characters) if characters else '无'}",
                     f"【涉及地点】{', '.join(str(item) for item in locations) if locations else '无'}",
                 ])
-                await self.content_manager.create_content(ContentItem(
+                created_id = await self.content_manager.create_content(ContentItem(
                     metadata=ContentMetadata(
                         id=event_id,
                         title=event_title,
@@ -993,6 +1003,12 @@ class AITaskScheduler:
                     },
                 ))
                 timeline_written += 1
+                written_assets.append({
+                    "id": created_id or event_id,
+                    "type": "timeline",
+                    "title": event_title,
+                    "repair_run_id": repair_run_id,
+                })
                 existing_timeline_keys.add(event_key)
 
         task.progress = 0.95
@@ -1004,6 +1020,8 @@ class AITaskScheduler:
             "repair_run_id": repair_run_id,
             "relationships_count": relationships_written,
             "timeline_count": timeline_written,
+            "created_content_ids": [asset["id"] for asset in written_assets],
+            "written_assets": written_assets,
             "write_mode": "confirmed",
         }
     

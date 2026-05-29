@@ -5589,3 +5589,30 @@
 - 当前边界：
   - 仍是任务中心级确认，还不是大型 diff viewer。
   - 下一步可把写回完成后的新增修复资产入口回链到 Extract / Dashboard，让用户直接查看已写入的关系和时间线资产。
+
+### 2026-05-29 Goal 21 后续：修复写回完成回链
+
+- 后端 `import_repair_apply` 结果新增：
+  - `created_content_ids`
+  - `written_assets`
+- 每个写入资产记录包含：
+  - `id`
+  - `type`
+  - `title`
+  - `repair_run_id`
+  - 关系资产额外包含 `source / target`
+- TaskCenter 对已完成的 `import_repair_apply` 任务新增“已写入项目记忆库”区块：
+  - 显示前几个新增关系 / 时间线修复资产。
+  - 如果全部被判定为重复项，会明确提示没有新增资产。
+  - 提供跳转入口：查看关系、查看时间线、查看质量。
+- 测试：
+  - 后端 repair apply 相关测试：`2 passed`。
+  - `compileall` 通过。
+  - 前端 `npx.cmd tsc --noEmit --incremental false` 通过。
+  - TaskCenter Vitest：`4 passed`。
+  - 后端相关回归：`49 passed`。
+  - 前端全量 Vitest：`27 passed / 110 passed`。
+  - 前端 build 通过。
+- 当前边界：
+  - 目前是跳转到资产页，不是直接打开具体资产详情面板。
+  - 下一步可把 `written_assets[].id` 与各页面 ArtifactPanel / 详情面板打通，做到点击某个写回资产后直接打开。

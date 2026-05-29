@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getChapterIndexRecoveryDetails, getRepairPreviewWritebackDetails, getTaskSummary } from './task-summary'
+import { getChapterIndexRecoveryDetails, getRepairApplyWrittenAssets, getRepairPreviewWritebackDetails, getTaskSummary } from './task-summary'
 
 describe('TaskCenter summaries', () => {
   it('shows reused chapter index history in repair previews', () => {
@@ -65,5 +65,22 @@ describe('TaskCenter summaries', () => {
       applyTypes: ['relationships', 'timeline'],
       hasWritableAssets: true,
     })
+  })
+
+  it('summarizes written assets after repair apply', () => {
+    const result = {
+      relationships_count: 1,
+      timeline_count: 1,
+      written_assets: [
+        { id: 'rel-1', type: 'relationship', title: '林墨 -> 周岚' },
+        { id: 'time-1', type: 'timeline', title: '并肩前行' },
+      ],
+    }
+
+    expect(getRepairApplyWrittenAssets(result)).toEqual([
+      { id: 'rel-1', type: 'relationship', title: '林墨 -> 周岚' },
+      { id: 'time-1', type: 'timeline', title: '并肩前行' },
+    ])
+    expect(getTaskSummary({ type: 'import_repair_apply', status: 'COMPLETED', result })).toContain('新增修复资产 2 个')
   })
 })
