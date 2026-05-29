@@ -117,6 +117,8 @@ class ExtractionService:
             "analysis_diagnostics": diagnostics,
             "candidate_counts": result.diagnostics.candidate_counts,
             "failed_chapters": result.diagnostics.failed_chapters,
+            "chapter_index_attempts": result.diagnostics.chapter_index_attempts,
+            "chapter_index_status": result.diagnostics.chapter_index_status,
             "relationship_unresolved_endpoints": result.diagnostics.relationship_unresolved_endpoints,
             "timeline_mismatch_events": result.diagnostics.timeline_mismatch_events,
             "model_route": model_route,

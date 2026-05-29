@@ -272,6 +272,45 @@ P1 已完成第一版代码落地：
 - 完整导入任务允许先结束为 `partial`，并提供“继续重跑失败章节”入口。
 - merge 可以读取多轮成功结果。
 
+#### 2026-05-29 进展
+
+P2 已完成第一步“attempt 可观测化”，先把失败章节从一个笼统的 `failed_chapters` 升级为可诊断的逐章/逐次记录：
+
+- `ImportAnalysisDiagnostics` 新增：
+  - `chapter_index_attempts`
+  - `chapter_index_status`
+- 每次章节 index 模型调用会记录：
+  - `chapter_id / chapter_title / chapter_order`
+  - `attempt_number`
+  - `status`
+  - `model_used`
+  - `latency_ms`
+  - `error_type`
+  - `raw_response_hash`
+  - `raw_response_chars`
+  - `parsed_candidate_counts`
+  - `retry_count`
+  - `needs_retry`
+- 错误会归类为：
+  - `rate_limited`
+  - `auth_failed`
+  - `gateway_timeout`
+  - `provider_unavailable`
+  - `json_invalid`
+  - `timeout`
+  - `empty_content`
+- `ExtractionService.extract_chapter_index_assets(...)`、导入深度分析结果、章节修复 preview 结果都会透传这些字段。
+- `candidate_counts` 会补充：
+  - `chapter_index_attempts`
+  - `chapter_index_failed_attempts`
+  - `chapter_index_needs_retry`
+
+当前边界：
+
+- attempt 目前随导入任务结果持久化，尚未拆成独立数据库表。
+- 任务中途进程崩溃时，已完成章节的 attempt 仍可能来不及落库。
+- 下一步应把成功/失败 attempt 在每章结束后立即写入可查询存储，并让 rerun 默认只选择 `needs_retry=true` 的章节。
+
 ### P3：多模型提取流水线
 
 - 快速模型做广覆盖。

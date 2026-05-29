@@ -10,10 +10,12 @@ useful writing, not just field extraction.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -111,6 +113,8 @@ class ImportAnalysisDiagnostics(BaseModel):
     relationship_low_confidence_resolved_endpoints: List[Dict[str, Any]] = Field(default_factory=list)
     timeline_mismatch_events: List[Dict[str, str]] = Field(default_factory=list)
     failed_chapters: List[Dict[str, str]] = Field(default_factory=list)
+    chapter_index_attempts: List[Dict[str, Any]] = Field(default_factory=list)
+    chapter_index_status: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class ChapterIndexMergeResult(BaseModel):
@@ -174,9 +178,14 @@ class ChapterIndexExtractor:
 
         semaphore = asyncio.Semaphore(self.chapter_concurrency)
 
-        async def run_with_limit(source: ChapterSource) -> ChapterIndex:
+        async def run_with_limit(source: ChapterSource) -> Dict[str, Any]:
             async with semaphore:
-                return await self._extract_chapter_index(source)
+                try:
+                    index, attempts = await self._extract_chapter_index_with_attempts(source)
+                    return {"source": source, "index": index, "attempts": attempts, "error": None}
+                except Exception as exc:
+                    attempts = getattr(exc, "attempts", [])
+                    return {"source": source, "index": None, "attempts": attempts, "error": exc}
 
         tasks = [run_with_limit(source) for source in sources]
         raw_results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -187,10 +196,42 @@ class ChapterIndexExtractor:
                 diagnostics.failed_chapters.append(
                     {"chapter_id": source.id, "title": source.title, "error": str(result)}
                 )
+                diagnostics.chapter_index_status.append(
+                    self._build_chapter_status(source, attempts=[], error=result)
+                )
                 continue
-            indices.append(result)
+            attempts = result.get("attempts") if isinstance(result, dict) else []
+            diagnostics.chapter_index_attempts.extend(attempts or [])
+            index = result.get("index") if isinstance(result, dict) else None
+            error = result.get("error") if isinstance(result, dict) else None
+            if error is not None:
+                logger.warning("Chapter index failed for %s: %s", source.title, error)
+                diagnostics.failed_chapters.append(
+                    {
+                        "chapter_id": source.id,
+                        "title": source.title,
+                        "error": str(error),
+                        "error_type": self._classify_error(error),
+                    }
+                )
+                diagnostics.chapter_index_status.append(
+                    self._build_chapter_status(source, attempts=attempts or [], error=error)
+                )
+                continue
+            if isinstance(index, ChapterIndex):
+                indices.append(index)
+                diagnostics.chapter_index_status.append(
+                    self._build_chapter_status(source, attempts=attempts or [], index=index)
+                )
 
         diagnostics.candidate_counts["chapters_indexed"] = len(indices)
+        diagnostics.candidate_counts["chapter_index_attempts"] = len(diagnostics.chapter_index_attempts)
+        diagnostics.candidate_counts["chapter_index_failed_attempts"] = sum(
+            1 for attempt in diagnostics.chapter_index_attempts if attempt.get("status") != "success"
+        )
+        diagnostics.candidate_counts["chapter_index_needs_retry"] = sum(
+            1 for status in diagnostics.chapter_index_status if status.get("needs_retry")
+        )
         return self.merge_indices(indices, diagnostics=diagnostics)
 
     async def extract_chapter_indices(self, chapters: List[Dict[str, Any]]) -> ChapterIndexMergeResult:
@@ -215,21 +256,160 @@ class ChapterIndexExtractor:
         return max(minimum, min(value, maximum))
 
     async def _extract_chapter_index(self, chapter: ChapterSource) -> ChapterIndex:
+        index, _attempts = await self._extract_chapter_index_with_attempts(chapter)
+        return index
+
+    async def _extract_chapter_index_with_attempts(self, chapter: ChapterSource) -> tuple[ChapterIndex, List[Dict[str, Any]]]:
         prompt = self._build_chapter_prompt(chapter)
         last_error: Optional[Exception] = None
-        for attempt in range(self.config.max_retries):
+        attempts: List[Dict[str, Any]] = []
+        max_retries = max(1, int(getattr(self.config, "max_retries", 1) or 1))
+        for attempt in range(max_retries):
+            started = time.perf_counter()
             try:
                 response = await self.ai_service.chat(
                     prompt,
                     max_tokens=self.max_tokens,
                     timeout=self.config.timeout,
                 )
-                return self._parse_chapter_response(response, chapter)
+                index = self._parse_chapter_response(response, chapter)
+                attempts.append(
+                    self._build_attempt_record(
+                        chapter,
+                        attempt_number=attempt + 1,
+                        status="success",
+                        latency_ms=self._elapsed_ms(started),
+                        raw_response=response,
+                        parsed_candidate_counts=self._index_candidate_counts(index),
+                        retry_count=attempt,
+                        needs_retry=False,
+                    )
+                )
+                return index, attempts
             except Exception as exc:
                 last_error = exc
-                if attempt < self.config.max_retries - 1:
+                is_final_attempt = attempt >= max_retries - 1
+                attempts.append(
+                    self._build_attempt_record(
+                        chapter,
+                        attempt_number=attempt + 1,
+                        status="failed",
+                        latency_ms=self._elapsed_ms(started),
+                        error=exc,
+                        retry_count=attempt,
+                        needs_retry=is_final_attempt,
+                    )
+                )
+                if not is_final_attempt:
                     await asyncio.sleep(self.config.retry_delay)
-        raise last_error or RuntimeError("chapter index extraction failed")
+        final_error = last_error or RuntimeError("chapter index extraction failed")
+        setattr(final_error, "attempts", attempts)
+        raise final_error
+
+    def _build_attempt_record(
+        self,
+        chapter: ChapterSource,
+        *,
+        attempt_number: int,
+        status: str,
+        latency_ms: int,
+        raw_response: Optional[str] = None,
+        parsed_candidate_counts: Optional[Dict[str, int]] = None,
+        error: Optional[Exception] = None,
+        retry_count: int = 0,
+        needs_retry: bool = False,
+    ) -> Dict[str, Any]:
+        response_text = raw_response or ""
+        model_used = self._current_model_name()
+        record: Dict[str, Any] = {
+            "chapter_id": chapter.id,
+            "chapter_title": chapter.title,
+            "chapter_order": chapter.order,
+            "attempt_number": attempt_number,
+            "status": status,
+            "model_used": model_used,
+            "latency_ms": latency_ms,
+            "error_type": self._classify_error(error) if error else None,
+            "error": str(error)[:500] if error else None,
+            "raw_response_hash": self._hash_response(response_text) if response_text else None,
+            "raw_response_chars": len(response_text),
+            "parsed_candidate_counts": parsed_candidate_counts or {},
+            "retry_count": retry_count,
+            "needs_retry": bool(needs_retry),
+        }
+        return record
+
+    def _build_chapter_status(
+        self,
+        chapter: ChapterSource,
+        *,
+        attempts: List[Dict[str, Any]],
+        index: Optional[ChapterIndex] = None,
+        error: Optional[Exception] = None,
+    ) -> Dict[str, Any]:
+        latest_attempt = attempts[-1] if attempts else {}
+        success = index is not None and error is None
+        parsed_counts = self._index_candidate_counts(index) if index is not None else {}
+        return {
+            "chapter_id": chapter.id,
+            "chapter_title": chapter.title,
+            "chapter_order": chapter.order,
+            "status": "success" if success else "failed",
+            "model_used": latest_attempt.get("model_used") or self._current_model_name(),
+            "attempt_count": len(attempts),
+            "latency_ms": sum(int(attempt.get("latency_ms") or 0) for attempt in attempts),
+            "error_type": latest_attempt.get("error_type") or (self._classify_error(error) if error else None),
+            "error": latest_attempt.get("error") or (str(error)[:500] if error else None),
+            "parsed_candidate_counts": parsed_counts,
+            "needs_retry": not success,
+        }
+
+    def _index_candidate_counts(self, index: Optional[ChapterIndex]) -> Dict[str, int]:
+        if index is None:
+            return {}
+        return {
+            "characters": len(index.chapter_characters),
+            "interactions": len(index.chapter_interactions),
+            "events": len(index.chapter_events),
+            "world_facts": len(index.chapter_world_facts),
+        }
+
+    def _current_model_name(self) -> str:
+        service_config = getattr(self.ai_service, "config", None)
+        model_name = getattr(service_config, "model", "") if service_config else ""
+        return str(model_name or "").strip()
+
+    @staticmethod
+    def _elapsed_ms(started: float) -> int:
+        return max(0, int(round((time.perf_counter() - started) * 1000)))
+
+    @staticmethod
+    def _hash_response(response: str) -> str:
+        return hashlib.sha256(response.encode("utf-8", errors="ignore")).hexdigest()[:16]
+
+    @staticmethod
+    def _classify_error(error: Optional[Exception]) -> str:
+        if error is None:
+            return ""
+        status_code = getattr(error, "status_code", None)
+        text = str(error).lower()
+        if status_code == 429 or "429" in text or "too many requests" in text:
+            return "rate_limited"
+        if status_code == 401 or "401" in text or "unauthorized" in text:
+            return "auth_failed"
+        if status_code == 403 or "403" in text or "forbidden" in text:
+            return "auth_failed"
+        if status_code == 504 or "504" in text or "gateway time" in text:
+            return "gateway_timeout"
+        if status_code and int(status_code) >= 500:
+            return "provider_unavailable"
+        if isinstance(error, json.JSONDecodeError) or "json" in text:
+            return "json_invalid"
+        if isinstance(error, TimeoutError) or "timeout" in text or "timed out" in text:
+            return "timeout"
+        if "empty content" in text:
+            return "empty_content"
+        return error.__class__.__name__
 
     def _build_chapter_prompt(self, chapter: ChapterSource) -> str:
         return f"""你是小说创作分析助手。请为单章建立结构化索引，目标是帮助后续 AI 写出动人、优美、有情绪张力的小说序章。

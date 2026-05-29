@@ -5464,3 +5464,23 @@
   - 后端相关测试 `41 passed`。
 - 当前边界：
   - 这还不是完整“可恢复章节 index”；失败章节持久化、增量重跑、模型健康历史和 UI 路由报告仍在下一轮。
+
+### 2026-05-29 Goal 21 后续：章节 index attempt 诊断 v1
+
+- 按 `EXTRACTION_PROVIDER_STRATEGY.md` 的 P2 计划推进可恢复章节 index 的第一步。
+- `ImportAnalysisDiagnostics` 新增 `chapter_index_attempts` 与 `chapter_index_status`：
+  - 每章每次模型调用记录 `model_used`、`latency_ms`、`error_type`、`raw_response_hash`、`parsed_candidate_counts`、`retry_count`、`needs_retry`。
+  - 失败章节会保留具体错误类型，便于区分 429、504、JSON 解析、timeout、empty content、provider/auth 等问题。
+  - `candidate_counts` 增加 attempt 总数、失败 attempt 数、需重跑章节数。
+- 结果透传：
+  - `ExtractionService.extract_chapter_index_assets(...)`
+  - 导入深度分析结果
+  - 章节级修复 preview 结果
+- 测试：
+  - 新增章节 index attempt 成功/失败诊断测试。
+  - `compileall` 通过。
+  - 后端相关测试在工作区临时目录下通过：`46 passed`。
+- 当前边界：
+  - attempt 目前随任务结果保存，尚未独立落入数据库中间表。
+  - 还未实现“只重跑 `needs_retry=true` 章节”的自动选择。
+  - 下一轮应把 attempt 存储从任务结果提升为可查询、可增量复跑的数据层。

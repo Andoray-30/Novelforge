@@ -8,10 +8,25 @@ from novelforge.extractors.chapter_index_extractor import (
     ChapterInteractionCandidate,
     ChapterWorldFactCandidate,
 )
+from novelforge.extractors.base_extractor import ExtractionConfig
 
 
 class DummyAIService:
     pass
+
+
+class ScriptedAIService:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.config = type("Config", (), {"model": "scripted-model"})()
+
+    async def chat(self, *_args, **_kwargs):
+        if not self.responses:
+            raise RuntimeError("no scripted response")
+        result = self.responses.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
 
 
 def build_extractor() -> ChapterIndexExtractor:
@@ -384,3 +399,82 @@ def test_chapter_index_does_not_flag_evidence_backed_event_as_mismatch():
 
     assert len(result.timeline_events) == 1
     assert result.diagnostics.timeline_mismatch_events == []
+
+
+def test_chapter_index_records_success_attempt_diagnostics():
+    extractor = ChapterIndexExtractor(ai_service=ScriptedAIService([
+        """
+        {
+          "chapter_characters": [{"name": "林墨", "evidence": ["林墨推开门。"]}],
+          "chapter_interactions": [],
+          "chapter_events": [{"title": "入夜", "description": "林墨推门入夜。", "evidence": ["林墨推开门。"]}],
+          "chapter_world_facts": [{"name": "旧宅", "category": "location", "description": "雨夜旧宅", "evidence": ["旧宅灯光昏暗。"]}]
+        }
+        """
+    ]))
+
+    result = asyncio.run(extractor.extract_and_merge([
+        {"id": "chapter-1", "title": "第一章", "chapter_index": 1, "content": "林墨推开门。"}
+    ]))
+
+    attempts = result.diagnostics.chapter_index_attempts
+    status = result.diagnostics.chapter_index_status
+    assert len(attempts) == 1
+    assert attempts[0]["status"] == "success"
+    assert attempts[0]["model_used"] == "scripted-model"
+    assert attempts[0]["raw_response_hash"]
+    assert attempts[0]["parsed_candidate_counts"] == {
+        "characters": 1,
+        "interactions": 0,
+        "events": 1,
+        "world_facts": 1,
+    }
+    assert status == [
+        {
+            "chapter_id": "chapter-1",
+            "chapter_title": "第一章",
+            "chapter_order": 1,
+            "status": "success",
+            "model_used": "scripted-model",
+            "attempt_count": 1,
+            "latency_ms": status[0]["latency_ms"],
+            "error_type": None,
+            "error": None,
+            "parsed_candidate_counts": {
+                "characters": 1,
+                "interactions": 0,
+                "events": 1,
+                "world_facts": 1,
+            },
+            "needs_retry": False,
+        }
+    ]
+    assert result.diagnostics.candidate_counts["chapter_index_attempts"] == 1
+    assert result.diagnostics.candidate_counts["chapter_index_needs_retry"] == 0
+
+
+def test_chapter_index_records_failed_attempts_as_retryable():
+    extractor = ChapterIndexExtractor(
+        ai_service=ScriptedAIService([TimeoutError("API request timed out (3s)")]),
+        config=ExtractionConfig(timeout=1.0, max_retries=1, retry_delay=0),
+    )
+
+    result = asyncio.run(extractor.extract_and_merge([
+        {"id": "chapter-2", "title": "第二章", "chapter_index": 2, "content": "小夏站在雨里。"}
+    ]))
+
+    assert result.characters == []
+    assert result.diagnostics.failed_chapters == [
+        {
+            "chapter_id": "chapter-2",
+            "title": "第二章",
+            "error": "API request timed out (3s)",
+            "error_type": "timeout",
+        }
+    ]
+    assert result.diagnostics.chapter_index_attempts[0]["status"] == "failed"
+    assert result.diagnostics.chapter_index_attempts[0]["error_type"] == "timeout"
+    assert result.diagnostics.chapter_index_attempts[0]["needs_retry"] is True
+    assert result.diagnostics.chapter_index_status[0]["needs_retry"] is True
+    assert result.diagnostics.candidate_counts["chapters_indexed"] == 0
+    assert result.diagnostics.candidate_counts["chapter_index_failed_attempts"] == 1

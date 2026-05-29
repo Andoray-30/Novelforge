@@ -565,6 +565,8 @@ class AITaskScheduler:
             "repair_diff": repair_diff,
             "candidate_counts": analysis.get("candidate_counts") or diagnostics.get("candidate_counts") or {},
             "failed_chapters": analysis.get("failed_chapters") or diagnostics.get("failed_chapters") or [],
+            "chapter_index_attempts": analysis.get("chapter_index_attempts") or diagnostics.get("chapter_index_attempts") or [],
+            "chapter_index_status": analysis.get("chapter_index_status") or diagnostics.get("chapter_index_status") or [],
             "relationship_unresolved_endpoints": (
                 analysis.get("relationship_unresolved_endpoints")
                 or diagnostics.get("relationship_unresolved_endpoints")
@@ -1074,6 +1076,8 @@ class AITaskScheduler:
             "analysis_diagnostics": diagnostics,
             "candidate_counts": diagnostics.get("candidate_counts", {}),
             "failed_chapters": diagnostics.get("failed_chapters", []),
+            "chapter_index_attempts": diagnostics.get("chapter_index_attempts", []),
+            "chapter_index_status": diagnostics.get("chapter_index_status", []),
             "relationship_unresolved_endpoints": diagnostics.get("relationship_unresolved_endpoints", []),
             "relationship_unresolved_details": diagnostics.get("relationship_unresolved_details", []),
             "relationship_endpoint_resolution": diagnostics.get("relationship_endpoint_resolution", []),
