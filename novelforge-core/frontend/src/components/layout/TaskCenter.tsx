@@ -10,7 +10,7 @@ import { emitTaskLifecycleEvent } from '@/lib/task-events'
 import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress-bar'
 import { cn } from '@/lib/utils'
-import { getTaskSummary, normalizeTaskStatus, REPAIR_PREVIEW_TASK_TYPES } from './task-summary'
+import { getChapterIndexRecoveryDetails, getTaskSummary, normalizeTaskStatus, REPAIR_PREVIEW_TASK_TYPES } from './task-summary'
 
 const TERMINAL_STATUSES = new Set(['COMPLETED', 'FAILED', 'CANCELLED'])
 const ACTIVE_STATUSES = new Set(['PENDING', 'RUNNING'])
@@ -342,6 +342,9 @@ export const TaskCenter = () => {
         const isCompleted = status === 'COMPLETED'
         const isFailed = status === 'FAILED'
         const canApplyRepairPreview = isCompleted && REPAIR_PREVIEW_TASK_TYPES.has(task.type || '')
+        const recoveryDetails = isCompleted && REPAIR_PREVIEW_TASK_TYPES.has(task.type || '')
+          ? getChapterIndexRecoveryDetails(task.result)
+          : null
 
         return (
           <Card
@@ -430,6 +433,34 @@ export const TaskCenter = () => {
                     <CheckCircle2 className="h-3 w-3" />
                     {getTaskSummary(task)}
                   </div>
+                ) : null}
+
+                {recoveryDetails ? (
+                  <details className="mt-2 rounded-md border border-primary/15 bg-primary/5 p-2 text-[10px] text-muted-foreground">
+                    <summary className="cursor-pointer font-semibold text-foreground">
+                      查看章节索引复用明细
+                    </summary>
+                    <div className="mt-2 space-y-2">
+                      {recoveryDetails.reused.length > 0 ? (
+                        <div>
+                          <div className="font-semibold text-green-700 dark:text-green-300">复用历史成功章</div>
+                          <ul className="mt-1 list-disc space-y-1 pl-4">
+                            {recoveryDetails.reused.slice(0, 5).map((item) => <li key={`reused-${item}`}>{item}</li>)}
+                          </ul>
+                          {recoveryDetails.reused.length > 5 ? <div className="mt-1">还有 {recoveryDetails.reused.length - 5} 章</div> : null}
+                        </div>
+                      ) : null}
+                      {recoveryDetails.retryable.length > 0 ? (
+                        <div>
+                          <div className="font-semibold text-amber-700 dark:text-amber-300">仍需重跑章节</div>
+                          <ul className="mt-1 list-disc space-y-1 pl-4">
+                            {recoveryDetails.retryable.slice(0, 5).map((item) => <li key={`retry-${item}`}>{item}</li>)}
+                          </ul>
+                          {recoveryDetails.retryable.length > 5 ? <div className="mt-1">还有 {recoveryDetails.retryable.length - 5} 章</div> : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  </details>
                 ) : null}
 
                 {canApplyRepairPreview ? (

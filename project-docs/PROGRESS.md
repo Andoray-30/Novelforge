@@ -5495,19 +5495,20 @@
   - 这样“重跑章节索引”会优先进入后端的失败章过滤逻辑，而不是默认全书重跑。
   - Extract 统计区新增 `chapter_index_history_reused / chapter_index_combined_indices` 标签。
   - TaskCenter 修复 preview 摘要会显示历史复用章数与合并索引章数，让用户知道本轮不是无差别全书重跑。
+  - TaskCenter 修复 preview 新增可展开明细：列出复用历史成功章节，以及仍需重跑章节和错误类型。
 - 测试：
   - 新增章节 index attempt 成功/失败诊断测试。
   - 新增章节修复按失败诊断筛选重跑章节测试。
   - 新增导入章节 index 即时持久化 run state 测试。
   - 新增章节修复 preview 复用历史成功 `ChapterIndex` 测试。
   - 新增/更新前端 task-events 诊断透传测试。
-  - 新增 TaskCenter 修复 preview 摘要测试。
+  - 新增 TaskCenter 修复 preview 摘要与单章明细测试。
   - `compileall` 通过。
   - 后端相关测试在工作区临时目录下通过：`50 passed`。
   - 前端 `npx.cmd tsc --noEmit --incremental false` 通过。
-  - 前端 Vitest：`26 passed / 105 passed`。
+  - 前端 Vitest：`26 passed / 106 passed`。
   - 前端 build 通过。
 - 当前边界：
   - attempt 目前落在 StorageManager key 中，尚未独立落入正式数据库中间表。
-  - 多轮成功结果合并已覆盖修复 preview；UI 已展示汇总复用数，但还没有展开到单章级详情。
-  - 下一轮应将 `chapter_index_run_*` 做成更稳定的可查询数据结构，或在 TaskCenter / Extract 中展示失败章与复用章明细。
+  - 多轮成功结果合并已覆盖修复 preview；UI 已展示汇总复用数和单章级详情。
+  - 下一轮应将 `chapter_index_run_*` 做成更稳定的可查询数据结构，或补独立查询 API。

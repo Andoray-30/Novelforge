@@ -328,12 +328,15 @@ P2 已完成第一步“attempt 可观测化”，先把失败章节从一个笼
 - UI 已显示历史复用状态：
   - Extract 统计区会识别 `chapter_index_history_reused / chapter_index_combined_indices`。
   - TaskCenter 修复 preview 摘要会显示“复用历史成功章 N 章，合并索引 M 章”。
+  - TaskCenter 修复 preview 可展开单章明细，显示：
+    - 已复用的历史成功章节
+    - 仍需重跑的章节及错误类型
 
 当前边界：
 
 - attempt 目前写入统一 StorageManager key，尚未拆成正式数据库表。
 - 多轮合并已覆盖修复 preview；正式导入主任务仍以当前任务结果为主。
-- 下一步应把 `chapter_index_run_*` 提升为更稳定的可查询数据结构，并考虑在 TaskCenter 中提供更细的失败章列表。
+- 下一步应把 `chapter_index_run_*` 提升为更稳定的可查询数据结构，并考虑增加独立的 run 查询 API，避免只能通过 task result 查看。
 
 ### P3：多模型提取流水线
 
