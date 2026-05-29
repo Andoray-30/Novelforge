@@ -125,6 +125,7 @@ class ExtractionService:
             "world_setting": result.world_setting,
             "timeline_events": result.timeline_events,
             "relationships": result.relationships,
+            "chapter_indices": [index.model_dump() for index in result.chapter_indices],
             "analysis_diagnostics": diagnostics,
             "candidate_counts": result.diagnostics.candidate_counts,
             "failed_chapters": result.diagnostics.failed_chapters,

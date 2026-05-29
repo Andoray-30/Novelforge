@@ -123,6 +123,7 @@ class ChapterIndexMergeResult(BaseModel):
     timeline_events: List[TimelineEvent] = Field(default_factory=list)
     world_setting: Optional[WorldSetting] = None
     diagnostics: ImportAnalysisDiagnostics = Field(default_factory=ImportAnalysisDiagnostics)
+    chapter_indices: List[ChapterIndex] = Field(default_factory=list)
 
 
 ChapterIndexAnalysis = ChapterIndexMergeResult
@@ -188,6 +189,12 @@ class ChapterIndexExtractor:
             async with semaphore:
                 try:
                     index, attempts = await self._extract_chapter_index_with_attempts(source)
+                    await self._record_diagnostic_event(
+                        {
+                            "event_type": "chapter_index",
+                            "record": index.model_dump(),
+                        }
+                    )
                     await self._record_diagnostic_event(
                         {
                             "event_type": "status",
@@ -570,6 +577,7 @@ class ChapterIndexExtractor:
             timeline_events=timeline_events,
             world_setting=world_setting,
             diagnostics=diagnostics,
+            chapter_indices=indices,
         )
 
     def merge_chapter_indices(

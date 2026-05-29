@@ -436,6 +436,7 @@ class AITaskScheduler:
             "total_chapters": len(chapters),
             "chapter_index_attempts": [],
             "chapter_index_status": [],
+            "chapter_indices": [],
             "created_at": now,
             "updated_at": now,
         }
@@ -457,6 +458,18 @@ class AITaskScheduler:
                     attempts = run_state.setdefault("chapter_index_attempts", [])
                     if isinstance(attempts, list):
                         attempts.append(record)
+                elif event_type == "chapter_index":
+                    indices = run_state.setdefault("chapter_indices", [])
+                    if isinstance(indices, list):
+                        chapter_id = record.get("chapter_id")
+                        replaced = False
+                        for index, existing in enumerate(indices):
+                            if isinstance(existing, dict) and existing.get("chapter_id") == chapter_id:
+                                indices[index] = record
+                                replaced = True
+                                break
+                        if not replaced:
+                            indices.append(record)
                 elif event_type == "status":
                     statuses = run_state.setdefault("chapter_index_status", [])
                     if isinstance(statuses, list):
@@ -502,6 +515,11 @@ class AITaskScheduler:
             )
             analysis["chapter_index_attempts"] = diagnostics["chapter_index_attempts"]
             analysis["chapter_index_status"] = diagnostics["chapter_index_status"]
+            analysis["chapter_indices"] = (
+                persisted_state.get("chapter_indices")
+                or analysis.get("chapter_indices")
+                or []
+            )
             counts = diagnostics.setdefault("candidate_counts", {})
             if isinstance(counts, dict):
                 counts["chapter_index_attempts"] = len(diagnostics["chapter_index_attempts"])
@@ -675,6 +693,7 @@ class AITaskScheduler:
             chapters,
             task,
         )
+        analysis = await self._merge_repair_analysis_with_previous_chapter_indices(analysis, task.parameters)
 
         diagnostics = analysis.get("analysis_diagnostics")
         if not isinstance(diagnostics, dict):
@@ -724,6 +743,7 @@ class AITaskScheduler:
                 or []
             ),
             "analysis_diagnostics": diagnostics,
+            "chapter_indices": analysis.get("chapter_indices") or [],
         }
 
         if repair_type == "relationships":
@@ -737,6 +757,107 @@ class AITaskScheduler:
         task.message = "重跑完成，已生成可复核结果。"
         await self._save_task(task)
         return result
+
+    def _previous_chapter_index_run_key(self, parameters: Dict[str, Any]) -> Optional[str]:
+        direct = parameters.get("chapter_index_run_key")
+        if isinstance(direct, str) and direct.strip():
+            return direct.strip()
+        diagnostics = parameters.get("analysis_diagnostics")
+        if isinstance(diagnostics, dict):
+            nested = diagnostics.get("chapter_index_run_key")
+            if isinstance(nested, str) and nested.strip():
+                return nested.strip()
+        return None
+
+    async def _merge_repair_analysis_with_previous_chapter_indices(
+        self,
+        analysis: Dict[str, Any],
+        parameters: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        previous_run_key = self._previous_chapter_index_run_key(parameters)
+        if not previous_run_key:
+            return analysis
+
+        previous_state = await self.storage.load(previous_run_key)
+        if not isinstance(previous_state, dict):
+            return analysis
+
+        previous_raw_indices = previous_state.get("chapter_indices")
+        current_raw_indices = analysis.get("chapter_indices")
+        if not isinstance(previous_raw_indices, list) or not isinstance(current_raw_indices, list):
+            return analysis
+
+        from ..extractors.chapter_index_extractor import ChapterIndex, ChapterIndexExtractor
+
+        combined_by_chapter: Dict[str, ChapterIndex] = {}
+        reused_chapters: List[str] = []
+        current_chapter_ids: set[str] = set()
+
+        for raw_index in current_raw_indices:
+            if not isinstance(raw_index, dict):
+                continue
+            try:
+                index = ChapterIndex(**raw_index)
+            except Exception:
+                continue
+            current_chapter_ids.add(index.chapter_id)
+
+        for raw_index in previous_raw_indices:
+            if not isinstance(raw_index, dict):
+                continue
+            try:
+                index = ChapterIndex(**raw_index)
+            except Exception:
+                continue
+            if index.chapter_id in current_chapter_ids:
+                continue
+            combined_by_chapter[index.chapter_id] = index
+            reused_chapters.append(index.chapter_id)
+
+        for raw_index in current_raw_indices:
+            if not isinstance(raw_index, dict):
+                continue
+            try:
+                index = ChapterIndex(**raw_index)
+            except Exception:
+                continue
+            combined_by_chapter[index.chapter_id] = index
+
+        if not reused_chapters:
+            return analysis
+
+        combined_indices = sorted(combined_by_chapter.values(), key=lambda item: item.chapter_order)
+        merge_result = ChapterIndexExtractor(ai_service=self.ai_service).merge_chapter_indices(combined_indices)
+        diagnostics = analysis.get("analysis_diagnostics")
+        if not isinstance(diagnostics, dict):
+            diagnostics = {}
+            analysis["analysis_diagnostics"] = diagnostics
+
+        diagnostics["chapter_index_history_run_key"] = previous_run_key
+        diagnostics["chapter_index_history_reused_chapters"] = reused_chapters
+        diagnostics["relationship_unresolved_endpoints"] = merge_result.diagnostics.relationship_unresolved_endpoints
+        diagnostics["relationship_unresolved_details"] = merge_result.diagnostics.relationship_unresolved_details
+        diagnostics["relationship_endpoint_resolution"] = merge_result.diagnostics.relationship_endpoint_resolution
+        diagnostics["relationship_low_confidence_resolved_endpoints"] = (
+            merge_result.diagnostics.relationship_low_confidence_resolved_endpoints
+        )
+        diagnostics["timeline_mismatch_events"] = merge_result.diagnostics.timeline_mismatch_events
+
+        counts = diagnostics.setdefault("candidate_counts", {})
+        if isinstance(counts, dict):
+            counts.update(merge_result.diagnostics.candidate_counts)
+            counts["chapter_index_history_reused"] = len(reused_chapters)
+            counts["chapter_index_combined_indices"] = len(combined_indices)
+
+        analysis["characters"] = merge_result.characters
+        analysis["relationships"] = merge_result.relationships
+        analysis["timeline_events"] = merge_result.timeline_events
+        analysis["world_setting"] = merge_result.world_setting
+        analysis["chapter_indices"] = [index.model_dump() for index in combined_indices]
+        analysis["candidate_counts"] = counts
+        analysis["relationship_unresolved_endpoints"] = merge_result.diagnostics.relationship_unresolved_endpoints
+        analysis["timeline_mismatch_events"] = merge_result.diagnostics.timeline_mismatch_events
+        return analysis
 
     async def _process_import_repair_apply_task(self, task: Task) -> Dict[str, Any]:
         """Persist selected repair preview assets after user confirmation."""

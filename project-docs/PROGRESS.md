@@ -5484,6 +5484,11 @@
   - 导入任务与章节修复 preview 任务会创建 `chapter_index_run_<task_id>` 存储记录。
   - 每次 attempt 和每章最终 status 会即时写入该 run key，最终结果通过 `analysis_diagnostics.chapter_index_run_key` 暴露。
   - 这让长篇任务中途崩溃时，已完成章节的模型、延迟、错误类型和候选数量不再完全丢失。
+- 多轮结果合并：
+  - 成功的 `ChapterIndex` 快照现在也会写入 `chapter_index_run_<task_id>.chapter_indices`。
+  - 章节修复 preview 如果携带上一轮 `chapter_index_run_key`，会复用历史成功章，并用本轮重跑成功章覆盖同 ID 旧结果。
+  - preview 会基于“历史成功章 + 本轮重跑章”重新合并角色、关系、时间线、世界观。
+  - 诊断新增 `chapter_index_history_run_key`、`chapter_index_history_reused_chapters`，统计新增 `chapter_index_history_reused`、`chapter_index_combined_indices`。
 - 前端接线：
   - `ImportAnalysisDiagnostics` 与 `parseNovelImportTaskResult(...)` 支持 `chapter_index_attempts / chapter_index_status / chapter_index_run_key`。
   - Extract 页面提交 `chapter_index_rerun` 时，如果用户未手动选择单章，会自动携带 `needs_retry` 章节诊断、失败章节和 run key。
@@ -5492,11 +5497,13 @@
   - 新增章节 index attempt 成功/失败诊断测试。
   - 新增章节修复按失败诊断筛选重跑章节测试。
   - 新增导入章节 index 即时持久化 run state 测试。
+  - 新增章节修复 preview 复用历史成功 `ChapterIndex` 测试。
   - 新增/更新前端 task-events 诊断透传测试。
   - `compileall` 通过。
-  - 后端相关测试在工作区临时目录下通过：`49 passed`。
+  - 后端相关测试在工作区临时目录下通过：`50 passed`。
   - 前端 `npx.cmd tsc --noEmit --incremental false` 通过。
   - 前端 Vitest：`25 passed / 104 passed`。
 - 当前边界：
   - attempt 目前落在 StorageManager key 中，尚未独立落入正式数据库中间表。
-  - merge 还不能自动复用上一轮成功章节结果，下一轮应补“多轮成功结果合并”或先补前端重跑入口。
+  - 多轮成功结果合并已覆盖修复 preview；UI 还未展示历史复用章节数。
+  - 下一轮应将 `chapter_index_run_*` 做成更稳定的可查询数据结构，或先把历史复用状态展示到 Extract / TaskCenter。

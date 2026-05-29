@@ -313,6 +313,14 @@ P2 已完成第一步“attempt 可观测化”，先把失败章节从一个笼
 - 导入任务 / 修复 preview 任务会创建 `chapter_index_run_<task_id>` 存储记录，并在每次 attempt / 每章 status 完成后立即写入：
   - 这让任务中途崩溃时，已完成章节的 attempt 诊断不再完全依赖最终 result。
   - 最终 `analysis_diagnostics.chapter_index_run_key` 会指向该记录。
+- 成功章节 `ChapterIndex` 快照会进入同一个 run 记录：
+  - `chapter_indices`
+  - 按 `chapter_id` 去重，后写入的重跑结果覆盖旧结果。
+- 章节修复 preview 支持读取上一轮 `chapter_index_run_key`：
+  - 先加载历史成功 `ChapterIndex`。
+  - 再合并本轮重跑成功 `ChapterIndex`。
+  - 最后基于组合后的章节索引重新 merge 角色、关系、时间线和世界观 preview。
+  - 诊断中会记录 `chapter_index_history_run_key` 与 `chapter_index_history_reused_chapters`。
 - 前端提取页已接入失败章节重跑诊断：
   - `ImportAnalysisDiagnostics` 类型支持 `chapter_index_attempts / chapter_index_status / chapter_index_run_key`。
   - “重跑章节索引”在未手动选择单章时，会把 `needs_retry` 章节、失败章节和 run key 提交给后端。
@@ -321,8 +329,8 @@ P2 已完成第一步“attempt 可观测化”，先把失败章节从一个笼
 当前边界：
 
 - attempt 目前写入统一 StorageManager key，尚未拆成正式数据库表。
-- merge 仍主要读取当前任务内的成功结果；还没有从多轮历史 `chapter_index_run_*` 记录合并成功章节。
-- 下一步应让 merge 能复用历史成功章结果，并把 `chapter_index_run_*` 提升为更稳定的可查询数据结构。
+- 多轮合并已覆盖修复 preview；正式导入主任务仍以当前任务结果为主。
+- 下一步应把 `chapter_index_run_*` 提升为更稳定的可查询数据结构，并让 UI 显示历史复用章节数。
 
 ### P3：多模型提取流水线
 

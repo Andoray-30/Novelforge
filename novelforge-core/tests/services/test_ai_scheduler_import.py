@@ -4,6 +4,11 @@ from pathlib import Path
 
 from novelforge.core.models import Character, CharacterRole, NetworkEdge, RelationshipType, TimelineEvent, WorldSetting
 from novelforge.content.models import ContentItem, ContentMetadata, ContentType
+from novelforge.extractors.chapter_index_extractor import (
+    ChapterCharacterCandidate,
+    ChapterIndex,
+    ChapterInteractionCandidate,
+)
 from novelforge.services.ai_scheduler import AITaskScheduler, Task, TaskPriority, TaskStatus
 
 
@@ -1045,6 +1050,152 @@ def test_import_repair_task_filters_explicit_failed_chapters(monkeypatch):
     asyncio.run(scheduler._process_import_repair_task(task))
 
     assert [chapter["id"] for chapter in service.received_chapters] == ["chapter-failed"]
+
+
+def test_import_repair_task_merges_previous_successful_chapter_indices(monkeypatch):
+    import novelforge.services.extraction_service as extraction_module
+
+    previous_index = ChapterIndex(
+        chapter_id="chapter-ok",
+        chapter_title="已成功章",
+        chapter_order=1,
+        chapter_characters=[
+            ChapterCharacterCandidate(
+                name="林墨",
+                role_hint="protagonist",
+                description="在上一轮成功章中建立的人物。",
+                evidence=["林墨在雨里等候。"],
+            )
+        ],
+    )
+    rerun_index = ChapterIndex(
+        chapter_id="chapter-failed",
+        chapter_title="失败章",
+        chapter_order=2,
+        chapter_characters=[
+            ChapterCharacterCandidate(
+                name="周岚",
+                role_hint="supporting",
+                description="重跑失败章后补回的人物。",
+                evidence=["周岚终于赶到旧桥。"],
+            )
+        ],
+        chapter_interactions=[
+            ChapterInteractionCandidate(
+                source="林墨",
+                target="周岚",
+                relationship_type="friend",
+                description="两人在旧桥重新并肩。",
+                evidence=["林墨与周岚在旧桥重新并肩。"],
+            )
+        ],
+    )
+
+    class FakeExtractionService:
+        def __init__(self):
+            self.received_chapters = None
+
+        async def extract_chapter_index_assets(self, chapters, diagnostics_recorder=None):
+            self.received_chapters = chapters
+            if diagnostics_recorder:
+                await diagnostics_recorder({"event_type": "chapter_index", "record": rerun_index.model_dump()})
+                await diagnostics_recorder({
+                    "event_type": "status",
+                    "record": {
+                        "chapter_id": "chapter-failed",
+                        "chapter_title": "失败章",
+                        "chapter_order": 2,
+                        "status": "success",
+                        "model_used": "repair-model",
+                        "attempt_count": 1,
+                        "latency_ms": 100,
+                        "error_type": None,
+                        "error": None,
+                        "parsed_candidate_counts": {"characters": 1, "interactions": 1, "events": 0, "world_facts": 0},
+                        "needs_retry": False,
+                    },
+                })
+            return {
+                "characters": [Character(name="周岚", role=CharacterRole.SUPPORTING, description="配角")],
+                "relationships": [],
+                "timeline_events": [],
+                "world_setting": None,
+                "chapter_indices": [rerun_index.model_dump()],
+                "analysis_diagnostics": {
+                    "candidate_counts": {"chapters_indexed": 1},
+                    "failed_chapters": [],
+                    "chapter_index_status": [],
+                },
+            }
+
+    service = FakeExtractionService()
+    monkeypatch.setattr(extraction_module, "get_extraction_service", lambda *args, **kwargs: service)
+
+    content_manager = RecordingContentManager()
+    asyncio.run(content_manager.create_content(ContentItem(
+        metadata=ContentMetadata(
+            id="chapter-ok",
+            title="已成功章",
+            type=ContentType.CHAPTER,
+            parent_id="novel-merge-history",
+            session_id="session-merge-history",
+        ),
+        content="林墨在雨里等候。",
+        extracted_data={"chapter_index": 1},
+    )))
+    asyncio.run(content_manager.create_content(ContentItem(
+        metadata=ContentMetadata(
+            id="chapter-failed",
+            title="失败章",
+            type=ContentType.CHAPTER,
+            parent_id="novel-merge-history",
+            session_id="session-merge-history",
+        ),
+        content="周岚终于赶到旧桥。",
+        extracted_data={"chapter_index": 2},
+    )))
+
+    storage = MemoryStorageManager()
+    storage.saved["chapter_index_run_previous"] = {
+        "task_id": "previous",
+        "chapter_indices": [previous_index.model_dump()],
+        "chapter_index_status": [
+            {"chapter_id": "chapter-ok", "status": "success", "needs_retry": False},
+            {"chapter_id": "chapter-failed", "status": "failed", "needs_retry": True},
+        ],
+    }
+    scheduler = build_scheduler(content_manager=content_manager, storage_manager=storage)
+    task = Task(
+        id="rerun-merge-history-task",
+        type="relationship_backfill",
+        status=TaskStatus.RUNNING,
+        priority=TaskPriority.MEDIUM,
+        parameters={
+            "session_id": "session-merge-history",
+            "parent_id": "novel-merge-history",
+            "analysis_diagnostics": {
+                "chapter_index_run_key": "chapter_index_run_previous",
+                "chapter_index_status": [
+                    {"chapter_id": "chapter-ok", "status": "success", "needs_retry": False},
+                    {"chapter_id": "chapter-failed", "status": "failed", "needs_retry": True},
+                ],
+            },
+        },
+        created_at=datetime.now(),
+    )
+
+    result = asyncio.run(scheduler._process_import_repair_task(task))
+
+    assert [chapter["id"] for chapter in service.received_chapters] == ["chapter-failed"]
+    assert result["characters_count"] == 2
+    assert result["relationships_count"] == 1
+    assert result["relationships"][0]["source"] == "林墨"
+    assert result["relationships"][0]["target"] == "周岚"
+    assert result["candidate_counts"]["chapter_index_history_reused"] == 1
+    assert result["candidate_counts"]["chapter_index_combined_indices"] == 2
+    assert result["analysis_diagnostics"]["chapter_index_history_run_key"] == "chapter_index_run_previous"
+    assert result["analysis_diagnostics"]["chapter_index_history_reused_chapters"] == ["chapter-ok"]
+    assert len(result["chapter_indices"]) == 2
 
 
 def test_import_repair_task_reports_preview_diff_against_existing_assets(monkeypatch):
