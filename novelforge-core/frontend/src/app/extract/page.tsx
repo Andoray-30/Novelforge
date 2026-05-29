@@ -20,14 +20,14 @@ import {
   Users,
   Wrench,
 } from 'lucide-react';
-import { contentService, taskService, textProcessingService } from '@/lib/api';
+import { chapterIndexRunService, contentService, taskService, textProcessingService } from '@/lib/api';
 import { buildAssetQualityDiagnostics, type AssetQualityDiagnosticsResult } from '@/lib/asset-quality-diagnostics';
 import { getNovelImportStageLabel, parseNovelImportTaskResult } from '@/lib/task-events';
 import { useAppStore } from '@/lib/hooks/use-app-store';
 import { useSessionTaskEvents } from '@/lib/hooks/use-session-task-events';
 import { useSessions } from '@/lib/hooks/use-sessions';
 import { formatFileSize } from '@/lib/utils';
-import type { ImportAnalysisDiagnostics, NovelImportAnalysisStageKey, NovelImportTaskResult, OpenAIConfig } from '@/types';
+import type { ChapterIndexRun, ImportAnalysisDiagnostics, NovelImportAnalysisStageKey, NovelImportTaskResult, OpenAIConfig } from '@/types';
 
 const ACCEPTED_EXTENSIONS = ['.txt', '.md', '.text', '.epub', '.pdf', '.docx'];
 const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024;
@@ -209,6 +209,27 @@ function getIssuePreview(value: unknown): string {
     return String(endpoint || payload.title || payload.name || payload.description_preview || payload.error || JSON.stringify(payload));
   }
   return String(value ?? '');
+}
+
+function getRunTimestampLabel(value?: string): string {
+  if (!value) return '时间未知';
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) return value;
+  return timestamp.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function getChapterStatusPreview(run: ChapterIndexRun): string[] {
+  return run.chapter_index_status.slice(0, 5).map((statusItem) => {
+    const title = String(statusItem.chapter_title || statusItem.chapter_id || '未命名章节');
+    const status = String(statusItem.status || 'unknown');
+    const errorType = statusItem.error_type ? ` / ${String(statusItem.error_type)}` : '';
+    return `${title}：${status}${errorType}`;
+  });
 }
 
 function severityClass(severity: RepairSeverity): string {
@@ -601,6 +622,9 @@ export default function ExtractPage() {
   const [repairMessage, setRepairMessage] = useState<string | null>(null);
   const [repairChapters, setRepairChapters] = useState<RepairChapterOption[]>([]);
   const [selectedRepairChapterId, setSelectedRepairChapterId] = useState<string>('');
+  const [chapterIndexRuns, setChapterIndexRuns] = useState<ChapterIndexRun[]>([]);
+  const [chapterIndexRunError, setChapterIndexRunError] = useState<string | null>(null);
+  const [chapterIndexRunsLoading, setChapterIndexRunsLoading] = useState(false);
 
   const { currentSession, currentSessionId, createSession, switchSession, loadSessions } = useSessions();
   const setSelectedNovelId = useAppStore((state) => state.setSelectedNovelId);
@@ -622,6 +646,9 @@ export default function ExtractPage() {
     setRepairMessage(null);
     setRepairChapters([]);
     setSelectedRepairChapterId('');
+    setChapterIndexRuns([]);
+    setChapterIndexRunError(null);
+    setChapterIndexRunsLoading(false);
   }, [currentSessionId]);
 
   const ensureSessionId = useCallback(async (selectedFile: File): Promise<string> => {
@@ -766,6 +793,38 @@ export default function ExtractPage() {
       disposed = true;
     };
   }, [completedResult?.parent_id, completedResult?.session_id, currentSessionId, savedSummary, status]);
+
+  useEffect(() => {
+    const sessionId = completedResult?.session_id || savedSummary?.sessionId || currentSessionId;
+    const parentId = completedResult?.parent_id || null;
+    if (!sessionId || status !== 'success') {
+      setChapterIndexRuns([]);
+      setChapterIndexRunError(null);
+      setChapterIndexRunsLoading(false);
+      return;
+    }
+
+    let disposed = false;
+    setChapterIndexRunsLoading(true);
+    setChapterIndexRunError(null);
+    const loadChapterIndexRuns = async () => {
+      try {
+        const runs = await chapterIndexRunService.list({ sessionId, parentId, limit: 5 });
+        if (!disposed) setChapterIndexRuns(runs);
+      } catch (error) {
+        if (!disposed) {
+          setChapterIndexRuns([]);
+          setChapterIndexRunError(error instanceof Error ? error.message : '章节索引运行记录读取失败');
+        }
+      } finally {
+        if (!disposed) setChapterIndexRunsLoading(false);
+      }
+    };
+    void loadChapterIndexRuns();
+    return () => {
+      disposed = true;
+    };
+  }, [completedResult?.parent_id, completedResult?.session_id, currentSessionId, savedSummary?.sessionId, status]);
 
   useSessionTaskEvents({
     sessionId: currentSessionId,
@@ -1285,6 +1344,65 @@ export default function ExtractPage() {
                   </div>
                 </div>
               ) : null}
+
+              <div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <h3 className="text-sm font-bold text-[var(--nf-text)]">章节索引运行记录</h3>
+                  <span className="text-xs text-[var(--nf-text-subtle)]">
+                    {chapterIndexRunsLoading ? '正在读取...' : chapterIndexRuns.length ? `最近 ${chapterIndexRuns.length} 次` : '暂无历史 run'}
+                  </span>
+                </div>
+                {chapterIndexRunError ? (
+                  <div className="nf-alert mt-3">{chapterIndexRunError}</div>
+                ) : chapterIndexRuns.length > 0 ? (
+                  <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                    {chapterIndexRuns.map((run) => {
+                      const counts = run.candidate_counts || {};
+                      const retryCount = counts.chapter_index_needs_retry ?? 0;
+                      const failedCount = counts.chapter_index_failed_attempts ?? 0;
+                      const successCount = counts.chapter_index_successful ?? 0;
+                      const statusPreview = getChapterStatusPreview(run);
+                      return (
+                        <article key={run.run_key} className="rounded-2xl border border-[var(--nf-border)] bg-[var(--nf-surface)] p-4">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                            <div>
+                              <p className="text-sm font-bold text-[var(--nf-text)]">{run.task_type || 'chapter_index'} · {getRunTimestampLabel(run.updated_at || run.created_at)}</p>
+                              <p className="mt-1 text-xs text-[var(--nf-text-subtle)]">{run.run_key}</p>
+                            </div>
+                            <span className={['inline-flex min-h-8 items-center rounded-full border px-3 text-xs font-bold', retryCount > 0 || failedCount > 0 ? 'border-[color-mix(in_srgb,var(--nf-warning)_35%,transparent)] text-[var(--nf-warning)]' : 'border-[color-mix(in_srgb,var(--nf-success)_30%,transparent)] text-[var(--nf-success)]'].join(' ')}>
+                              {retryCount > 0 ? `${retryCount} 章需重跑` : '无待重跑章'}
+                            </span>
+                          </div>
+                          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                            {[
+                              ['成功章', successCount],
+                              ['失败尝试', failedCount],
+                              ['索引快照', counts.chapter_indices ?? run.chapter_indices_summary.length],
+                            ].map(([label, value]) => (
+                              <div key={String(label)} className="rounded-xl border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] px-3 py-2">
+                                <p className="text-xs text-[var(--nf-text-subtle)]">{label}</p>
+                                <p className="mt-1 text-sm font-black text-[var(--nf-text)]">{String(value)}</p>
+                              </div>
+                            ))}
+                          </div>
+                          {statusPreview.length > 0 ? (
+                            <ul className="mt-3 space-y-1 text-xs leading-5 text-[var(--nf-text-muted)]">
+                              {statusPreview.map((line) => <li key={line}>{line}</li>)}
+                              {run.chapter_index_status.length > statusPreview.length ? (
+                                <li className="text-[var(--nf-text-subtle)]">还有 {run.chapter_index_status.length - statusPreview.length} 章状态记录</li>
+                              ) : null}
+                            </ul>
+                          ) : null}
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="nf-alert mt-3">
+                    当前项目还没有可查询的章节索引 run。新导入或修复 preview 完成后会在这里显示。
+                  </div>
+                )}
+              </div>
 
               {qualityRepairGroups.length > 0 ? (
                 <div>

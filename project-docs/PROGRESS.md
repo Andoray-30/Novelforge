@@ -5539,3 +5539,17 @@
 - 当前边界：
   - run 仍保存在 StorageManager key 中，还不是正式数据库表。
   - 这一步先解决“只能通过 task result 间接查看”的问题；后续再做分页、模型健康历史和数据库迁移。
+
+### 2026-05-29 Goal 21 后续：Extract 页接入章节 index run 历史
+
+- Extract 页“详细诊断日志”新增“章节索引运行记录”区块：
+  - 自动按当前 `session_id / parent_id` 查询最近章节 index run。
+  - 显示 run key、更新时间、成功章、失败尝试、索引快照数、需重跑章节数。
+  - 显示前几条章节 status，帮助用户判断失败集中在哪些章节、错误类型是什么。
+- 这一步把上一轮新增的稳定查询 API 变成用户可见诊断入口，不再只停留在后端接口。
+- 测试：
+  - 前端 `npx.cmd tsc --noEmit --incremental false` 通过。
+  - TaskCenter 相关 Vitest：`2 passed`。
+- 当前边界：
+  - Extract 页目前只展示最近 run 摘要，还没有提供“点击 run 查看完整 chapter_indices / 直接重跑该 run 失败章节”的交互。
+  - 下一步应把 run 历史与“重跑章节索引”按钮串联：用户可从某个 run 的失败章直接发起精确重跑。
