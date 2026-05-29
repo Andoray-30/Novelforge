@@ -340,6 +340,9 @@ P2 已完成第一步“attempt 可观测化”，先把失败章节从一个笼
   - `GET /api/extraction/chapter-index-runs?session_id=...&parent_id=...`
   - `GET /api/extraction/chapter-index-runs/{run_key}?session_id=...&parent_id=...&include_indices=true`
   - 默认返回 attempt/status/章节索引摘要；需要完整 `chapter_indices` 时显式传 `include_indices=true`。
+- Extract 页已能展示最近 run，并可从某个 run 的失败/需重跑章节直接提交 `chapter_index_rerun` preview 任务：
+  - payload 携带 `chapter_index_run_key`、失败章 `chapter_index_status`、`failed_chapters` 与精确 `chapter_ids`。
+  - 后端会复用历史成功 `ChapterIndex`，只重跑失败章，再合并 preview。
 - 下一步仍应把该 run 结构从通用 StorageManager key 升级为正式数据库中间表，以便支持分页、长期保留、模型健康统计和更高效的项目级查询。
 
 ### P3：多模型提取流水线

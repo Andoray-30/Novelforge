@@ -28,6 +28,12 @@ import { useSessionTaskEvents } from '@/lib/hooks/use-session-task-events';
 import { useSessions } from '@/lib/hooks/use-sessions';
 import { formatFileSize } from '@/lib/utils';
 import type { ChapterIndexRun, ImportAnalysisDiagnostics, NovelImportAnalysisStageKey, NovelImportTaskResult, OpenAIConfig } from '@/types';
+import {
+  buildChapterIndexRunRerunPayload,
+  getChapterStatusPreview,
+  getRetryableChapterIndexRunStatuses,
+  getRunTimestampLabel,
+} from './chapter-index-run-utils';
 
 const ACCEPTED_EXTENSIONS = ['.txt', '.md', '.text', '.epub', '.pdf', '.docx'];
 const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024;
@@ -209,27 +215,6 @@ function getIssuePreview(value: unknown): string {
     return String(endpoint || payload.title || payload.name || payload.description_preview || payload.error || JSON.stringify(payload));
   }
   return String(value ?? '');
-}
-
-function getRunTimestampLabel(value?: string): string {
-  if (!value) return '时间未知';
-  const timestamp = new Date(value);
-  if (Number.isNaN(timestamp.getTime())) return value;
-  return timestamp.toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-function getChapterStatusPreview(run: ChapterIndexRun): string[] {
-  return run.chapter_index_status.slice(0, 5).map((statusItem) => {
-    const title = String(statusItem.chapter_title || statusItem.chapter_id || '未命名章节');
-    const status = String(statusItem.status || 'unknown');
-    const errorType = statusItem.error_type ? ` / ${String(statusItem.error_type)}` : '';
-    return `${title}：${status}${errorType}`;
-  });
 }
 
 function severityClass(severity: RepairSeverity): string {
@@ -1019,7 +1004,7 @@ export default function ExtractPage() {
     };
   }, [completedResult?.parent_id, completedResult?.session_id, currentSessionId, savedSummary?.sessionId]);
 
-  const submitRepairTask = async (taskType: RepairTaskType, group?: QualityRepairGroup) => {
+  const submitRepairTask = async (taskType: RepairTaskType, group?: QualityRepairGroup, rerunPayload?: Record<string, unknown>) => {
     const sessionId = completedResult?.session_id || savedSummary?.sessionId || currentSessionId;
     if (!sessionId) {
       setRepairMessage('请先选择或完成一个项目导入。');
@@ -1031,11 +1016,12 @@ export default function ExtractPage() {
       const response = await taskService.submitTask(taskType, {
         session_id: sessionId,
         parent_id: completedResult?.parent_id || null,
-        chapter_id: selectedRepairChapterId || null,
-        ...(taskType === 'chapter_index_rerun' && !selectedRepairChapterId
+        chapter_id: rerunPayload ? null : selectedRepairChapterId || null,
+        ...(rerunPayload ?? {}),
+        ...(taskType === 'chapter_index_rerun' && !selectedRepairChapterId && !rerunPayload
           ? buildChapterIndexRerunPayload(analysisResult, group)
           : {}),
-        source: 'extract_quality_panel',
+        source: rerunPayload ? 'extract_chapter_index_run_history' : 'extract_quality_panel',
       });
       if (!response.success || !response.task_id) throw new Error(response.message || '重跑任务提交失败');
       addTask({
@@ -1358,7 +1344,8 @@ export default function ExtractPage() {
                   <div className="mt-3 grid gap-3 lg:grid-cols-2">
                     {chapterIndexRuns.map((run) => {
                       const counts = run.candidate_counts || {};
-                      const retryCount = counts.chapter_index_needs_retry ?? 0;
+                      const retryableStatuses = getRetryableChapterIndexRunStatuses(run);
+                      const retryCount = Math.max(counts.chapter_index_needs_retry ?? 0, retryableStatuses.length);
                       const failedCount = counts.chapter_index_failed_attempts ?? 0;
                       const successCount = counts.chapter_index_successful ?? 0;
                       const statusPreview = getChapterStatusPreview(run);
@@ -1393,6 +1380,20 @@ export default function ExtractPage() {
                               ) : null}
                             </ul>
                           ) : null}
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              className="nf-button"
+                              disabled={repairSubmitting !== null || retryableStatuses.length === 0}
+                              onClick={() => void submitRepairTask('chapter_index_rerun', undefined, buildChapterIndexRunRerunPayload(run))}
+                            >
+                              <RefreshCw className={['h-4 w-4', repairSubmitting === 'chapter_index_rerun' ? 'animate-spin' : ''].join(' ')} />
+                              重跑该 run 失败章
+                            </button>
+                            {retryableStatuses.length === 0 ? (
+                              <span className="inline-flex min-h-10 items-center text-xs text-[var(--nf-text-subtle)]">当前 run 没有待重跑章节</span>
+                            ) : null}
+                          </div>
                         </article>
                       );
                     })}

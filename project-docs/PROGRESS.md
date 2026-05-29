@@ -5553,3 +5553,22 @@
 - 当前边界：
   - Extract 页目前只展示最近 run 摘要，还没有提供“点击 run 查看完整 chapter_indices / 直接重跑该 run 失败章节”的交互。
   - 下一步应把 run 历史与“重跑章节索引”按钮串联：用户可从某个 run 的失败章直接发起精确重跑。
+
+### 2026-05-29 Goal 21 后续：从历史 run 精确重跑失败章节
+
+- Extract 页章节索引运行记录卡片新增“重跑该 run 失败章”操作：
+  - 从 `chapter_index_status` 中提取 `needs_retry=true` 或 `status=failed` 的章节。
+  - 如果最终 status 缺失，则回退到失败的 `chapter_index_attempts`。
+  - 提交 payload 会携带 `chapter_index_run_key`、`chapter_index_status`、`failed_chapters` 与精确 `chapter_ids`。
+  - 即使用户在页面底部选择了单章，下方 run 卡片操作也不会被全局章节下拉框误窄化。
+- 新增前端 helper：
+  - `chapter-index-run-utils.ts`
+  - 单测覆盖 status 生成精确重跑 payload、缺 status 时从失败 attempt 回退。
+- 测试：
+  - 前端 `npx.cmd tsc --noEmit --incremental false` 通过。
+  - 新增 Vitest：`2 passed`。
+  - 前端全量 Vitest：`27 passed / 108 passed`。
+  - 前端 build 通过。
+- 当前边界：
+  - 操作仍然生成修复 preview 任务，用户需要在任务中心复核后再写回。
+  - 下一步应把 preview 结果的“复用历史成功章 + 本轮重跑章”做成更明显的确认写回入口。
