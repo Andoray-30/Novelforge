@@ -63,6 +63,13 @@ OPENAI_MODEL=gemini-3.5-flash
 NOVELFORGE_FAST_MODEL=gemini-3.5-flash
 NOVELFORGE_PRO_MODEL=gemini-3.1-pro-preview
 NOVELFORGE_DEFAULT_AI_MODE=fast
+NOVELFORGE_ENABLE_MODEL_ROUTER=true
+NOVELFORGE_EXTRACTOR_FAST_MODELS=gemini-3.5-flash,deepseek-ai/deepseek-v4-flash,mimo-v2.5-pro
+NOVELFORGE_EXTRACTOR_DEEP_MODELS=gemini-3.1-pro-preview,deepseek-ai/deepseek-v4-pro
+NOVELFORGE_EXTRACTOR_REPAIR_MODELS=gemini-3.1-pro-preview,deepseek-ai/deepseek-v4-pro,deepseek-ai/deepseek-v4-flash
+NOVELFORGE_WRITER_FAST_MODELS=mimo-v2.5-pro,deepseek-ai/deepseek-v4-flash
+NOVELFORGE_WRITER_PRO_MODELS=gemini-3.1-pro-preview,deepseek-ai/deepseek-v4-pro
+NOVELFORGE_JUDGE_MODELS=gemini-3.1-pro-preview,deepseek-ai/deepseek-v4-pro
 STORAGE_TYPE=content_db
 USE_CONTENT_DATABASE=true
 
@@ -86,6 +93,8 @@ NOVELFORGE_SESSION_SECRET=replace-with-a-long-random-string
 FRONTEND_ORIGIN=https://your-frontend-domain.example
 NOVELFORGE_ALLOW_RUNTIME_OPENAI_OVERRIDES=false
 # 普通用户只选择“快速 / Pro”；真实模型由 NOVELFORGE_FAST_MODEL / NOVELFORGE_PRO_MODEL 映射
+# 提取链路会从 NOVELFORGE_EXTRACTOR_*_MODELS 候选池中做运行时探测和路由，
+# 避免把长篇导入绑定到某一个固定模型名。
 ```
 
 公开部署模式会启用单管理员登录、HttpOnly Cookie 会话、服务端 AI Key，并在启动时检查管理员密码、Session Secret、AI Key、SQLite 内容库和数据目录写权限。

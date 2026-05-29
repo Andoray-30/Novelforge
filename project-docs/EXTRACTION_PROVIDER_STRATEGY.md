@@ -233,6 +233,38 @@ Goal 21 真实复验结果：
 - 为章节提取选择当前最优模型。
 - 对空 content、504、429 设置短期冷却。
 
+#### 2026-05-29 进展
+
+P1 已完成第一版代码落地：
+
+- 新增 `novelforge.services.model_router.ModelRouter`。
+- 新增运行时模型池配置：
+  - `NOVELFORGE_EXTRACTOR_FAST_MODELS`
+  - `NOVELFORGE_EXTRACTOR_DEEP_MODELS`
+  - `NOVELFORGE_EXTRACTOR_REPAIR_MODELS`
+  - `NOVELFORGE_WRITER_FAST_MODELS`
+  - `NOVELFORGE_WRITER_PRO_MODELS`
+  - `NOVELFORGE_JUDGE_MODELS`
+- 新增探测参数：
+  - `NOVELFORGE_ENABLE_MODEL_ROUTER`
+  - `NOVELFORGE_MODEL_PROBE_TIMEOUT`
+  - `NOVELFORGE_MODEL_COOLDOWN_SECONDS`
+- `ModelRouter` 当前支持：
+  - 按任务角色读取候选池。
+  - 对 extractor 角色做非空响应、JSON 可解析、提取信号非空检查。
+  - 对 writer 等非 extractor 角色做非空响应检查。
+  - 对 `429 / 5xx / 504 / empty_content / auth_failed / json_invalid` 做错误归类。
+  - 对不合格模型设置短期冷却。
+  - 将路由决策写入章节 index 的 `analysis_diagnostics.model_route`。
+- `ExtractionService.extract_chapter_index_assets(...)` 已在任务开始前为章节 index 选择一次模型，不在每章重复测速。
+
+当前边界：
+
+- 这还不是完整的多模型流水线；只完成了模型路由入口。
+- 路由结果仍是内存态，没有持久化为长期模型健康历史。
+- 尚未实现失败章节的持久化 attempt 与增量重跑。
+- 尚未为 UI 展示模型路由报告。
+
 ### P2：实现可恢复章节 index
 
 - 每个章节/片段独立保存 attempt。

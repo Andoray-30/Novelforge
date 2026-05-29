@@ -1079,6 +1079,7 @@ class AITaskScheduler:
             "relationship_endpoint_resolution": diagnostics.get("relationship_endpoint_resolution", []),
             "relationship_low_confidence_resolved_endpoints": diagnostics.get("relationship_low_confidence_resolved_endpoints", []),
             "timeline_mismatch_events": diagnostics.get("timeline_mismatch_events", []),
+            "model_route": analysis.get("model_route") or diagnostics.get("model_route"),
         }
 
         if not characters:

@@ -57,6 +57,35 @@ class Config:
             for item in os.getenv("OPENAI_FALLBACK_MODELS", "").split(",")
             if item.strip()
         ]
+        self.enable_model_router: bool = os.getenv("NOVELFORGE_ENABLE_MODEL_ROUTER", "true").lower() == "true"
+        self.model_probe_timeout: float = float(os.getenv("NOVELFORGE_MODEL_PROBE_TIMEOUT", "25.0"))
+        self.model_cooldown_seconds: float = float(os.getenv("NOVELFORGE_MODEL_COOLDOWN_SECONDS", "180.0"))
+        self.model_pools: dict[str, list[str]] = {
+            "extractor_fast": self._model_pool_from_env(
+                "NOVELFORGE_EXTRACTOR_FAST_MODELS",
+                [self.fast_model, self.model, *self.fallback_models],
+            ),
+            "extractor_deep": self._model_pool_from_env(
+                "NOVELFORGE_EXTRACTOR_DEEP_MODELS",
+                [self.pro_model, self.model, *self.fallback_models],
+            ),
+            "extractor_repair": self._model_pool_from_env(
+                "NOVELFORGE_EXTRACTOR_REPAIR_MODELS",
+                [self.pro_model, self.fast_model, self.model, *self.fallback_models],
+            ),
+            "writer_fast": self._model_pool_from_env(
+                "NOVELFORGE_WRITER_FAST_MODELS",
+                [self.fast_model, self.model, *self.fallback_models],
+            ),
+            "writer_pro": self._model_pool_from_env(
+                "NOVELFORGE_WRITER_PRO_MODELS",
+                [self.pro_model, self.model, *self.fallback_models],
+            ),
+            "judge": self._model_pool_from_env(
+                "NOVELFORGE_JUDGE_MODELS",
+                [self.pro_model, self.model, *self.fallback_models],
+            ),
+        }
         
         # SillyTavern 配置
         self.sillytavern_url: Optional[str] = os.getenv("SILLYTAVERN_URL")
@@ -129,6 +158,22 @@ class Config:
         cloned = Config.__new__(Config)
         cloned.__dict__ = self.__dict__.copy()
         return cloned
+
+    @staticmethod
+    def _dedupe_model_names(model_names: list[str]) -> list[str]:
+        result: list[str] = []
+        for model_name in model_names:
+            normalized = str(model_name or "").strip()
+            if normalized and normalized not in result:
+                result.append(normalized)
+        return result
+
+    @classmethod
+    def _model_pool_from_env(cls, env_name: str, defaults: list[str]) -> list[str]:
+        raw = os.getenv(env_name, "")
+        if raw.strip():
+            return cls._dedupe_model_names(raw.split(","))
+        return cls._dedupe_model_names(defaults)
 
     def with_openai_overrides(
         self,

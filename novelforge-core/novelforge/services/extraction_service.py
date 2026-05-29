@@ -22,6 +22,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from .ai_service import AIService
+from .model_router import ModelRouter
 from ..core.config import Config
 from ..core.models import Character, Culture, NetworkEdge, TimelineEvent, WorldSetting
 from ..extractors.base_extractor import ExtractionConfig, SmartChunker
@@ -40,6 +41,7 @@ class ExtractionService:
     def __init__(self, ai_service: AIService, config: Config):
         self.ai_service = ai_service
         self.config = config
+        self.model_router = ModelRouter(ai_service, config)
 
         unified_config = ExtractionConfig(
             timeout=300.0,
@@ -88,17 +90,36 @@ class ExtractionService:
         return await self.unified_relationship_extractor.extract_relationships_guided(text, characters=characters)
 
     async def extract_chapter_index_assets(self, chapters: List[Dict[str, Any]]) -> Dict[str, Any]:
-        result = await self.chapter_index_extractor.extract_and_merge(chapters)
+        extractor = self.chapter_index_extractor
+        model_route = None
+        if getattr(self.config, "enable_model_router", True):
+            decision = await self.model_router.select_model("extractor_fast")
+            model_route = decision.to_dict()
+            with_overrides = getattr(self.ai_service, "with_overrides", None)
+            if decision.selected_model and callable(with_overrides):
+                routed_service = with_overrides(
+                    model=decision.selected_model,
+                    strict_model=True,
+                )
+                extractor = ChapterIndexExtractor(
+                    config=self.chapter_index_extractor.config,
+                    ai_service=routed_service,
+                )
+        result = await extractor.extract_and_merge(chapters)
+        diagnostics = result.diagnostics.model_dump()
+        if model_route:
+            diagnostics["model_route"] = model_route
         return {
             "characters": result.characters,
             "world_setting": result.world_setting,
             "timeline_events": result.timeline_events,
             "relationships": result.relationships,
-            "analysis_diagnostics": result.diagnostics.model_dump(),
+            "analysis_diagnostics": diagnostics,
             "candidate_counts": result.diagnostics.candidate_counts,
             "failed_chapters": result.diagnostics.failed_chapters,
             "relationship_unresolved_endpoints": result.diagnostics.relationship_unresolved_endpoints,
             "timeline_mismatch_events": result.diagnostics.timeline_mismatch_events,
+            "model_route": model_route,
         }
 
     async def extract_all(self, text: str) -> Dict[str, Any]:

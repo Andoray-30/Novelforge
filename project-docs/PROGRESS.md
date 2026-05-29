@@ -5444,3 +5444,23 @@
   - 不应继续盲目固定某个模型重跑。下一轮应先实现模型测速、模型路由、可恢复章节 index。
 - 新增分析文档：
   - `project-docs/EXTRACTION_PROVIDER_STRATEGY.md`
+
+### 2026-05-29 Goal 21 后续：ModelRouter v1 落地
+
+- 按 `EXTRACTION_PROVIDER_STRATEGY.md` 的 P1 计划完成第一版模型路由骨架：
+  - 新增 `novelforge.services.model_router.ModelRouter`。
+  - 新增模型角色候选池配置，覆盖 `extractor_fast / extractor_deep / extractor_repair / writer_fast / writer_pro / judge`。
+  - 新增模型探测参数：启用开关、probe timeout、cooldown seconds。
+  - extractor 角色探测会检查非空响应、JSON 可解析、章节提取信号是否非空。
+  - 对 429、504/5xx、auth、empty content、JSON invalid 等错误做分类，并对失败模型进入短期 cooldown。
+- 章节 index 接入：
+  - `ExtractionService.extract_chapter_index_assets(...)` 会在任务开始前为 `extractor_fast` 选择一次模型。
+  - 路由决策写入 `analysis_diagnostics.model_route`，便于后续 smoke 报告和 UI 诊断展示。
+  - 不在每章重复测速，避免把路由器变成新的请求放大器。
+- 配置与文档：
+  - `.env.example` 与 README 增加模型池配置说明。
+- 测试：
+  - 新增 `test_model_router.py` 覆盖模型选择、无真实 client 跳过探测、错误分类、配置去重、ExtractionService 写入路由诊断。
+  - 后端相关测试 `41 passed`。
+- 当前边界：
+  - 这还不是完整“可恢复章节 index”；失败章节持久化、增量重跑、模型健康历史和 UI 路由报告仍在下一轮。
