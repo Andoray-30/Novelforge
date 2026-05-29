@@ -5512,3 +5512,30 @@
   - attempt 目前落在 StorageManager key 中，尚未独立落入正式数据库中间表。
   - 多轮成功结果合并已覆盖修复 preview；UI 已展示汇总复用数和单章级详情。
   - 下一轮应将 `chapter_index_run_*` 做成更稳定的可查询数据结构，或补独立查询 API。
+
+### 2026-05-29 Goal 21 后续：章节 index run 查询 API v1
+
+- 继续推进 `EXTRACTION_PROVIDER_STRATEGY.md` 的 P2“可恢复章节 index”。
+- 新增稳定查询入口：
+  - `GET /api/extraction/chapter-index-runs?session_id=...&parent_id=...`
+  - `GET /api/extraction/chapter-index-runs/{run_key}?session_id=...&parent_id=...&include_indices=true`
+- 查询边界：
+  - 必须按 `session_id` 查询。
+  - 可传 `parent_id` 进一步限制当前小说。
+  - run 不属于当前项目时返回 403，避免跨项目读取章节 index 诊断。
+- 返回内容：
+  - attempt/status 明细。
+  - 失败 attempt、需重跑章、成功章、已保存章节 index 数等 `candidate_counts`。
+  - 默认只返回章节 index 摘要；完整 `chapter_indices` 需要显式 `include_indices=true`。
+- 前端接线：
+  - 新增 `ChapterIndexRun` 类型。
+  - 新增 `chapterIndexRunService.list/get(...)` 客户端封装，为后续 Extract / TaskCenter / Dashboard 查询历史 run 做准备。
+- 测试：
+  - 新增 `test_chapter_index_runs_api.py` 覆盖单 run 查询、跨项目拒绝、项目范围列表过滤。
+  - 后端相关测试：`49 passed`。
+  - 前端 `npx.cmd tsc --noEmit --incremental false` 通过。
+  - 前端 Vitest：`26 passed / 106 passed`。
+  - 前端 build 通过。
+- 当前边界：
+  - run 仍保存在 StorageManager key 中，还不是正式数据库表。
+  - 这一步先解决“只能通过 task result 间接查看”的问题；后续再做分页、模型健康历史和数据库迁移。

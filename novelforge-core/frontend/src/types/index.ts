@@ -452,6 +452,22 @@ export interface NovelImportTaskResult {
   timeline_mismatch_events?: Array<Record<string, unknown>>;
 }
 
+export interface ChapterIndexRun {
+  run_key: string;
+  task_id?: string;
+  task_type?: string;
+  session_id?: string;
+  parent_id?: string | null;
+  total_chapters?: number;
+  created_at?: string;
+  updated_at?: string;
+  chapter_index_attempts: Array<Record<string, unknown>>;
+  chapter_index_status: Array<Record<string, unknown>>;
+  chapter_indices_summary: Array<Record<string, unknown>>;
+  chapter_indices?: Array<Record<string, unknown>>;
+  candidate_counts: Record<string, number>;
+}
+
 export interface AITask {
   id: string;
   type: string;

@@ -5,6 +5,7 @@ import type {
   CharacterDesign,
   CharacterDesignRequest,
   ChatResponse,
+  ChapterIndexRun,
   ContentCreateRequest,
   ContentItem,
   ContentSearchRequest,
@@ -406,6 +407,25 @@ export const contentService = {
     postBlob('/api/content/export', { content_ids: ids, format }),
   exportContent: (ids: string[], format: 'json' | 'txt' = 'json'): Promise<Blob> =>
     postBlob('/api/content/export', { content_ids: ids, format }),
+};
+
+export const chapterIndexRunService = {
+  list: (params: { sessionId: string; parentId?: string | null; limit?: number }): Promise<ChapterIndexRun[]> => {
+    const query = new URLSearchParams({ session_id: params.sessionId });
+    if (params.parentId) query.append('parent_id', params.parentId);
+    if (params.limit) query.append('limit', String(params.limit));
+    return novelforgeClient.get(`/api/extraction/chapter-index-runs?${query.toString()}`);
+  },
+
+  get: (
+    runKey: string,
+    params: { sessionId: string; parentId?: string | null; includeIndices?: boolean },
+  ): Promise<ChapterIndexRun> => {
+    const query = new URLSearchParams({ session_id: params.sessionId });
+    if (params.parentId) query.append('parent_id', params.parentId);
+    if (params.includeIndices) query.append('include_indices', 'true');
+    return novelforgeClient.get(`/api/extraction/chapter-index-runs/${encodeURIComponent(runKey)}?${query.toString()}`);
+  },
 };
 
 export const workflowService = {

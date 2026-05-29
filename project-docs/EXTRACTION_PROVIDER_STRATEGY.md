@@ -336,7 +336,11 @@ P2 已完成第一步“attempt 可观测化”，先把失败章节从一个笼
 
 - attempt 目前写入统一 StorageManager key，尚未拆成正式数据库表。
 - 多轮合并已覆盖修复 preview；正式导入主任务仍以当前任务结果为主。
-- 下一步应把 `chapter_index_run_*` 提升为更稳定的可查询数据结构，并考虑增加独立的 run 查询 API，避免只能通过 task result 查看。
+- `chapter_index_run_*` 已补独立查询 API，可按 `session_id / parent_id` 边界查询单个 run 或当前项目 run 列表：
+  - `GET /api/extraction/chapter-index-runs?session_id=...&parent_id=...`
+  - `GET /api/extraction/chapter-index-runs/{run_key}?session_id=...&parent_id=...&include_indices=true`
+  - 默认返回 attempt/status/章节索引摘要；需要完整 `chapter_indices` 时显式传 `include_indices=true`。
+- 下一步仍应把该 run 结构从通用 StorageManager key 升级为正式数据库中间表，以便支持分页、长期保留、模型健康统计和更高效的项目级查询。
 
 ### P3：多模型提取流水线
 

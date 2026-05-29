@@ -411,6 +411,90 @@ def _first_nonempty(values: List[object]) -> Optional[str]:
     return None
 
 
+def _valid_chapter_index_run_key(value: str) -> bool:
+    if not isinstance(value, str) or not value.startswith("chapter_index_run_"):
+        return False
+    suffix = value[len("chapter_index_run_"):]
+    return bool(suffix) and all(char.isalnum() or char in {"-", "_"} for char in suffix)
+
+
+def _summarize_chapter_index(raw_index: object) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw_index, dict):
+        return None
+
+    def _count_list(key: str) -> int:
+        value = raw_index.get(key)
+        return len(value) if isinstance(value, list) else 0
+
+    return {
+        "chapter_id": raw_index.get("chapter_id"),
+        "chapter_title": raw_index.get("chapter_title"),
+        "chapter_order": raw_index.get("chapter_order"),
+        "characters_count": _count_list("chapter_characters"),
+        "interactions_count": _count_list("chapter_interactions"),
+        "events_count": _count_list("chapter_events"),
+        "world_facts_count": _count_list("chapter_world_facts"),
+    }
+
+
+def _serialize_chapter_index_run_state(
+    run_key: str,
+    state: Dict[str, Any],
+    *,
+    include_indices: bool = False,
+) -> Dict[str, Any]:
+    raw_indices = state.get("chapter_indices")
+    chapter_indices = raw_indices if isinstance(raw_indices, list) else []
+    summaries = [
+        summary
+        for summary in (_summarize_chapter_index(raw_index) for raw_index in chapter_indices)
+        if summary is not None
+    ]
+    summaries.sort(key=lambda item: item.get("chapter_order") if isinstance(item.get("chapter_order"), int) else 10**9)
+
+    attempts = state.get("chapter_index_attempts")
+    statuses = state.get("chapter_index_status")
+    attempts = attempts if isinstance(attempts, list) else []
+    statuses = statuses if isinstance(statuses, list) else []
+
+    payload: Dict[str, Any] = {
+        "run_key": run_key,
+        "task_id": state.get("task_id"),
+        "task_type": state.get("task_type"),
+        "session_id": state.get("session_id"),
+        "parent_id": state.get("parent_id"),
+        "total_chapters": state.get("total_chapters"),
+        "created_at": state.get("created_at"),
+        "updated_at": state.get("updated_at"),
+        "chapter_index_attempts": attempts,
+        "chapter_index_status": statuses,
+        "chapter_indices_summary": summaries,
+        "candidate_counts": {
+            "chapter_index_attempts": len(attempts),
+            "chapter_index_failed_attempts": sum(1 for item in attempts if isinstance(item, dict) and item.get("status") == "failed"),
+            "chapter_index_needs_retry": sum(1 for item in statuses if isinstance(item, dict) and item.get("needs_retry")),
+            "chapter_index_successful": sum(1 for item in statuses if isinstance(item, dict) and item.get("status") == "success"),
+            "chapter_indices": len(chapter_indices),
+        },
+    }
+    if include_indices:
+        payload["chapter_indices"] = chapter_indices
+    return payload
+
+
+def _chapter_index_run_matches_scope(
+    state: Dict[str, Any],
+    *,
+    session_id: str,
+    parent_id: Optional[str] = None,
+) -> bool:
+    if state.get("session_id") != session_id:
+        return False
+    if parent_id and state.get("parent_id") not in {None, parent_id}:
+        return False
+    return True
+
+
 def _extract_topology_lookup_keys(item: ContentItem) -> List[str]:
     payload = _topology_payload(item)
     aliases = _as_string_list(payload.get("aliases"))
@@ -1829,6 +1913,67 @@ async def execute_task(task_id: str):
            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
            detail=f"任务执行失败: {str(e)}"
        )
+
+
+@app.get("/api/extraction/chapter-index-runs", response_model=List[dict])
+async def list_chapter_index_runs(
+    session_id: str = Query(..., min_length=1),
+    parent_id: Optional[str] = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+):
+   """List persisted chapter index run summaries for a project/session."""
+   try:
+       keys = await storage_manager.list_keys()
+       run_keys = sorted(
+           (key for key in keys if isinstance(key, str) and key.startswith("chapter_index_run_")),
+           reverse=True,
+       )
+       runs: List[Dict[str, Any]] = []
+       for run_key in run_keys:
+           if len(runs) >= limit:
+               break
+           state = await storage_manager.load(run_key)
+           if not isinstance(state, dict):
+               continue
+           if not _chapter_index_run_matches_scope(state, session_id=session_id, parent_id=parent_id):
+               continue
+           runs.append(_serialize_chapter_index_run_state(run_key, state, include_indices=False))
+       return runs
+   except HTTPException:
+       raise
+   except Exception as e:
+       raise HTTPException(
+           status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+           detail=f"章节索引运行记录查询失败: {str(e)}",
+       )
+
+
+@app.get("/api/extraction/chapter-index-runs/{run_key}", response_model=dict)
+async def get_chapter_index_run(
+    run_key: str,
+    session_id: str = Query(..., min_length=1),
+    parent_id: Optional[str] = Query(None),
+    include_indices: bool = Query(False),
+):
+   """Get a persisted chapter index run, scoped to the current project/session."""
+   if not _valid_chapter_index_run_key(run_key):
+       raise HTTPException(
+           status_code=status.HTTP_400_BAD_REQUEST,
+           detail="章节索引运行记录标识无效",
+       )
+
+   loaded = await storage_manager.load(run_key)
+   if not isinstance(loaded, dict):
+       raise HTTPException(
+           status_code=status.HTTP_404_NOT_FOUND,
+           detail="章节索引运行记录不存在",
+       )
+   if not _chapter_index_run_matches_scope(loaded, session_id=session_id, parent_id=parent_id):
+       raise HTTPException(
+           status_code=status.HTTP_403_FORBIDDEN,
+           detail="章节索引运行记录不属于当前项目",
+       )
+   return _serialize_chapter_index_run_state(run_key, loaded, include_indices=include_indices)
 
 
 # Content management endpoints.
