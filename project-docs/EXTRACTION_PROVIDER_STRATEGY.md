@@ -325,12 +325,15 @@ P2 已完成第一步“attempt 可观测化”，先把失败章节从一个笼
   - `ImportAnalysisDiagnostics` 类型支持 `chapter_index_attempts / chapter_index_status / chapter_index_run_key`。
   - “重跑章节索引”在未手动选择单章时，会把 `needs_retry` 章节、失败章节和 run key 提交给后端。
   - 后端会基于这些字段缩小重跑范围，避免再次对整本书发起无差别提取。
+- UI 已显示历史复用状态：
+  - Extract 统计区会识别 `chapter_index_history_reused / chapter_index_combined_indices`。
+  - TaskCenter 修复 preview 摘要会显示“复用历史成功章 N 章，合并索引 M 章”。
 
 当前边界：
 
 - attempt 目前写入统一 StorageManager key，尚未拆成正式数据库表。
 - 多轮合并已覆盖修复 preview；正式导入主任务仍以当前任务结果为主。
-- 下一步应把 `chapter_index_run_*` 提升为更稳定的可查询数据结构，并让 UI 显示历史复用章节数。
+- 下一步应把 `chapter_index_run_*` 提升为更稳定的可查询数据结构，并考虑在 TaskCenter 中提供更细的失败章列表。
 
 ### P3：多模型提取流水线
 

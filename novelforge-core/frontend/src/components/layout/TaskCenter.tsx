@@ -6,19 +6,15 @@ import { Loader2, CheckCircle2, AlertCircle, Info, X } from 'lucide-react'
 import { taskService } from '@/lib/api/novelforge-api'
 import { useAppStore } from '@/lib/hooks/use-app-store'
 import { loadProjectPreferences, PROJECT_PREFERENCES_CHANGED_EVENT } from '@/lib/project-preferences'
-import {
-  emitTaskLifecycleEvent,
-  formatNovelImportStageSummary,
-  parseNovelImportTaskResult,
-} from '@/lib/task-events'
+import { emitTaskLifecycleEvent } from '@/lib/task-events'
 import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress-bar'
 import { cn } from '@/lib/utils'
+import { getTaskSummary, normalizeTaskStatus, REPAIR_PREVIEW_TASK_TYPES } from './task-summary'
 
 const TERMINAL_STATUSES = new Set(['COMPLETED', 'FAILED', 'CANCELLED'])
 const ACTIVE_STATUSES = new Set(['PENDING', 'RUNNING'])
 const TASK_EVENT_STATE_STORAGE_KEY = 'novelforge-task-event-states'
-const REPAIR_PREVIEW_TASK_TYPES = new Set(['chapter_index_rerun', 'relationship_backfill', 'timeline_rebuild'])
 
 function loadNotifiedTaskStates() {
   if (typeof window === 'undefined') {
@@ -50,95 +46,6 @@ function persistNotifiedTaskStates(states: Record<string, string>) {
   } catch {
     // Ignore storage write failures; eventing still works for the current runtime.
   }
-}
-
-function normalizeTaskStatus(status: unknown): string {
-  return String(status || '').toUpperCase()
-}
-
-function getTaskSummary(task: {
-  type?: string
-  status?: string
-  message?: string
-  result?: unknown
-  error?: string | null
-}) {
-  if (REPAIR_PREVIEW_TASK_TYPES.has(task.type || '')) {
-    const result = task.result && typeof task.result === 'object'
-      ? (task.result as Record<string, unknown>)
-      : {}
-    const relationships = typeof result.relationships_count === 'number' ? result.relationships_count : 0
-    const timeline = typeof result.timeline_count === 'number' ? result.timeline_count : 0
-    const diff = result.repair_diff && typeof result.repair_diff === 'object'
-      ? (result.repair_diff as Record<string, unknown>)
-      : null
-    const relationshipDiff = diff?.relationships && typeof diff.relationships === 'object'
-      ? (diff.relationships as Record<string, unknown>)
-      : null
-    const timelineDiff = diff?.timeline && typeof diff.timeline === 'object'
-      ? (diff.timeline as Record<string, unknown>)
-      : null
-    const relationshipNew = typeof relationshipDiff?.new === 'number' ? relationshipDiff.new : null
-    const relationshipDuplicates = typeof relationshipDiff?.duplicates === 'number' ? relationshipDiff.duplicates : null
-    const timelineNew = typeof timelineDiff?.new === 'number' ? timelineDiff.new : null
-    const timelineDuplicates = typeof timelineDiff?.duplicates === 'number' ? timelineDiff.duplicates : null
-    if (normalizeTaskStatus(task.status) === 'COMPLETED') {
-      if (
-        relationshipNew !== null ||
-        relationshipDuplicates !== null ||
-        timelineNew !== null ||
-        timelineDuplicates !== null
-      ) {
-        return [
-          '修复预览完成。',
-          `关系新增 ${relationshipNew ?? relationships} / 跳过 ${relationshipDuplicates ?? 0}`,
-          `时间线新增 ${timelineNew ?? timeline} / 跳过 ${timelineDuplicates ?? 0}`,
-        ].join(' ')
-      }
-      return `修复预览完成：关系 ${relationships} 条，时间线 ${timeline} 条。`
-    }
-    return task.message || '质量修复任务正在处理中...'
-  }
-
-  if ((task.type || '') === 'import_repair_apply') {
-    const result = task.result && typeof task.result === 'object'
-      ? (task.result as Record<string, unknown>)
-      : {}
-    const relationships = typeof result.relationships_count === 'number' ? result.relationships_count : 0
-    const timeline = typeof result.timeline_count === 'number' ? result.timeline_count : 0
-    return normalizeTaskStatus(task.status) === 'COMPLETED'
-      ? `修复写回完成：关系 ${relationships} 条，时间线 ${timeline} 条。`
-      : task.message || '修复写回正在处理中...'
-  }
-
-  if ((task.type || '') !== 'novel_import') {
-    return task.error || task.message || '任务状态已更新'
-  }
-
-  const result = parseNovelImportTaskResult(task.result)
-  const chaptersCount = result?.chapters_count ?? null
-  const warning = result?.analysis_warning?.trim() || null
-  const stageSummary = formatNovelImportStageSummary(result)
-
-  if (normalizeTaskStatus(task.status) === 'COMPLETED') {
-    const isPartial = result?.analysis_status && result.analysis_status !== 'completed'
-    const base = isPartial
-      ? '导入完成，但分析未完全完成。'
-      : chaptersCount !== null
-        ? `导入完成，已写入 ${chaptersCount} 个章节。`
-        : '导入完成。'
-    return [base, stageSummary, warning].filter(Boolean).join(' ')
-  }
-
-  if (normalizeTaskStatus(task.status) === 'FAILED') {
-    return task.error || task.message || '导入任务失败。'
-  }
-
-  if (normalizeTaskStatus(task.status) === 'CANCELLED') {
-    return '导入任务已取消。'
-  }
-
-  return task.message || '导入任务正在处理中...'
 }
 
 export const TaskCenter = () => {

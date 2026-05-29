@@ -125,6 +125,8 @@ const CANDIDATE_COUNT_LABELS: Record<string, string> = {
   chapter_index_attempts: '章节索引尝试',
   chapter_index_failed_attempts: '失败尝试',
   chapter_index_needs_retry: '需重跑章节',
+  chapter_index_history_reused: '复用历史成功章',
+  chapter_index_combined_indices: '合并章节索引',
 };
 
 function hasAcceptedExtension(fileName: string): boolean {
