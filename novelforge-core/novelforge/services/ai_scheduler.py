@@ -413,6 +413,104 @@ class AITaskScheduler:
 
         return targets
 
+    def _chapter_index_run_key(self, task_id: str) -> str:
+        return f"chapter_index_run_{task_id}"
+
+    async def _load_chapter_index_run_state(self, task_id: str) -> Optional[Dict[str, Any]]:
+        loaded = await self.storage.load(self._chapter_index_run_key(task_id))
+        return loaded if isinstance(loaded, dict) else None
+
+    async def _extract_chapter_index_assets_with_persisted_diagnostics(
+        self,
+        extraction_service: Any,
+        chapters: List[Dict[str, Any]],
+        task: Task,
+    ) -> Dict[str, Any]:
+        run_key = self._chapter_index_run_key(task.id)
+        now = datetime.now().isoformat()
+        run_state: Dict[str, Any] = {
+            "task_id": task.id,
+            "task_type": task.type,
+            "session_id": task.parameters.get("session_id"),
+            "parent_id": task.parameters.get("parent_id") or task.parameters.get("novel_id"),
+            "total_chapters": len(chapters),
+            "chapter_index_attempts": [],
+            "chapter_index_status": [],
+            "created_at": now,
+            "updated_at": now,
+        }
+        state_lock = asyncio.Lock()
+        await self.storage.save(run_key, run_state)
+
+        async def diagnostics_recorder(event: Dict[str, Any]) -> None:
+            record = event.get("record") if isinstance(event, dict) else None
+            if not isinstance(record, dict):
+                return
+
+            async with state_lock:
+                current_state = await self._load_chapter_index_run_state(task.id)
+                if isinstance(current_state, dict):
+                    run_state.update(current_state)
+
+                event_type = event.get("event_type")
+                if event_type == "attempt":
+                    attempts = run_state.setdefault("chapter_index_attempts", [])
+                    if isinstance(attempts, list):
+                        attempts.append(record)
+                elif event_type == "status":
+                    statuses = run_state.setdefault("chapter_index_status", [])
+                    if isinstance(statuses, list):
+                        chapter_id = record.get("chapter_id")
+                        replaced = False
+                        for index, existing in enumerate(statuses):
+                            if isinstance(existing, dict) and existing.get("chapter_id") == chapter_id:
+                                statuses[index] = record
+                                replaced = True
+                                break
+                        if not replaced:
+                            statuses.append(record)
+
+                run_state["updated_at"] = datetime.now().isoformat()
+                await self.storage.save(run_key, run_state)
+
+        try:
+            analysis = await extraction_service.extract_chapter_index_assets(
+                chapters,
+                diagnostics_recorder=diagnostics_recorder,
+            )
+        except TypeError as exc:
+            if "diagnostics_recorder" not in str(exc):
+                raise
+            analysis = await extraction_service.extract_chapter_index_assets(chapters)
+
+        persisted_state = await self._load_chapter_index_run_state(task.id)
+        if isinstance(persisted_state, dict):
+            diagnostics = analysis.get("analysis_diagnostics")
+            if not isinstance(diagnostics, dict):
+                diagnostics = {}
+                analysis["analysis_diagnostics"] = diagnostics
+            diagnostics["chapter_index_run_key"] = run_key
+            diagnostics["chapter_index_attempts"] = (
+                persisted_state.get("chapter_index_attempts")
+                or diagnostics.get("chapter_index_attempts")
+                or []
+            )
+            diagnostics["chapter_index_status"] = (
+                persisted_state.get("chapter_index_status")
+                or diagnostics.get("chapter_index_status")
+                or []
+            )
+            analysis["chapter_index_attempts"] = diagnostics["chapter_index_attempts"]
+            analysis["chapter_index_status"] = diagnostics["chapter_index_status"]
+            counts = diagnostics.setdefault("candidate_counts", {})
+            if isinstance(counts, dict):
+                counts["chapter_index_attempts"] = len(diagnostics["chapter_index_attempts"])
+                counts["chapter_index_needs_retry"] = sum(
+                    1 for status in diagnostics["chapter_index_status"]
+                    if isinstance(status, dict) and status.get("needs_retry")
+                )
+        return analysis
+
     def _build_relationship_repair_key(self, relationship: Dict[str, Any]) -> Optional[str]:
         source = self._normalize_import_name(str(relationship.get("source") or ""))
         target = self._normalize_import_name(str(relationship.get("target") or relationship.get("target_name") or ""))
@@ -572,7 +670,11 @@ class AITaskScheduler:
         task.message = "正在执行章节级索引重跑..."
         await self._save_task(task)
         extraction_service = get_extraction_service(self.ai_service, self.config)
-        analysis = await extraction_service.extract_chapter_index_assets(chapters)
+        analysis = await self._extract_chapter_index_assets_with_persisted_diagnostics(
+            extraction_service,
+            chapters,
+            task,
+        )
 
         diagnostics = analysis.get("analysis_diagnostics")
         if not isinstance(diagnostics, dict):
@@ -1096,7 +1198,11 @@ class AITaskScheduler:
         task.message = "AI 分析中：构建章节级创作资产索引..."
         await self._save_task(task)
 
-        analysis = await extraction_service.extract_chapter_index_assets(chapters)
+        analysis = await self._extract_chapter_index_assets_with_persisted_diagnostics(
+            extraction_service,
+            chapters,
+            task,
+        )
         diagnostics = analysis.get("analysis_diagnostics", {}) or {}
         characters = list(analysis.get("characters") or [])
         relationships = list(analysis.get("relationships") or [])

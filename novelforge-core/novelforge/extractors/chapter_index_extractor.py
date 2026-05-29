@@ -17,7 +17,7 @@ import os
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -162,9 +162,15 @@ class EndpointMatch:
 class ChapterIndexExtractor:
     """Extract and merge chapter-level novel understanding indices."""
 
-    def __init__(self, ai_service: Any, config: Optional[ExtractionConfig] = None):
+    def __init__(
+        self,
+        ai_service: Any,
+        config: Optional[ExtractionConfig] = None,
+        diagnostics_recorder: Optional[Callable[[Dict[str, Any]], Any]] = None,
+    ):
         self.ai_service = ai_service
         self.config = config or ExtractionConfig(timeout=180.0, max_retries=1, retry_delay=1.0)
+        self.diagnostics_recorder = diagnostics_recorder
         self.chapter_concurrency = self._resolve_chapter_concurrency()
         self.max_tokens = self._resolve_int_env("NOVELFORGE_CHAPTER_INDEX_MAX_TOKENS", default=2500, minimum=800, maximum=5000)
 
@@ -182,9 +188,21 @@ class ChapterIndexExtractor:
             async with semaphore:
                 try:
                     index, attempts = await self._extract_chapter_index_with_attempts(source)
+                    await self._record_diagnostic_event(
+                        {
+                            "event_type": "status",
+                            "record": self._build_chapter_status(source, attempts=attempts, index=index),
+                        }
+                    )
                     return {"source": source, "index": index, "attempts": attempts, "error": None}
                 except Exception as exc:
                     attempts = getattr(exc, "attempts", [])
+                    await self._record_diagnostic_event(
+                        {
+                            "event_type": "status",
+                            "record": self._build_chapter_status(source, attempts=attempts, error=exc),
+                        }
+                    )
                     return {"source": source, "index": None, "attempts": attempts, "error": exc}
 
         tasks = [run_with_limit(source) for source in sources]
@@ -285,6 +303,7 @@ class ChapterIndexExtractor:
                         needs_retry=False,
                     )
                 )
+                await self._record_diagnostic_event({"event_type": "attempt", "record": attempts[-1]})
                 return index, attempts
             except Exception as exc:
                 last_error = exc
@@ -300,6 +319,7 @@ class ChapterIndexExtractor:
                         needs_retry=is_final_attempt,
                     )
                 )
+                await self._record_diagnostic_event({"event_type": "attempt", "record": attempts[-1]})
                 if not is_final_attempt:
                     await asyncio.sleep(self.config.retry_delay)
         final_error = last_error or RuntimeError("chapter index extraction failed")
@@ -338,6 +358,13 @@ class ChapterIndexExtractor:
             "needs_retry": bool(needs_retry),
         }
         return record
+
+    async def _record_diagnostic_event(self, event: Dict[str, Any]) -> None:
+        if not self.diagnostics_recorder:
+            return
+        result = self.diagnostics_recorder(event)
+        if asyncio.iscoroutine(result):
+            await result
 
     def _build_chapter_status(
         self,

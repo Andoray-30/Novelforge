@@ -460,6 +460,109 @@ def test_novel_import_uses_chapter_index_analysis_and_returns_diagnostics(monkey
     assert result["relationship_unresolved_endpoints"] == ["陌生人"]
 
 
+def test_import_chapter_index_analysis_persists_attempt_run_state():
+    class RecorderExtractionService:
+        async def extract_chapter_index_assets(self, chapters, diagnostics_recorder=None):
+            assert diagnostics_recorder is not None
+            await diagnostics_recorder({
+                "event_type": "attempt",
+                "record": {
+                    "chapter_id": "chapter-1",
+                    "chapter_title": "第一章",
+                    "chapter_order": 1,
+                    "attempt_number": 1,
+                    "status": "success",
+                    "model_used": "route-model",
+                    "latency_ms": 123,
+                    "error_type": None,
+                    "raw_response_hash": "abc123",
+                    "parsed_candidate_counts": {"characters": 8},
+                    "retry_count": 0,
+                    "needs_retry": False,
+                },
+            })
+            await diagnostics_recorder({
+                "event_type": "status",
+                "record": {
+                    "chapter_id": "chapter-1",
+                    "chapter_title": "第一章",
+                    "chapter_order": 1,
+                    "status": "success",
+                    "model_used": "route-model",
+                    "attempt_count": 1,
+                    "latency_ms": 123,
+                    "error_type": None,
+                    "error": None,
+                    "parsed_candidate_counts": {"characters": 8},
+                    "needs_retry": False,
+                },
+            })
+            characters = [
+                Character(
+                    name=f"角色{i}",
+                    role=CharacterRole.PROTAGONIST if i == 1 else CharacterRole.SUPPORTING,
+                    description="可用于创作的人物",
+                )
+                for i in range(1, 9)
+            ]
+            relationships = [
+                NetworkEdge(
+                    source=f"角色{i}",
+                    target=f"角色{(i % 8) + 1}",
+                    relationship_type=RelationshipType.FRIEND,
+                    description="互相牵引",
+                )
+                for i in range(1, 9)
+            ]
+            timeline_events = [
+                TimelineEvent(
+                    title=f"事件{i}",
+                    description=f"角色{i}经历了关键转折。",
+                    characters=[f"角色{i}"],
+                )
+                for i in range(1, 7)
+            ]
+            return {
+                "characters": characters,
+                "relationships": relationships,
+                "timeline_events": timeline_events,
+                "world_setting": WorldSetting(history="旧时代留下未解的约定"),
+                "analysis_diagnostics": {
+                    "candidate_counts": {},
+                    "failed_chapters": [],
+                    "relationship_unresolved_endpoints": [],
+                    "timeline_mismatch_events": [],
+                },
+            }
+
+    storage = MemoryStorageManager()
+    scheduler = build_scheduler(storage_manager=storage)
+    task = Task(
+        id="import-attempt-persist",
+        type="novel_import",
+        status=TaskStatus.RUNNING,
+        priority=TaskPriority.HIGH,
+        parameters={"session_id": "session-attempt", "parent_id": "novel-attempt"},
+        created_at=datetime.now(),
+    )
+
+    result = asyncio.run(scheduler._run_import_chapter_index_analysis(
+        RecorderExtractionService(),
+        [{"id": "chapter-1", "title": "第一章", "chapter_index": 1, "content": "正文"}],
+        task,
+    ))
+
+    run_key = "chapter_index_run_import-attempt-persist"
+    persisted = storage.saved[run_key]
+    assert persisted["total_chapters"] == 1
+    assert persisted["chapter_index_attempts"][0]["model_used"] == "route-model"
+    assert persisted["chapter_index_status"][0]["status"] == "success"
+    assert result["analysis_diagnostics"]["chapter_index_run_key"] == run_key
+    assert result["analysis_diagnostics"]["chapter_index_attempts"][0]["raw_response_hash"] == "abc123"
+    assert result["candidate_counts"]["chapter_index_attempts"] == 1
+    assert result["candidate_counts"]["chapter_index_needs_retry"] == 0
+
+
 def test_import_expands_overlong_chapters_on_sentence_boundaries():
     from novelforge.types.text_processing import Chapter
 

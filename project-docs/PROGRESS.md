@@ -5479,12 +5479,18 @@
 - 章节重跑范围：
   - `_load_repair_chapters(...)` 现在支持从 `analysis_diagnostics.chapter_index_status`、`failed_chapters` 或显式 `chapter_ids` 中筛出需要重跑的章节。
   - 这避免章节修复任务默认把整本书重新发给模型，降低 504 / 429 风险。
+- 章节 attempt 持久化：
+  - `ChapterIndexExtractor` 新增 `diagnostics_recorder` 回调。
+  - 导入任务与章节修复 preview 任务会创建 `chapter_index_run_<task_id>` 存储记录。
+  - 每次 attempt 和每章最终 status 会即时写入该 run key，最终结果通过 `analysis_diagnostics.chapter_index_run_key` 暴露。
+  - 这让长篇任务中途崩溃时，已完成章节的模型、延迟、错误类型和候选数量不再完全丢失。
 - 测试：
   - 新增章节 index attempt 成功/失败诊断测试。
   - 新增章节修复按失败诊断筛选重跑章节测试。
+  - 新增导入章节 index 即时持久化 run state 测试。
   - `compileall` 通过。
-  - 后端相关测试在工作区临时目录下通过：`48 passed`。
+  - 后端相关测试在工作区临时目录下通过：`49 passed`。
 - 当前边界：
-  - attempt 目前随任务结果保存，尚未独立落入数据库中间表。
+  - attempt 目前落在 StorageManager key 中，尚未独立落入正式数据库中间表。
   - 前端“继续重跑失败章节”按钮尚未接入这些字段。
-  - 下一轮应把 attempt 存储从任务结果提升为可查询、可增量复跑的数据层。
+  - merge 还不能自动复用上一轮成功章节结果，下一轮应补“多轮成功结果合并”或先补前端重跑入口。

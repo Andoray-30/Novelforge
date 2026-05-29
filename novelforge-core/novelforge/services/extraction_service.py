@@ -89,8 +89,18 @@ class ExtractionService:
     async def extract_relationships_guided(self, text: str, characters: Optional[List[Character]] = None) -> List[NetworkEdge]:
         return await self.unified_relationship_extractor.extract_relationships_guided(text, characters=characters)
 
-    async def extract_chapter_index_assets(self, chapters: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def extract_chapter_index_assets(
+        self,
+        chapters: List[Dict[str, Any]],
+        diagnostics_recorder: Optional[Any] = None,
+    ) -> Dict[str, Any]:
         extractor = self.chapter_index_extractor
+        if diagnostics_recorder is not None:
+            extractor = ChapterIndexExtractor(
+                config=self.chapter_index_extractor.config,
+                ai_service=self.ai_service,
+                diagnostics_recorder=diagnostics_recorder,
+            )
         model_route = None
         if getattr(self.config, "enable_model_router", True):
             decision = await self.model_router.select_model("extractor_fast")
@@ -104,6 +114,7 @@ class ExtractionService:
                 extractor = ChapterIndexExtractor(
                     config=self.chapter_index_extractor.config,
                     ai_service=routed_service,
+                    diagnostics_recorder=diagnostics_recorder,
                 )
         result = await extractor.extract_and_merge(chapters)
         diagnostics = result.diagnostics.model_dump()

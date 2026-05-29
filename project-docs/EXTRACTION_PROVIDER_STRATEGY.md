@@ -309,12 +309,16 @@ P2 已完成第一步“attempt 可观测化”，先把失败章节从一个笼
   - `chapter_index_status[].status=failed`
   - `failed_chapters[].chapter_id`
   - 显式 `chapter_ids`
+- 章节 index 提取器新增 `diagnostics_recorder` 回调。
+- 导入任务 / 修复 preview 任务会创建 `chapter_index_run_<task_id>` 存储记录，并在每次 attempt / 每章 status 完成后立即写入：
+  - 这让任务中途崩溃时，已完成章节的 attempt 诊断不再完全依赖最终 result。
+  - 最终 `analysis_diagnostics.chapter_index_run_key` 会指向该记录。
 
 当前边界：
 
-- attempt 目前随导入任务结果持久化，尚未拆成独立数据库表。
-- 任务中途进程崩溃时，已完成章节的 attempt 仍可能来不及落库。
-- 下一步应把成功/失败 attempt 在每章结束后立即写入可查询存储，并把前端“继续重跑失败章节”按钮接入这些诊断字段。
+- attempt 目前写入统一 StorageManager key，尚未拆成正式数据库表。
+- merge 仍主要读取当前任务内的成功结果；还没有从多轮历史 `chapter_index_run_*` 记录合并成功章节。
+- 下一步应把前端“继续重跑失败章节”按钮接入这些诊断字段，并让 merge 能复用历史成功章结果。
 
 ### P3：多模型提取流水线
 
