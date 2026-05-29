@@ -12,6 +12,15 @@ export interface ChapterIndexRecoveryDetails {
   previousRunKey?: string
 }
 
+export interface RepairPreviewWritebackDetails {
+  relationshipNew: number
+  relationshipDuplicates: number
+  timelineNew: number
+  timelineDuplicates: number
+  applyTypes: string[]
+  hasWritableAssets: boolean
+}
+
 function numberFromRecord(record: Record<string, unknown> | null, key: string): number | null {
   const value = record?.[key]
   return typeof value === 'number' && Number.isFinite(value) ? value : null
@@ -83,6 +92,38 @@ export function getChapterIndexRecoveryDetails(resultValue: unknown): ChapterInd
     retryable,
     runKey: typeof diagnostics?.chapter_index_run_key === 'string' ? diagnostics.chapter_index_run_key : undefined,
     previousRunKey: typeof diagnostics?.chapter_index_history_run_key === 'string' ? diagnostics.chapter_index_history_run_key : undefined,
+  }
+}
+
+export function getRepairPreviewWritebackDetails(resultValue: unknown): RepairPreviewWritebackDetails | null {
+  const result = asRecord(resultValue)
+  if (!result) return null
+
+  const diff = asRecord(result.repair_diff)
+  const relationshipDiff = asRecord(diff?.relationships)
+  const timelineDiff = asRecord(diff?.timeline)
+  const repairType = typeof result.repair_type === 'string' ? result.repair_type : ''
+  const relationshipsCount = typeof result.relationships_count === 'number' ? result.relationships_count : 0
+  const timelineCount = typeof result.timeline_count === 'number' ? result.timeline_count : 0
+
+  const relationshipNew = numberFromRecord(relationshipDiff, 'new') ?? relationshipsCount
+  const relationshipDuplicates = numberFromRecord(relationshipDiff, 'duplicates') ?? 0
+  const timelineNew = numberFromRecord(timelineDiff, 'new') ?? timelineCount
+  const timelineDuplicates = numberFromRecord(timelineDiff, 'duplicates') ?? 0
+
+  const applyTypes = repairType === 'relationships'
+    ? ['relationships']
+    : repairType === 'timeline'
+      ? ['timeline']
+      : ['relationships', 'timeline']
+
+  return {
+    relationshipNew,
+    relationshipDuplicates,
+    timelineNew,
+    timelineDuplicates,
+    applyTypes,
+    hasWritableAssets: relationshipNew + timelineNew > 0,
   }
 }
 

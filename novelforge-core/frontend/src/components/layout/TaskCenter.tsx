@@ -10,7 +10,7 @@ import { emitTaskLifecycleEvent } from '@/lib/task-events'
 import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress-bar'
 import { cn } from '@/lib/utils'
-import { getChapterIndexRecoveryDetails, getTaskSummary, normalizeTaskStatus, REPAIR_PREVIEW_TASK_TYPES } from './task-summary'
+import { getChapterIndexRecoveryDetails, getRepairPreviewWritebackDetails, getTaskSummary, normalizeTaskStatus, REPAIR_PREVIEW_TASK_TYPES } from './task-summary'
 
 const TERMINAL_STATUSES = new Set(['COMPLETED', 'FAILED', 'CANCELLED'])
 const ACTIVE_STATUSES = new Set(['PENDING', 'RUNNING'])
@@ -345,6 +345,9 @@ export const TaskCenter = () => {
         const recoveryDetails = isCompleted && REPAIR_PREVIEW_TASK_TYPES.has(task.type || '')
           ? getChapterIndexRecoveryDetails(task.result)
           : null
+        const writebackDetails = canApplyRepairPreview
+          ? getRepairPreviewWritebackDetails(task.result)
+          : null
 
         return (
           <Card
@@ -464,16 +467,28 @@ export const TaskCenter = () => {
                 ) : null}
 
                 {canApplyRepairPreview ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handleApplyRepairPreview(task)
-                    }}
-                    disabled={applyingRepairTaskId === task.id}
-                    className="mt-2 inline-flex items-center rounded-md border border-green-500/30 bg-green-500/10 px-2 py-1 text-[10px] font-semibold text-green-700 transition hover:bg-green-500/20 disabled:cursor-not-allowed disabled:opacity-60 dark:text-green-300"
-                  >
-                    {applyingRepairTaskId === task.id ? 'Submitting...' : 'Confirm writeback'}
-                  </button>
+                  <div className="mt-2 rounded-md border border-green-500/20 bg-green-500/5 p-2 text-[10px] text-muted-foreground">
+                    <div className="font-semibold text-green-700 dark:text-green-300">确认写回预览</div>
+                    <div className="mt-1 grid grid-cols-2 gap-1">
+                      <span>关系新增 {writebackDetails?.relationshipNew ?? 0}</span>
+                      <span>关系跳过 {writebackDetails?.relationshipDuplicates ?? 0}</span>
+                      <span>时间线新增 {writebackDetails?.timelineNew ?? 0}</span>
+                      <span>时间线跳过 {writebackDetails?.timelineDuplicates ?? 0}</span>
+                    </div>
+                    <p className="mt-1 leading-4">
+                      写回会保存为修复资产，不覆盖原始提取资产；后续 Agent 会优先读取补强后的项目记忆。
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleApplyRepairPreview(task)
+                      }}
+                      disabled={applyingRepairTaskId === task.id || writebackDetails?.hasWritableAssets === false}
+                      className="mt-2 inline-flex items-center rounded-md border border-green-500/30 bg-green-500/10 px-2 py-1 text-[10px] font-semibold text-green-700 transition hover:bg-green-500/20 disabled:cursor-not-allowed disabled:opacity-60 dark:text-green-300"
+                    >
+                      {applyingRepairTaskId === task.id ? '提交中...' : writebackDetails?.hasWritableAssets === false ? '无新增可写回' : '确认写回修复资产'}
+                    </button>
+                  </div>
                 ) : null}
               </div>
             </CardContent>

@@ -5572,3 +5572,20 @@
 - 当前边界：
   - 操作仍然生成修复 preview 任务，用户需要在任务中心复核后再写回。
   - 下一步应把 preview 结果的“复用历史成功章 + 本轮重跑章”做成更明显的确认写回入口。
+
+### 2026-05-29 Goal 21 后续：修复 preview 写回确认卡增强
+
+- TaskCenter 对已完成的修复 preview 任务新增“确认写回预览”：
+  - 显示关系新增 / 关系跳过 / 时间线新增 / 时间线跳过。
+  - 明确提示写回会保存为修复资产，不覆盖原始提取资产。
+  - 当没有新增可写回资产时禁用确认按钮，避免用户误以为写回会产生变化。
+  - 按钮文案改为“确认写回修复资产”，弱化工程化英文。
+- 新增 `getRepairPreviewWritebackDetails(...)` helper，并补 TaskCenter 单测。
+- 测试：
+  - 前端 `npx.cmd tsc --noEmit --incremental false` 通过。
+  - TaskCenter Vitest：`3 passed`。
+  - 前端全量 Vitest：`27 passed / 109 passed`。
+  - 前端 build 通过。
+- 当前边界：
+  - 仍是任务中心级确认，还不是大型 diff viewer。
+  - 下一步可把写回完成后的新增修复资产入口回链到 Extract / Dashboard，让用户直接查看已写入的关系和时间线资产。

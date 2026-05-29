@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getChapterIndexRecoveryDetails, getTaskSummary } from './task-summary'
+import { getChapterIndexRecoveryDetails, getRepairPreviewWritebackDetails, getTaskSummary } from './task-summary'
 
 describe('TaskCenter summaries', () => {
   it('shows reused chapter index history in repair previews', () => {
@@ -44,5 +44,26 @@ describe('TaskCenter summaries', () => {
     expect(details?.retryable).toEqual(['第二章：gateway_timeout'])
     expect(details?.runKey).toBe('chapter_index_run_current')
     expect(details?.previousRunKey).toBe('chapter_index_run_previous')
+  })
+
+  it('builds writeback details for repair previews', () => {
+    const details = getRepairPreviewWritebackDetails({
+      repair_type: 'all',
+      relationships_count: 4,
+      timeline_count: 2,
+      repair_diff: {
+        relationships: { new: 3, duplicates: 1 },
+        timeline: { new: 2, duplicates: 0 },
+      },
+    })
+
+    expect(details).toMatchObject({
+      relationshipNew: 3,
+      relationshipDuplicates: 1,
+      timelineNew: 2,
+      timelineDuplicates: 0,
+      applyTypes: ['relationships', 'timeline'],
+      hasWritableAssets: true,
+    })
   })
 })
