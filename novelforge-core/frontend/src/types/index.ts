@@ -490,6 +490,7 @@ export interface ChapterIndexRun {
   chapter_indices_summary: Array<Record<string, unknown>>;
   chapter_indices?: Array<Record<string, unknown>>;
   candidate_counts: Record<string, number>;
+  model_route?: ModelRouteDecision | null;
 }
 
 export interface AITask {

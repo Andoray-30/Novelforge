@@ -43,11 +43,17 @@ describe('chapter index run utils', () => {
         { chapter_id: 'chapter-1', status: 'failed', error_type: 'timeout' },
         { chapter_id: 'chapter-2', status: 'success' },
       ],
+      model_route: {
+        selected_model: 'route-model',
+        role: 'extractor_fast',
+        reason: 'probe_passed',
+      },
     });
 
     const retryable = getRetryableChapterIndexRunStatuses(run);
 
     expect(retryable).toHaveLength(1);
     expect(retryable[0].chapter_id).toBe('chapter-1');
+    expect(run.model_route?.selected_model).toBe('route-model');
   });
 });

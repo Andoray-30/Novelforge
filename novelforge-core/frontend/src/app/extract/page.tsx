@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { chapterIndexRunService, contentService, taskService, textProcessingService } from '@/lib/api';
 import { buildAssetQualityDiagnostics, type AssetQualityDiagnosticsResult } from '@/lib/asset-quality-diagnostics';
-import { getModelProbeStatusLabel, getModelRouteSummary } from '@/lib/model-route-summary';
+import { getModelProbeStatusLabel, getModelRouteSummary, normalizeModelRoute } from '@/lib/model-route-summary';
 import { getNovelImportStageLabel, parseNovelImportTaskResult } from '@/lib/task-events';
 import { useAppStore } from '@/lib/hooks/use-app-store';
 import { useSessionTaskEvents } from '@/lib/hooks/use-session-task-events';
@@ -1397,6 +1397,7 @@ export default function ExtractPage() {
                       const failedCount = counts.chapter_index_failed_attempts ?? 0;
                       const successCount = counts.chapter_index_successful ?? 0;
                       const statusPreview = getChapterStatusPreview(run);
+                      const runModelRoute = normalizeModelRoute(run.model_route);
                       return (
                         <article key={run.run_key} className="rounded-2xl border border-[var(--nf-border)] bg-[var(--nf-surface)] p-4">
                           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -1427,6 +1428,12 @@ export default function ExtractPage() {
                                 <li className="text-[var(--nf-text-subtle)]">还有 {run.chapter_index_status.length - statusPreview.length} 章状态记录</li>
                               ) : null}
                             </ul>
+                          ) : null}
+                          {runModelRoute ? (
+                            <div className="mt-3 rounded-xl border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] px-3 py-2 text-xs leading-5 text-[var(--nf-text-muted)]">
+                              <p className="font-semibold text-[var(--nf-text)]">模型：{runModelRoute.selectedModel}</p>
+                              <p>{runModelRoute.role} · {runModelRoute.reasonLabel}</p>
+                            </div>
                           ) : null}
                           <div className="mt-4 flex flex-wrap gap-2">
                             <button

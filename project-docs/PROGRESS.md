@@ -5698,3 +5698,25 @@
 - 当前边界：
   - 这一步只把现有路由诊断变成用户可见，不新增真实测速 API 或模型健康历史。
   - 下一步应继续把模型健康从单次导入结果扩展为可查询的短期健康报告。
+
+### 2026-05-30 Goal 21 后续：章节索引历史 run 保存模型路由
+
+- `chapter_index_run_*` 持久化记录现在会保存 `model_route`：
+  - 导入或修复 preview 完成后，run state 会写入当时的模型角色、候选池、选中模型、选择原因和 probe 结果。
+  - 即使用户之后只查看历史 run，也能追溯当时为什么使用某个模型。
+- 章节索引 run 查询 API 返回 `model_route`：
+  - `GET /api/extraction/chapter-index-runs`
+  - `GET /api/extraction/chapter-index-runs/{run_key}`
+- Extract 页“章节索引运行记录”卡片新增轻量模型摘要：
+  - 显示当时选中的模型。
+  - 显示任务角色与选择原因。
+- 测试：
+  - 后端持久化/API 相关 pytest：`4 passed`。
+  - 后端 `compileall` 通过。
+  - 前端 `npx.cmd tsc --noEmit --incremental false` 通过。
+  - 前端相关 Vitest：`5 passed`。
+  - 前端全量 Vitest：`30 passed / 121 passed`。
+  - 前端 build 通过。
+- 当前边界：
+  - 仍然是 run 级追溯，不是跨任务全局模型健康表。
+  - 下一步可以把多个 run 的 probe/error 汇总成“最近模型健康”报告。

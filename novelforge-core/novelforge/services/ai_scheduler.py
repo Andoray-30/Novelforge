@@ -502,6 +502,12 @@ class AITaskScheduler:
             if not isinstance(diagnostics, dict):
                 diagnostics = {}
                 analysis["analysis_diagnostics"] = diagnostics
+            model_route = analysis.get("model_route") or diagnostics.get("model_route")
+            if isinstance(model_route, dict):
+                persisted_state["model_route"] = model_route
+                run_state["model_route"] = model_route
+                run_state["updated_at"] = datetime.now().isoformat()
+                await self.storage.save(run_key, run_state)
             diagnostics["chapter_index_run_key"] = run_key
             diagnostics["chapter_index_attempts"] = (
                 persisted_state.get("chapter_index_attempts")

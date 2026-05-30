@@ -469,6 +469,7 @@ def _serialize_chapter_index_run_state(
         "chapter_index_attempts": attempts,
         "chapter_index_status": statuses,
         "chapter_indices_summary": summaries,
+        "model_route": state.get("model_route") if isinstance(state.get("model_route"), dict) else None,
         "candidate_counts": {
             "chapter_index_attempts": len(attempts),
             "chapter_index_failed_attempts": sum(1 for item in attempts if isinstance(item, dict) and item.get("status") == "failed"),

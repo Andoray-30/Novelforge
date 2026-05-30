@@ -537,6 +537,18 @@ def test_import_chapter_index_analysis_persists_attempt_run_state():
                     "failed_chapters": [],
                     "relationship_unresolved_endpoints": [],
                     "timeline_mismatch_events": [],
+                    "model_route": {
+                        "role": "extractor_fast",
+                        "selected_model": "route-model",
+                        "reason": "probe_passed",
+                        "candidates": ["route-model"],
+                    },
+                },
+                "model_route": {
+                    "role": "extractor_fast",
+                    "selected_model": "route-model",
+                    "reason": "probe_passed",
+                    "candidates": ["route-model"],
                 },
             }
 
@@ -562,6 +574,7 @@ def test_import_chapter_index_analysis_persists_attempt_run_state():
     assert persisted["total_chapters"] == 1
     assert persisted["chapter_index_attempts"][0]["model_used"] == "route-model"
     assert persisted["chapter_index_status"][0]["status"] == "success"
+    assert persisted["model_route"]["selected_model"] == "route-model"
     assert result["analysis_diagnostics"]["chapter_index_run_key"] == run_key
     assert result["analysis_diagnostics"]["chapter_index_attempts"][0]["raw_response_hash"] == "abc123"
     assert result["candidate_counts"]["chapter_index_attempts"] == 1

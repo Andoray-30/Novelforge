@@ -53,6 +53,12 @@ def _run_state(session_id="session-a", parent_id="novel-a"):
                 "chapter_world_facts": [],
             }
         ],
+        "model_route": {
+            "role": "extractor_fast",
+            "selected_model": "route-model",
+            "reason": "probe_passed",
+            "candidates": ["route-model"],
+        },
     }
 
 
@@ -74,6 +80,7 @@ def test_chapter_index_run_query_is_scoped_and_summarized(monkeypatch):
     assert payload["candidate_counts"]["chapter_index_failed_attempts"] == 1
     assert payload["candidate_counts"]["chapter_index_needs_retry"] == 1
     assert payload["chapter_indices_summary"][0]["characters_count"] == 1
+    assert payload["model_route"]["selected_model"] == "route-model"
     assert "chapter_indices" not in payload
 
     with_indices = client.get(
