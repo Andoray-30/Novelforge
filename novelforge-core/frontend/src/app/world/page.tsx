@@ -31,6 +31,7 @@ import {
 } from '@/lib/content-item-binding';
 import { useSessionTaskEvents } from '@/lib/hooks/use-session-task-events';
 import { useSessions } from '@/lib/hooks/use-sessions';
+import { shouldRefreshWorldLibrary } from '@/lib/task-refresh-scope';
 import type { ContentItem, Culture, Location, TimelineEvent, WorldRule, WorldSetting } from '@/types';
 import type { ToolCall } from '@/lib/chat-parser';
 
@@ -357,13 +358,13 @@ export default function WorldSettingsPage() {
   useSessionTaskEvents({
     sessionId: currentSessionId,
     onCompleted: (detail) => {
-      if (!['novel_import', 'extraction', 'world_building', 'timeline_generation'].includes(detail.taskType)) {
+      if (!shouldRefreshWorldLibrary(detail.taskType)) {
         return;
       }
       setRefreshTick((current) => current + 1);
     },
     onFailed: (detail) => {
-      if (!['novel_import', 'extraction', 'world_building', 'timeline_generation'].includes(detail.taskType)) {
+      if (!shouldRefreshWorldLibrary(detail.taskType)) {
         return;
       }
       setError(`后台任务失败，世界观资料库可能未完全更新：${detail.error || detail.message || '未知错误'}`);

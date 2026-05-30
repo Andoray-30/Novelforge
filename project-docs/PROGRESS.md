@@ -5635,3 +5635,26 @@
 - 当前边界：
   - 仍然是轻量 query 参数直达，不是完整资产详情路由重构。
   - 后续可以把 direct-open 逻辑抽成共享 hook，供 Analytics / 主工作台统一复用。
+
+### 2026-05-30 Goal 21 后续：修复写回后资产页自动刷新
+
+- Characters / World 页面不再各自硬编码任务刷新白名单，改为复用共享 helper：
+  - `shouldRefreshCharacterLibrary(...)`
+  - `shouldRefreshWorldLibrary(...)`
+- `import_repair_apply` 写回完成或失败时现在会触发角色 / 关系库与世界观 / 时间线库刷新：
+  - 用户在 TaskCenter 确认写回后，如果停留在 Characters 或 World 页面，列表会自动重新拉取。
+  - 关系补强资产和时间线修复资产不会只靠手动刷新才能看到。
+- preview-only 任务仍不会强制刷新资产库，避免修复预览阶段误导用户以为已经写库。
+- 新增 `task-refresh-scope.test.ts`，覆盖：
+  - 修复写回会刷新角色库。
+  - 修复写回会刷新世界观库。
+  - 仅预览类修复任务不会刷新资产库。
+  - 原有导入 / 提取刷新行为保持不变。
+- 测试：
+  - 前端 `npx.cmd tsc --noEmit --incremental false` 通过。
+  - 新增 Vitest：`4 passed`。
+  - 前端全量 Vitest：`28 passed / 115 passed`。
+  - 前端 build 通过。
+- 当前边界：
+  - 这次修的是任务事件驱动刷新，不是完整资产详情路由重构。
+  - direct-open 逻辑后续仍可抽成共享 hook，减少 Characters / World 的重复实现。

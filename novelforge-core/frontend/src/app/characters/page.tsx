@@ -35,6 +35,7 @@ import {
 } from '@/lib/asset-normalization';
 import { useSessionTaskEvents } from '@/lib/hooks/use-session-task-events';
 import { useSessions } from '@/lib/hooks/use-sessions';
+import { shouldRefreshCharacterLibrary } from '@/lib/task-refresh-scope';
 import CharacterRelationshipGraph from '@/components/Character/CharacterRelationshipGraph';
 import type { Character, ContentItem, ImportanceLevel, NetworkEdge } from '@/types';
 import type { ToolCall } from '@/lib/chat-parser';
@@ -280,13 +281,13 @@ export default function CharactersPage() {
   useSessionTaskEvents({
     sessionId: currentSessionId,
     onCompleted: (detail) => {
-      if (!['novel_import', 'extraction', 'character_generation', 'relationship_extraction'].includes(detail.taskType)) {
+      if (!shouldRefreshCharacterLibrary(detail.taskType)) {
         return;
       }
       setRefreshTick((current) => current + 1);
     },
     onFailed: (detail) => {
-      if (!['novel_import', 'extraction', 'character_generation', 'relationship_extraction'].includes(detail.taskType)) {
+      if (!shouldRefreshCharacterLibrary(detail.taskType)) {
         return;
       }
       setError(`后台任务失败，角色资料库可能未完全更新：${detail.error || detail.message || '未知错误'}`);
