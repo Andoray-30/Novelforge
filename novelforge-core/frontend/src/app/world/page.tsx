@@ -31,6 +31,7 @@ import {
 } from '@/lib/content-item-binding';
 import { useSessionTaskEvents } from '@/lib/hooks/use-session-task-events';
 import { useSessions } from '@/lib/hooks/use-sessions';
+import { validateDirectContentAssetSession } from '@/lib/direct-content-asset';
 import { shouldRefreshWorldLibrary } from '@/lib/task-refresh-scope';
 import type { ContentItem, Culture, Location, TimelineEvent, WorldRule, WorldSetting } from '@/types';
 import type { ToolCall } from '@/lib/chat-parser';
@@ -297,7 +298,7 @@ export default function WorldSettingsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const directAssetId = searchParams.get('assetId');
-  const { currentSession, currentSessionId } = useSessions();
+  const { currentSession, currentSessionId, isLoading: sessionsLoading } = useSessions();
   const selectedNovelId = useAppStore((state) => state.selectedNovelId);
   const [worldItems, setWorldItems] = useState<ContentItem[]>([]);
   const [timelineItems, setTimelineItems] = useState<ContentItem[]>([]);
@@ -403,14 +404,16 @@ export default function WorldSettingsPage() {
 
   useEffect(() => {
     if (!directAssetId) return;
+    if (sessionsLoading) return;
     let disposed = false;
 
     const openDirectAsset = async () => {
       try {
         const item = await contentService.getById(directAssetId);
         if (disposed) return;
-        if (currentSessionId && item.metadata.session_id && item.metadata.session_id !== currentSessionId) {
-          setError('该资产不属于当前项目，请先切换到对应项目后再查看。');
+        const validation = validateDirectContentAssetSession(item, currentSessionId);
+        if (!validation.ok) {
+          setError(validation.message);
           return;
         }
         openWorldAsset(item);
@@ -423,7 +426,7 @@ export default function WorldSettingsPage() {
     return () => {
       disposed = true;
     };
-  }, [currentSessionId, directAssetId, openWorldAsset, selectedNovelId]);
+  }, [currentSessionId, directAssetId, openWorldAsset, selectedNovelId, sessionsLoading]);
 
   const bindWorldAssetToSelectedNovel = async (item: ContentItem) => {
     if (!selectedNovelId || !isUnassignedNovelScopedContentItem(item)) {

@@ -35,6 +35,7 @@ import {
 } from '@/lib/asset-normalization';
 import { useSessionTaskEvents } from '@/lib/hooks/use-session-task-events';
 import { useSessions } from '@/lib/hooks/use-sessions';
+import { validateDirectContentAssetSession } from '@/lib/direct-content-asset';
 import { shouldRefreshCharacterLibrary } from '@/lib/task-refresh-scope';
 import CharacterRelationshipGraph from '@/components/Character/CharacterRelationshipGraph';
 import type { Character, ContentItem, ImportanceLevel, NetworkEdge } from '@/types';
@@ -220,7 +221,7 @@ export default function CharactersPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const directAssetId = searchParams.get('assetId');
-  const { currentSession, currentSessionId } = useSessions();
+  const { currentSession, currentSessionId, isLoading: sessionsLoading } = useSessions();
   const selectedNovelId = useAppStore((state) => state.selectedNovelId);
   const [characters, setCharacters] = useState<Character[]>([]);
   const [characterItems, setCharacterItems] = useState<ContentItem[]>([]);
@@ -352,14 +353,16 @@ export default function CharactersPage() {
 
   useEffect(() => {
     if (!directAssetId) return;
+    if (sessionsLoading) return;
     let disposed = false;
 
     const openDirectAsset = async () => {
       try {
         const item = await contentService.getById(directAssetId);
         if (disposed) return;
-        if (currentSessionId && item.metadata.session_id && item.metadata.session_id !== currentSessionId) {
-          setError('该资产不属于当前项目，请先切换到对应项目后再查看。');
+        const validation = validateDirectContentAssetSession(item, currentSessionId);
+        if (!validation.ok) {
+          setError(validation.message);
           return;
         }
         openContentAsset(item);
@@ -372,7 +375,7 @@ export default function CharactersPage() {
     return () => {
       disposed = true;
     };
-  }, [currentSessionId, directAssetId, openContentAsset, selectedNovelId]);
+  }, [currentSessionId, directAssetId, openContentAsset, selectedNovelId, sessionsLoading]);
 
   const handleSaveArtifact = async (artifact: ArtifactData, updatedData: Record<string, unknown>) => {
     setError(null);

@@ -5658,3 +5658,23 @@
 - 当前边界：
   - 这次修的是任务事件驱动刷新，不是完整资产详情路由重构。
   - direct-open 逻辑后续仍可抽成共享 hook，减少 Characters / World 的重复实现。
+
+### 2026-05-30 Goal 21 后续：写回资产直达的项目边界保护
+
+- 新增 `validateDirectContentAssetSession(...)` helper：
+  - 没有选中项目时，禁止通过 `assetId` 直接打开写回资产。
+  - 资产 `session_id` 与当前项目不一致时，显示明确中文错误。
+  - 当前项目一致时才允许复用现有 `ArtifactPanel` 打开详情。
+- Characters / World 页面 direct-open 逻辑改为等待 `useSessions()` 加载结束后再取资产：
+  - 避免 session 尚未恢复时提前 `getById(...)`。
+  - 避免跨项目资产被短暂打开后才校验。
+- 新增 `direct-content-asset.test.ts`，覆盖：
+  - 未选择项目时拦截。
+  - 跨项目资产拦截。
+  - 当前项目资产允许打开。
+- 测试：
+  - 前端 `npx.cmd tsc --noEmit --incremental false` 通过。
+  - 相关 Vitest：`7 passed`。
+- 当前边界：
+  - GitHub 远端同步仍受本机 HTTPS 凭据缺失影响；临时 clone 已保留未推送提交。
+  - 后续如恢复凭据，需要把本轮 direct-open 边界保护与上一轮刷新 helper 一并同步。
