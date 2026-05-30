@@ -179,6 +179,11 @@ export function parseNovelImportTaskResult(result: unknown): NovelImportTaskResu
     relationship_low_confidence_resolved_endpoints:
       asRecordList(payload.relationship_low_confidence_resolved_endpoints) ?? diagnostics?.relationship_low_confidence_resolved_endpoints,
     timeline_mismatch_events: asRecordList(payload.timeline_mismatch_events) ?? diagnostics?.timeline_mismatch_events,
+    model_route: (
+      payload.model_route && typeof payload.model_route === 'object'
+        ? payload.model_route as NovelImportTaskResult['model_route']
+        : diagnostics?.model_route
+    ),
   }
 }
 

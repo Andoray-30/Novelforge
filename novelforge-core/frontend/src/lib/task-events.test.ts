@@ -27,6 +27,13 @@ describe('parseNovelImportTaskResult', () => {
         low_confidence_characters: [{ name: '配角甲', confidence: 'low' }],
         suspected_merged_characters: [{ name: '甲与乙' }],
         weak_relationships: [{ source: '甲', target: '乙' }],
+        model_route: {
+          role: 'extractor_fast',
+          selected_model: 'route-model',
+          reason: 'probe_passed',
+          candidates: ['route-model'],
+          probe_results: [{ model: 'route-model', available: true, score: 95 }],
+        },
       },
     });
 
@@ -44,5 +51,6 @@ describe('parseNovelImportTaskResult', () => {
     expect(result?.analysis_diagnostics?.low_confidence_characters?.[0]?.name).toBe('配角甲');
     expect(result?.analysis_diagnostics?.suspected_merged_characters?.[0]?.name).toBe('甲与乙');
     expect(result?.analysis_diagnostics?.weak_relationships?.[0]?.source).toBe('甲');
+    expect(result?.model_route?.selected_model).toBe('route-model');
   });
 });

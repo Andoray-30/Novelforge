@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { chapterIndexRunService, contentService, taskService, textProcessingService } from '@/lib/api';
 import { buildAssetQualityDiagnostics, type AssetQualityDiagnosticsResult } from '@/lib/asset-quality-diagnostics';
+import { getModelProbeStatusLabel, getModelRouteSummary } from '@/lib/model-route-summary';
 import { getNovelImportStageLabel, parseNovelImportTaskResult } from '@/lib/task-events';
 import { useAppStore } from '@/lib/hooks/use-app-store';
 import { useSessionTaskEvents } from '@/lib/hooks/use-session-task-events';
@@ -1052,6 +1053,7 @@ export default function ExtractPage() {
     () => buildDiagnosticAreas(analysisResult, savedSummary, qualityRepairGroups),
     [analysisResult, qualityRepairGroups, savedSummary]
   );
+  const modelRouteSummary = useMemo(() => getModelRouteSummary(analysisResult), [analysisResult]);
   const topQualityIssues = analysisResult?.analysis_quality_issues?.slice(0, 3) ?? [];
   const statusLabel = analysisResult?.analysis_status ? ANALYSIS_STATUS_LABELS[analysisResult.analysis_status] : status === 'error' ? '需要处理' : status === 'success' ? '已完成' : '等待导入';
   const progressStageLabel = status === 'uploading'
@@ -1313,6 +1315,52 @@ export default function ExtractPage() {
                         </div>
                       );
                     })}
+                  </div>
+                </div>
+              ) : null}
+
+              {modelRouteSummary ? (
+                <div>
+                  <h3 className="text-sm font-bold text-[var(--nf-text)]">模型路由诊断</h3>
+                  <div className="mt-3 rounded-2xl border border-[var(--nf-border)] bg-[var(--nf-surface)] p-4">
+                    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--nf-text-subtle)]">Selected</p>
+                        <p className="mt-1 break-words text-sm font-black text-[var(--nf-text)]">{modelRouteSummary.selectedModel}</p>
+                        <p className="mt-2 text-xs leading-5 text-[var(--nf-text-muted)]">
+                          {modelRouteSummary.role} · {modelRouteSummary.reasonLabel}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--nf-text-subtle)]">Candidates</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {(modelRouteSummary.candidates.length > 0 ? modelRouteSummary.candidates : [modelRouteSummary.selectedModel]).map((model) => (
+                            <span key={model} className="nf-chip break-all">{model}</span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    {modelRouteSummary.probeResults.length > 0 ? (
+                      <div className="mt-4 grid gap-2 md:grid-cols-2">
+                        {modelRouteSummary.probeResults.map((probe) => {
+                          const statusLabel = getModelProbeStatusLabel(probe);
+                          return (
+                            <div key={probe.model} className="rounded-xl border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] px-3 py-2">
+                              <div className="flex items-start justify-between gap-3">
+                                <p className="break-all text-xs font-bold text-[var(--nf-text)]">{probe.model}</p>
+                                <span className="shrink-0 rounded-full border border-[var(--nf-border)] px-2 py-0.5 text-[11px] text-[var(--nf-text-muted)]">{statusLabel}</span>
+                              </div>
+                              <p className="mt-2 text-xs leading-5 text-[var(--nf-text-subtle)]">
+                                分数 {probe.score ?? 'n/a'} · 延迟 {probe.latencyMs !== null ? `${probe.latencyMs}ms` : 'n/a'} · JSON {probe.jsonCapable ? '通过' : '未通过'} · 提取信号 {probe.extractionRich ? '有' : '不足'}
+                              </p>
+                              {probe.error ? <p className="mt-1 line-clamp-2 text-xs text-[var(--nf-warning)]">{probe.error}</p> : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="mt-3 text-xs leading-5 text-[var(--nf-text-subtle)]">本次没有执行模型探测，通常表示本地 mock、路由关闭或服务端复用了默认模型。</p>
+                    )}
                   </div>
                 </div>
               ) : null}

@@ -5678,3 +5678,23 @@
 - 当前边界：
   - GitHub 远端同步仍受本机 HTTPS 凭据缺失影响；临时 clone 已保留未推送提交。
   - 后续如恢复凭据，需要把本轮 direct-open 边界保护与上一轮刷新 helper 一并同步。
+
+### 2026-05-30 Goal 21 后续：Extract 页模型路由诊断展示
+
+- Extract 页“查看详细诊断日志”新增“模型路由诊断”区块：
+  - 显示本次章节索引选择的 `selected_model`。
+  - 显示任务角色、选择原因和候选模型池。
+  - 如果有 probe 结果，逐个显示模型状态、分数、延迟、JSON 合规性、提取信号和错误摘要。
+- 新增 `model-route-summary.ts`：
+  - 标准化 `analysis_diagnostics.model_route` / 顶层 `model_route`。
+  - 把 `probe_passed`、`no_probe_passed_using_best_score`、`gateway_timeout`、`empty_content` 等路由原因和错误类型转成中文。
+- `NovelImportTaskResult` / `ImportAnalysisDiagnostics` 增加 `model_route` 类型。
+- `parseNovelImportTaskResult(...)` 现在会保留顶层或 diagnostics 内的 `model_route`。
+- 测试：
+  - 前端 `npx.cmd tsc --noEmit --incremental false` 通过。
+  - 相关 Vitest：`4 passed`。
+  - 前端全量 Vitest：`30 passed / 121 passed`。
+  - 前端 build 通过。
+- 当前边界：
+  - 这一步只把现有路由诊断变成用户可见，不新增真实测速 API 或模型健康历史。
+  - 下一步应继续把模型健康从单次导入结果扩展为可查询的短期健康报告。

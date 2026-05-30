@@ -403,6 +403,28 @@ export type NovelImportAnalysisStatus = 'completed' | 'partial' | 'low_quality' 
 export type NovelImportAnalysisStageKey = 'chapter_index' | 'characters' | 'world_setting' | 'timeline_events' | 'relationships';
 export type NovelImportAnalysisStageStatus = 'completed' | 'timed_out' | 'failed';
 
+export interface ModelProbeResult {
+  role?: string;
+  model?: string;
+  available?: boolean;
+  latency_ms?: number;
+  non_empty_chat?: boolean;
+  json_capable?: boolean;
+  extraction_rich?: boolean;
+  error_type?: string | null;
+  error?: string | null;
+  score?: number;
+  checked_at?: number;
+}
+
+export interface ModelRouteDecision {
+  role?: string;
+  selected_model?: string;
+  reason?: string;
+  candidates?: string[];
+  probe_results?: ModelProbeResult[];
+}
+
 export interface ImportAnalysisDiagnostics {
   candidate_counts?: Record<string, number>;
   dropped_candidates?: Array<Record<string, unknown>>;
@@ -423,6 +445,7 @@ export interface ImportAnalysisDiagnostics {
   weak_relationships?: Array<Record<string, unknown>>;
   suspected_mojibake_assets?: Array<Record<string, unknown>>;
   weak_world_facts?: Array<Record<string, unknown>>;
+  model_route?: ModelRouteDecision;
 }
 
 export interface NovelImportTaskResult {
@@ -450,6 +473,7 @@ export interface NovelImportTaskResult {
   relationship_endpoint_resolution?: Array<Record<string, unknown>>;
   relationship_low_confidence_resolved_endpoints?: Array<Record<string, unknown>>;
   timeline_mismatch_events?: Array<Record<string, unknown>>;
+  model_route?: ModelRouteDecision;
 }
 
 export interface ChapterIndexRun {
