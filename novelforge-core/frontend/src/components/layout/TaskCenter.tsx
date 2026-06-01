@@ -10,7 +10,7 @@ import { emitTaskLifecycleEvent } from '@/lib/task-events'
 import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress-bar'
 import { cn } from '@/lib/utils'
-import { getChapterIndexRecoveryDetails, getRepairApplyWrittenAssetHref, getRepairApplyWrittenAssets, getRepairPreviewWritebackDetails, getTaskSummary, normalizeTaskStatus, REPAIR_PREVIEW_TASK_TYPES } from './task-summary'
+import { getChapterIndexRecoveryDetails, getRepairApplyWrittenAssetHref, getRepairApplyWrittenAssets, getRepairPreviewBatchDetails, getRepairPreviewWritebackDetails, getTaskSummary, normalizeTaskStatus, REPAIR_PREVIEW_TASK_TYPES } from './task-summary'
 
 const TERMINAL_STATUSES = new Set(['COMPLETED', 'FAILED', 'CANCELLED'])
 const ACTIVE_STATUSES = new Set(['PENDING', 'RUNNING'])
@@ -353,6 +353,9 @@ export const TaskCenter = () => {
         const writebackDetails = canApplyRepairPreview
           ? getRepairPreviewWritebackDetails(task.result)
           : null
+        const repairBatchDetails = canApplyRepairPreview
+          ? getRepairPreviewBatchDetails(task.result)
+          : []
         const writtenAssets = isCompleted && task.type === 'import_repair_apply'
           ? getRepairApplyWrittenAssets(task.result)
           : []
@@ -471,6 +474,31 @@ export const TaskCenter = () => {
                           </ul>
                           {recoveryDetails.retryable.length > 5 ? <div className="mt-1">还有 {recoveryDetails.retryable.length - 5} 章</div> : null}
                         </div>
+                      ) : null}
+                    </div>
+                  </details>
+                ) : null}
+
+                {repairBatchDetails.length > 0 ? (
+                  <details className="mt-2 rounded-md border border-primary/15 bg-primary/5 p-2 text-[10px] text-muted-foreground">
+                    <summary className="cursor-pointer font-semibold text-foreground">
+                      查看错误类型拆批策略
+                    </summary>
+                    <div className="mt-2 space-y-2">
+                      {repairBatchDetails.slice(0, 4).map((batch) => (
+                        <div key={batch.batchKey} className="rounded border border-border/60 bg-background/60 p-2">
+                          <div className="font-semibold text-foreground">{batch.actionLabel}</div>
+                          <div className="mt-0.5">{batch.errorTypeLabel} · {batch.chapterCount} 章 · {batch.modelLabel}</div>
+                          {batch.chapterIds.length > 0 ? (
+                            <div className="mt-0.5 break-all text-muted-foreground">
+                              章节：{batch.chapterIds.slice(0, 4).join(', ')}
+                              {batch.chapterIds.length > 4 ? ` 等 ${batch.chapterIds.length} 章` : ''}
+                            </div>
+                          ) : null}
+                        </div>
+                      ))}
+                      {repairBatchDetails.length > 4 ? (
+                        <div>还有 {repairBatchDetails.length - 4} 批未展开</div>
                       ) : null}
                     </div>
                   </details>

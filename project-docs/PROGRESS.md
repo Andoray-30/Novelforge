@@ -5878,3 +5878,23 @@
 - 当前边界：
   - 本轮未做浏览器截图验收；当前可用工具没有暴露 Browser 控制接口。
   - 下一步可以继续把 batch 信息接入 TaskCenter 修复 preview 摘要，或补后端长期模型健康表。
+
+## 2026-06-01 TaskCenter repair batch 摘要 v1
+
+- 继续补齐拆批修复的用户可见反馈。
+- `TaskCenter` 的修复 preview 卡片现在会展示“错误类型拆批策略”：
+  - 每批修复动作。
+  - 每批错误类型。
+  - 每批章节数和章节 id 预览。
+  - 每批实际模型。
+- `task-summary.ts` 新增 `getRepairPreviewBatchDetails(...)`，从 `repair_strategy_batches / model_route_batches` 生成任务中心可读摘要。
+- `getTaskSummary(...)` 会在修复 preview 完成摘要中显示“按错误类型拆成 N 批修复”。
+- 顺手清理 `task-summary.ts` 与对应测试中的用户可见乱码文案，避免 TaskCenter 继续显示 mojibake。
+- 验证：
+  - `npm test -- src/components/layout/TaskCenter.test.ts --run`：1 file / 7 tests passed。
+  - `npx tsc --noEmit --incremental false`：通过。
+  - 前端全量 Vitest：31 files / 127 tests passed。
+  - 前端 build：通过。
+- 当前边界：
+  - 本轮只改前端任务中心与摘要 helper，没有改后端。
+  - 下一步建议进入后端长期模型健康表，避免“最近模型健康”只依赖前端从 run 列表临时汇总。

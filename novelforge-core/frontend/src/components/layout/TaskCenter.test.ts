@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { getChapterIndexRecoveryDetails, getRepairApplyWrittenAssetHref, getRepairApplyWrittenAssets, getRepairPreviewWritebackDetails, getTaskSummary } from './task-summary'
+import {
+  getChapterIndexRecoveryDetails,
+  getRepairApplyWrittenAssetHref,
+  getRepairApplyWrittenAssets,
+  getRepairPreviewBatchDetails,
+  getRepairPreviewWritebackDetails,
+  getTaskSummary,
+} from './task-summary'
 
 describe('TaskCenter summaries', () => {
   it('shows reused chapter index history in repair previews', () => {
@@ -24,6 +31,22 @@ describe('TaskCenter summaries', () => {
     expect(summary).toContain('关系新增 1 / 跳过 0')
   })
 
+  it('shows split repair batch count in repair preview summary', () => {
+    const summary = getTaskSummary({
+      type: 'chapter_index_rerun',
+      status: 'COMPLETED',
+      result: {
+        relationships_count: 0,
+        timeline_count: 0,
+        candidate_counts: {
+          chapter_index_repair_batch_count: 2,
+        },
+      },
+    })
+
+    expect(summary).toContain('按错误类型拆成 2 批修复。')
+  })
+
   it('builds chapter index recovery details from repair previews', () => {
     const details = getChapterIndexRecoveryDetails({
       chapter_indices: [
@@ -41,9 +64,60 @@ describe('TaskCenter summaries', () => {
     })
 
     expect(details?.reused).toEqual(['第一章'])
-    expect(details?.retryable).toEqual(['第二章：gateway_timeout'])
+    expect(details?.retryable).toEqual(['第二章：网关超时'])
     expect(details?.runKey).toBe('chapter_index_run_current')
     expect(details?.previousRunKey).toBe('chapter_index_run_previous')
+  })
+
+  it('builds repair batch details from preview diagnostics', () => {
+    const details = getRepairPreviewBatchDetails({
+      analysis_diagnostics: {
+        repair_strategy_batches: [
+          {
+            batch_key: 'repair_batch_1_shrink_chunk_and_extend_timeout',
+            chapter_ids: ['chapter-1'],
+            repair_strategy: {
+              actions: ['shrink_chunk_and_extend_timeout'],
+              error_types: ['gateway_timeout'],
+              chapter_count: 1,
+            },
+          },
+          {
+            batch_key: 'repair_batch_2_prefer_json_repair',
+            chapter_ids: ['chapter-2', 'chapter-3'],
+            repair_strategy: {
+              actions: ['prefer_json_repair'],
+              error_types: ['json_invalid'],
+              chapter_count: 2,
+            },
+          },
+        ],
+        model_route_batches: [
+          {
+            batch_key: 'repair_batch_1_shrink_chunk_and_extend_timeout',
+            model_route: { selected_model: 'slow-stable-model' },
+          },
+          {
+            batch_key: 'repair_batch_2_prefer_json_repair',
+            model_route: { selected_model: 'json-repair-model' },
+          },
+        ],
+      },
+    })
+
+    expect(details).toHaveLength(2)
+    expect(details[0]).toMatchObject({
+      chapterCount: 1,
+      actionLabel: '缩短分段并延长超时',
+      errorTypeLabel: '网关超时',
+      modelLabel: 'slow-stable-model',
+    })
+    expect(details[1]).toMatchObject({
+      chapterCount: 2,
+      actionLabel: 'JSON 修复优先',
+      errorTypeLabel: 'JSON 不合规',
+      modelLabel: 'json-repair-model',
+    })
   })
 
   it('builds writeback details for repair previews', () => {

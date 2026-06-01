@@ -21,10 +21,39 @@ export interface RepairPreviewWritebackDetails {
   hasWritableAssets: boolean
 }
 
+export interface RepairBatchPreviewDetail {
+  batchKey: string
+  chapterCount: number
+  chapterIds: string[]
+  actionLabel: string
+  errorTypeLabel: string
+  modelLabel: string
+}
+
 export interface RepairApplyWrittenAsset {
   id: string
   type: string
   title: string
+}
+
+const REPAIR_ACTION_LABELS: Record<string, string> = {
+  shrink_chunk_and_extend_timeout: '缩短分段并延长超时',
+  cooldown_and_lower_concurrency: '降并发并冷却',
+  prefer_json_repair: 'JSON 修复优先',
+  switch_model_after_empty_content: '空响应后切换模型',
+  repair_role_rerun: '修复模型重跑',
+}
+
+const ERROR_TYPE_LABELS: Record<string, string> = {
+  rate_limited: '请求限流',
+  gateway_timeout: '网关超时',
+  timeout: '请求超时',
+  auth_failed: '鉴权失败',
+  empty_content: '空响应',
+  json_invalid: 'JSON 不合规',
+  provider_unavailable: '供应商不可用',
+  upstream_error: '上游错误',
+  probe_not_suitable: '探测不合格',
 }
 
 function numberFromRecord(record: Record<string, unknown> | null, key: string): number | null {
@@ -33,15 +62,20 @@ function numberFromRecord(record: Record<string, unknown> | null, key: string): 
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null
 }
 
 function asRecordArray(value: unknown): Array<Record<string, unknown>> {
-  return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object') : []
+  return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object' && !Array.isArray(item)) : []
 }
 
 function asStringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0) : []
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim()) : []
+}
+
+function labelList(values: string[], labels: Record<string, string>, fallback: string): string {
+  if (!values.length) return fallback
+  return values.map((value) => labels[value] || value).join(' / ')
 }
 
 function chapterLabel(record: Record<string, unknown>, fallback = '未知章节'): string {
@@ -55,7 +89,7 @@ function chapterLabel(record: Record<string, unknown>, fallback = '未知章节'
           ? record.id.trim()
           : fallback
   const error = typeof record.error_type === 'string' && record.error_type.trim()
-    ? `：${record.error_type.trim()}`
+    ? `：${ERROR_TYPE_LABELS[record.error_type.trim()] || record.error_type.trim()}`
     : typeof record.error === 'string' && record.error.trim()
       ? `：${record.error.trim()}`
       : ''
@@ -133,6 +167,54 @@ export function getRepairPreviewWritebackDetails(resultValue: unknown): RepairPr
   }
 }
 
+export function getRepairPreviewBatchDetails(resultValue: unknown): RepairBatchPreviewDetail[] {
+  const result = asRecord(resultValue)
+  const diagnostics = asRecord(result?.analysis_diagnostics)
+  const rawBatches = asRecordArray(result?.repair_strategy_batches).length > 0
+    ? asRecordArray(result?.repair_strategy_batches)
+    : asRecordArray(diagnostics?.repair_strategy_batches)
+  const rawRouteBatches = asRecordArray(result?.model_route_batches).length > 0
+    ? asRecordArray(result?.model_route_batches)
+    : asRecordArray(diagnostics?.model_route_batches)
+  const routeByBatch = new Map<string, Record<string, unknown>>()
+
+  rawRouteBatches.forEach((item) => {
+    const batchKey = typeof item.batch_key === 'string' ? item.batch_key.trim() : ''
+    const modelRoute = asRecord(item.model_route)
+    if (batchKey && modelRoute) routeByBatch.set(batchKey, modelRoute)
+  })
+
+  return rawBatches.map((item): RepairBatchPreviewDetail | null => {
+    const strategy = asRecord(item.repair_strategy)
+    const batchKey = typeof item.batch_key === 'string' && item.batch_key.trim()
+      ? item.batch_key.trim()
+      : typeof strategy?.batch_key === 'string' && strategy.batch_key.trim()
+        ? strategy.batch_key.trim()
+        : 'repair_batch'
+    const chapterIds = asStringArray(item.chapter_ids).length > 0
+      ? asStringArray(item.chapter_ids)
+      : asStringArray(strategy?.chapter_ids)
+    const actions = asStringArray(strategy?.actions)
+    const errorTypes = asStringArray(strategy?.error_types)
+    const route = routeByBatch.get(batchKey)
+    const selectedModel = typeof route?.selected_model === 'string' && route.selected_model.trim()
+      ? route.selected_model.trim()
+      : typeof route?.model === 'string' && route.model.trim()
+        ? route.model.trim()
+        : '模型未记录'
+    const explicitChapterCount = numberFromRecord(strategy, 'chapter_count')
+
+    return {
+      batchKey,
+      chapterCount: explicitChapterCount ?? chapterIds.length,
+      chapterIds,
+      actionLabel: labelList(actions, REPAIR_ACTION_LABELS, '默认修复策略'),
+      errorTypeLabel: labelList(errorTypes, ERROR_TYPE_LABELS, '未记录错误类型'),
+      modelLabel: selectedModel,
+    }
+  }).filter((item): item is RepairBatchPreviewDetail => item !== null)
+}
+
 export function getRepairApplyWrittenAssets(resultValue: unknown): RepairApplyWrittenAsset[] {
   const result = asRecord(resultValue)
   const rawAssets = asRecordArray(result?.written_assets)
@@ -164,48 +246,39 @@ export function getTaskSummary(task: {
   error?: string | null
 }) {
   if (REPAIR_PREVIEW_TASK_TYPES.has(task.type || '')) {
-    const result = task.result && typeof task.result === 'object'
-      ? (task.result as Record<string, unknown>)
-      : {}
+    const result = asRecord(task.result) ?? {}
     const relationships = typeof result.relationships_count === 'number' ? result.relationships_count : 0
     const timeline = typeof result.timeline_count === 'number' ? result.timeline_count : 0
-    const diff = result.repair_diff && typeof result.repair_diff === 'object'
-      ? (result.repair_diff as Record<string, unknown>)
-      : null
-    const relationshipDiff = diff?.relationships && typeof diff.relationships === 'object'
-      ? (diff.relationships as Record<string, unknown>)
-      : null
-    const timelineDiff = diff?.timeline && typeof diff.timeline === 'object'
-      ? (diff.timeline as Record<string, unknown>)
-      : null
-    const diagnostics = result.analysis_diagnostics && typeof result.analysis_diagnostics === 'object'
-      ? (result.analysis_diagnostics as Record<string, unknown>)
-      : null
-    const candidateCounts = result.candidate_counts && typeof result.candidate_counts === 'object'
-      ? (result.candidate_counts as Record<string, unknown>)
-      : diagnostics?.candidate_counts && typeof diagnostics.candidate_counts === 'object'
-        ? (diagnostics.candidate_counts as Record<string, unknown>)
-        : null
+    const diff = asRecord(result.repair_diff)
+    const relationshipDiff = asRecord(diff?.relationships)
+    const timelineDiff = asRecord(diff?.timeline)
+    const diagnostics = asRecord(result.analysis_diagnostics)
+    const candidateCounts = asRecord(result.candidate_counts) ?? asRecord(diagnostics?.candidate_counts)
     const relationshipNew = numberFromRecord(relationshipDiff, 'new')
     const relationshipDuplicates = numberFromRecord(relationshipDiff, 'duplicates')
     const timelineNew = numberFromRecord(timelineDiff, 'new')
     const timelineDuplicates = numberFromRecord(timelineDiff, 'duplicates')
     const reusedChapters = numberFromRecord(candidateCounts, 'chapter_index_history_reused')
     const combinedIndices = numberFromRecord(candidateCounts, 'chapter_index_combined_indices')
+    const batchCount = numberFromRecord(candidateCounts, 'chapter_index_repair_batch_count')
     const recoverySummary = reusedChapters !== null || combinedIndices !== null
       ? `复用历史成功章 ${reusedChapters ?? 0} 章，合并索引 ${combinedIndices ?? 0} 章。`
       : null
+    const batchSummary = batchCount !== null && batchCount > 1 ? `按错误类型拆成 ${batchCount} 批修复。` : null
+
     if (normalizeTaskStatus(task.status) === 'COMPLETED') {
       if (
         relationshipNew !== null ||
         relationshipDuplicates !== null ||
         timelineNew !== null ||
         timelineDuplicates !== null ||
-        recoverySummary
+        recoverySummary ||
+        batchSummary
       ) {
         return [
           '修复预览完成。',
           recoverySummary,
+          batchSummary,
           `关系新增 ${relationshipNew ?? relationships} / 跳过 ${relationshipDuplicates ?? 0}`,
           `时间线新增 ${timelineNew ?? timeline} / 跳过 ${timelineDuplicates ?? 0}`,
         ].filter(Boolean).join(' ')
@@ -213,15 +286,14 @@ export function getTaskSummary(task: {
       return [
         `修复预览完成：关系 ${relationships} 条，时间线 ${timeline} 条。`,
         recoverySummary,
+        batchSummary,
       ].filter(Boolean).join(' ')
     }
     return task.message || '质量修复任务正在处理中...'
   }
 
   if ((task.type || '') === 'import_repair_apply') {
-    const result = task.result && typeof task.result === 'object'
-      ? (task.result as Record<string, unknown>)
-      : {}
+    const result = asRecord(task.result) ?? {}
     const relationships = typeof result.relationships_count === 'number' ? result.relationships_count : 0
     const timeline = typeof result.timeline_count === 'number' ? result.timeline_count : 0
     const writtenAssets = getRepairApplyWrittenAssets(result)
