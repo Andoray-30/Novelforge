@@ -1,548 +1,252 @@
-# NovelForge 提取模型与网关策略复盘
+﻿# NovelForge 模型网关与提取策略复盘
 
-日期：2026-05-29
+日期：2026-06-01
 
 ## 当前结论
 
-Goal 21 暴露出的核心问题已经不是单纯“换一个模型名”能解决的。当前提取链路过度依赖单一模型在单次请求中完成结构化理解，一旦 NewAPI 网关在某个时段出现慢响应、空响应、504、429、模型路由变化或 JSON 不稳定，整本长篇导入就会从“可用”退回到 `partial` 或 `low_quality`。
+这次网关切换暴露的不是单纯的 API 地址或模型名问题，而是 NovelForge 还没有把“模型能力不稳定”当成产品基础约束来处理。
 
-关系端点归一本身已经有明显进展：上一轮 `帝` 这类短端点导致未闭合；本轮在部分真实 smoke 中已做到 `relationship_unresolved_endpoints=[]`、`relationship_endpoint_mapping_ratio=1.0`。但项目仍不能进入内部可用，因为章节级抽取覆盖率被模型/网关稳定性拖垮。
+现在不能继续依赖“指定一个模型名，然后期待它稳定完成整本小说提取”。不同模型在速度、JSON 稳定性、长上下文耐受、中文叙事理解、关系张力判断上差异很大；同一个模型在不同时段、不同上游 channel、不同请求长度下也会变化。只靠固定 `.env` 模型名，系统会在每次网关、模型或上游 channel 波动时重新变得不可用。
 
-因此下一阶段重点应从“指定某个模型跑完”升级为“可观测、可测速、可切换、可恢复的模型编排系统”。
+NovelForge 下一步必须从“模型配置”升级为“模型编排”：
 
-## 本轮事实记录
+- 按任务角色维护候选模型池，而不是把逻辑写死到某一个模型。
+- 运行时测速和记录健康状态，而不是只看 `/models` 是否列出。
+- 快模型做广覆盖，慢但质量高的模型做深度补强。
+- fallback 只能保底和诊断，不能冒充 AI 理解结果。
+- quality gate 必须阻止低质量或纯摘录结果伪装成完成。
 
-Goal 20 基线：
+## 这轮遇到的问题
 
-- `chapters=10`
-- `characters=15`
-- `relationships=15`
-- `timeline=30`
-- `world=1`
-- `analysis_status=low_quality`
-- 主要质量问题：关系端点 `帝` 未映射到角色池。
+### 1. 网关可访问不等于模型可用于长篇提取
 
-Goal 21 已完成的工程修复：
+浏览器能打开网关，或 `/models` 能返回模型列表，只能说明网关暴露了模型入口。它不能证明某个模型能稳定完成以下任务：
 
-- 增强章节级关系端点归一：
-  - 完整姓名匹配
-  - tags / aliases / extracted_data.aliases 匹配
-  - 称谓剥离
-  - 有证据、唯一候选时的中文单字简称匹配
-  - 多候选或低证据时保留 unresolved
-- 增加端点审计字段：
-  - `match_type`
-  - `confidence`
-  - `matched_character_id`
-  - `matched_character_name`
-  - `evidence`
-  - `needs_review`
-- 前端导入诊断增加：
-  - 关系端点已自动归一
-  - 低置信关系需要复核
-  - 仍有未闭合端点
-- 修复 AI 请求限流器并发竞态，避免并发协程同时越过 RPM 检查。
-- 章节 index 增加可配置并发与输出 token 上限。
-- 长章切分阈值收紧，降低单次请求体积。
+- 长章节输入后不超时。
+- 返回可解析 JSON。
+- 返回非空角色、关系、事件、世界观候选。
+- 给出 evidence，而不是泛泛总结。
+- 不把关系端点写成抽象概念、别名残片或错别字。
+- 不把时间线标题和描述混配。
 
-Goal 21 真实复验结果：
+因此，“可连接”只能是第一层探测，不能作为可用性验收。
 
-| 时间/模型策略 | 结果 | 关键指标 | 结论 |
-| --- | --- | --- | --- |
-| `gemini-3.5-flash` | `/models` 可列出，但 chat 返回空 content 或 provider 失败 | 章节级抽取不可用 | 不适合当前提取主链路 |
-| `deepseek-ai/deepseek-v4-pro` | 完整 smoke 成功返回，但仅 2/18 章节抽取成功 | `characters=6`, `relationships=5`, `timeline=4`, `status=partial`, `unresolved=0` | 端点闭合改善，但覆盖率不足 |
-| `deepseek-ai/deepseek-v4-flash` | 完整 smoke 成功返回，但多数章节 504 | `characters=4-5`, `relationships=2-4`, `timeline=2-3`, `status=partial`, `unresolved=0` | 快速模型仍受网关超时影响 |
-| `mimo-v2.5-pro` | 小样本速度较快，但结构化提取常返回空数组 | `characters=0`, `relationships=0`, `events=0` | 不适合作为章节提取主模型，可作为后续创作/改写候选再测 |
-| 2500 字符切分 + 轻量 prompt | 40 分钟超时，未形成完整结果 | 日志出现 200 与 504 混杂 | 仅缩小 chunk 仍不足，需要可恢复任务与模型编排 |
+### 2. 慢模型不是不可用，快模型也不是天然适合提取
 
-## 当前问题清单
+当前网关里存在明显的模型差异：
 
-### 1. 模型可用性不是静态事实
+- 有些模型慢，但可能更适合复杂叙事理解。
+- 有些模型快，但可能只返回浅摘要、空数组或不稳定 JSON。
+- 有些模型适合写作，不适合严格结构化提取。
+- 有些模型适合 JSON 修复，不适合生成优美序章。
 
-同一个模型在 `/models` 中可见，不等于它在 `/chat/completions` 中稳定可用。真实表现可能包括：
+如果只按速度选模型，会牺牲提取质量；如果只按质量选模型，又会让导入任务长时间卡住甚至超时。正确策略是分工，而不是寻找一个万能模型。
 
-- HTTP 200 但 `content=""`
-- HTTP 503 无可用 channel
-- HTTP 504 Gateway Time-out
-- HTTP 429 Too Many Requests
-- 返回解释性文字而不是 JSON
-- 返回 JSON 但尾部截断或格式错误
-- 短 prompt 可用，长 prompt 不可用
+### 3. 单模型长篇硬跑会让系统脆弱
 
-所以 `.env` 里写死 `OPENAI_MODEL=xxx` 只能解决启动问题，不能解决生产可用性。
+长篇小说导入不是一次普通聊天请求。它至少包含：
 
-### 2. 当前提取链路过度依赖模型一次性理解
+- 章节解析。
+- 章节级角色候选提取。
+- 章节级关系互动提取。
+- 章节级事件提取。
+- 世界观事实提取。
+- 全书合并。
+- 质量判断。
+- 局部重跑。
 
-现有章节级 index 已比全书 prompt 更合理，但仍要求模型对每个片段直接输出完整结构化资产。只要模型慢、格式差或网关波动，该章节就失败。
+如果这些阶段全部压在同一个模型上，只要该模型在某一阶段慢、空、超时或 JSON 不稳定，整个项目就会被判为 `partial` 或 `low_quality`。这会造成用户体感上的“换个 API 又坏了”。
 
-如果“回退”只是从文章里摘取一些句子并假装完成提取，那么 AI 的价值确实会被稀释。正确定位应是：
+### 4. fallback 的边界需要更硬
 
-- 本地规则负责稳定的输入整理、候选召回、证据定位、章节切分、失败恢复。
-- AI 负责语义判断、人物性格/欲望/创伤/关系张力/事件意义/世界观归类。
-- 本地 fallback 只能作为低置信种子或诊断材料，不能计入 ready 质量，也不能冒充 AI 提取成果。
+用户指出的问题成立：如果系统失败后只是从小说原文摘几句作为 fallback，那么 AI 引入的价值就不清晰。fallback 可以保障数据不丢，但不能证明系统理解了小说。
 
-### 3. 长篇导入仍不是可恢复任务
+本地 fallback 只能用于：
 
-目前完整 smoke 是“整本导入跑到底”。当中途大量章节 504 或命令超时时，结果要么 partial，要么根本没有最终 JSON。
+- 保留章节正文。
+- 生成低置信诊断种子。
+- 标注可能的人名或证据片段。
+- 支持后续 AI repair 重跑。
 
-产品级导入应该是：
-
-- 每章/每段独立持久化 index 尝试结果。
-- 成功段立即写入中间表或任务缓存。
-- 失败段可批量重试。
-- 第二轮只重跑失败段，不重复成功段。
-- 最终 merge 可以多次执行。
-
-这也是未来“用户修改某章后只重跑该章”的基础。
-
-### 4. 请求限流需要按模型和错误动态调整
-
-本轮修复了本地 RateLimiter 并发竞态，但这只是底层保证。还需要上层策略：
-
-- 429：降低并发和 RPM，等待冷却。
-- 504：切模型或缩短 chunk，不应立刻对同模型重复轰炸。
-- 空 content：将模型标记为当前任务不合格。
-- JSON 错误：可以先做一次同模型轻量修复或切到 JSON 合规性更好的模型。
-- 多次失败：进入 circuit breaker 冷却，而不是继续占用全书任务。
-
-### 5. 速度快的模型不一定适合提取
-
-`mimo-v2.5-pro` 的响应速度较好，但在章节 index 小样本中返回空数组。它可能更适合创作、润色、改写，而不是严格结构化提取。
-
-模型应按“任务角色”评估，而不是按名字或速度粗暴选择：
-
-- `extractor_fast`：结构化 JSON 合规、低延迟、可批量。
-- `extractor_repair`：能修复 JSON、补证据、处理失败章节。
-- `extractor_deep`：慢但语义强，用于主角/关系/世界观深度补强。
-- `writer_fast`：快速生成候选段落。
-- `writer_pro`：高质量序章、风格化、情绪张力。
-- `judge`：质量验收、错配检查、关系张力评分。
-
-## 建议的新架构
-
-### A. 模型注册与实时测速
-
-增加 `ModelRegistry` / `ModelRouter`，不把业务逻辑绑定到固定模型名。
-
-管理员配置只保存候选池：
-
-```json
-{
-  "extractor_fast": ["gemini-3.5-flash", "deepseek-ai/deepseek-v4-flash", "mimo-v2.5-pro"],
-  "extractor_deep": ["gemini-3.1-pro-preview", "deepseek-ai/deepseek-v4-pro"],
-  "writer_fast": ["mimo-v2.5-pro", "deepseek-ai/deepseek-v4-flash"],
-  "writer_pro": ["gemini-3.1-pro-preview", "deepseek-ai/deepseek-v4-pro"]
-}
-```
-
-系统启动或任务开始前做轻量测速：
-
-- `/models` 可见性
-- 短 chat 是否有非空 content
-- JSON prompt 是否能返回可解析 JSON
-- 小片段是否能提取非空候选
-- 延迟 p50/p95
-- 429/5xx 率
-
-测速结果只影响当前时段路由，不写死代码。
-
-### B. 任务级模型编排
-
-导入一本文本时不要只选一个模型：
-
-1. 本地预处理：
-   - 编码识别
-   - 章节解析
-   - 小段切分
-   - 关键词/人名候选粗召回
-   - 证据片段定位
-2. 快速模型批量抽取：
-   - 小段结构化 index
-   - 严格 JSON schema
-   - 失败段直接记录
-3. 失败段修复：
-   - 换模型
-   - 缩短文本
-   - 降低输出字段
-   - JSON 修复
-4. 深度模型补强：
-   - 核心角色档案
-   - 关系张力
-   - 世界观规则/历史
-5. Merge + quality gate：
-   - 只把有证据资产写入内容库
-   - 低置信资产标记 `needs_review`
-   - 不达标保持 `low_quality` 或 `partial`
-
-### C. 可恢复的章节 index 存储
-
-需要新增中间结果存储，不再依赖一次任务内存：
-
-- `chapter_index_attempts`
-- `chapter_index_status`
-- `model_used`
-- `latency_ms`
-- `error_type`
-- `raw_response_hash`
-- `parsed_candidate_counts`
-- `retry_count`
-- `needs_retry`
-
-这样 UI 才能真实显示：
-
-- 哪些章节成功
-- 哪些章节失败
-- 失败原因是 504、JSON、空内容还是模型不合格
-- 下一轮应该重跑哪些章节
-
-### D. 本地 fallback 的边界
-
-本地 fallback 可以做：
-
-- 保证章节和正文不丢。
-- 给失败章节生成低置信 `diagnostic_seed`。
-- 提供可复跑证据片段。
-- 帮助 UI 告诉用户“这章没真正 AI 理解，只是保留了候选线索”。
-
-本地 fallback 不应该做：
+本地 fallback 不能用于：
 
 - 冒充完整角色档案。
-- 冒充关系张力。
+- 冒充人物关系张力。
 - 冒充世界观理解。
-- 让项目状态从 `low_quality` 升到 `ready`。
+- 让 `analysis_status` 升级为 `completed` 或 `ready`。
 
-换句话说，fallback 是抗故障，不是替代 AI。
+所有 fallback 资产必须被标记为 `diagnostic_seed` 或 `needs_ai_repair`，并在 UI 与 diagnostics 中明确暴露。
 
-## 下一阶段实施计划
+## AI 在 NovelForge 中真正应该提供的价值
 
-### P0：停止单模型长篇硬跑
+AI 不应该只是把原文搬进数据库。它在 NovelForge 中的核心价值是把原文转化为可创作的项目记忆：
 
-- 保留当前关系端点归一修复。
-- 保留 RateLimiter 锁。
-- 保留前端低置信关系诊断展示。
-- 不再把单次 smoke 失败解释成“提取器失败”或“模型不可用”，而是记录具体网关/模型行为。
+1. **语义压缩**：从长篇正文中提炼角色动机、创伤、欲望、恐惧、目标和转变。
+2. **关系理解**：判断角色之间的依赖、误解、债务、权力差、情绪张力和叙事冲突。
+3. **事件意义判断**：不只记录发生了什么，还判断事件如何改变角色选择和世界规则。
+4. **世界观归类**：把散落设定归入地点、组织、规则、历史、禁忌、特殊概念，并保留证据。
+5. **写作可用化**：把资产整理成 agent 写作时可检索、可引用、可增强的项目记忆。
+6. **创作增益**：生成序章、续写和改写时使用角色关系、世界观规则和章节证据，产生情绪张力和人物选择。
 
-### P1：实现 ModelRouter v1
+规则系统负责稳定性：编码、切章、分段、候选召回、证据定位、失败恢复。
 
-- 新增模型候选池配置。
-- 增加 `model_probe`：
-  - 短文本非空响应
-  - JSON 合规
-  - 小片段非空提取
-  - latency
-- 为章节提取选择当前最优模型。
-- 对空 content、504、429 设置短期冷却。
+AI 负责理解性：性格、关系、冲突、情绪、事件意义、世界观逻辑、文学表达。
 
-#### 2026-05-29 进展
+质量门槛负责约束：不能让低质量结果伪装成可写作资产。
 
-P1 已完成第一版代码落地：
+## 当前已经落地的基础
 
-- 新增 `novelforge.services.model_router.ModelRouter`。
-- 新增运行时模型池配置：
-  - `NOVELFORGE_EXTRACTOR_FAST_MODELS`
-  - `NOVELFORGE_EXTRACTOR_DEEP_MODELS`
-  - `NOVELFORGE_EXTRACTOR_REPAIR_MODELS`
-  - `NOVELFORGE_WRITER_FAST_MODELS`
-  - `NOVELFORGE_WRITER_PRO_MODELS`
-  - `NOVELFORGE_JUDGE_MODELS`
-- 新增探测参数：
-  - `NOVELFORGE_ENABLE_MODEL_ROUTER`
-  - `NOVELFORGE_MODEL_PROBE_TIMEOUT`
-  - `NOVELFORGE_MODEL_COOLDOWN_SECONDS`
-- `ModelRouter` 当前支持：
-  - 按任务角色读取候选池。
-  - 对 extractor 角色做非空响应、JSON 可解析、提取信号非空检查。
-  - 对 writer 等非 extractor 角色做非空响应检查。
-  - 对 `429 / 5xx / 504 / empty_content / auth_failed / json_invalid` 做错误归类。
-  - 对不合格模型设置短期冷却。
-  - 将路由决策写入章节 index 的 `analysis_diagnostics.model_route`。
-- `ExtractionService.extract_chapter_index_assets(...)` 已在任务开始前为章节 index 选择一次模型，不在每章重复测速。
+截至本次复盘，项目已经具备以下基础：
 
-当前边界：
-
-- 这还不是完整的多模型流水线；只完成了模型路由入口。
-- 路由结果仍是内存态，没有持久化为长期模型健康历史。
-- 尚未实现失败章节的持久化 attempt 与增量重跑。
-- 尚未为 UI 展示模型路由报告。
-
-### P2：实现可恢复章节 index
-
-- 每个章节/片段独立保存 attempt。
-- 失败章节可重试。
-- 完整导入任务允许先结束为 `partial`，并提供“继续重跑失败章节”入口。
-- merge 可以读取多轮成功结果。
-
-#### 2026-05-29 进展
-
-P2 已完成第一步“attempt 可观测化”，先把失败章节从一个笼统的 `failed_chapters` 升级为可诊断的逐章/逐次记录：
-
-- `ImportAnalysisDiagnostics` 新增：
-  - `chapter_index_attempts`
-  - `chapter_index_status`
-- 每次章节 index 模型调用会记录：
-  - `chapter_id / chapter_title / chapter_order`
-  - `attempt_number`
-  - `status`
-  - `model_used`
-  - `latency_ms`
-  - `error_type`
-  - `raw_response_hash`
-  - `raw_response_chars`
-  - `parsed_candidate_counts`
-  - `retry_count`
-  - `needs_retry`
-- 错误会归类为：
-  - `rate_limited`
-  - `auth_failed`
-  - `gateway_timeout`
-  - `provider_unavailable`
-  - `json_invalid`
-  - `timeout`
-  - `empty_content`
-- `ExtractionService.extract_chapter_index_assets(...)`、导入深度分析结果、章节修复 preview 结果都会透传这些字段。
-- `candidate_counts` 会补充：
-  - `chapter_index_attempts`
-  - `chapter_index_failed_attempts`
-  - `chapter_index_needs_retry`
-- 章节级修复任务已支持根据上一轮诊断缩小重跑范围：
-  - `chapter_index_status[].needs_retry=true`
-  - `chapter_index_status[].status=failed`
-  - `failed_chapters[].chapter_id`
-  - 显式 `chapter_ids`
-- 章节 index 提取器新增 `diagnostics_recorder` 回调。
-- 导入任务 / 修复 preview 任务会创建 `chapter_index_run_<task_id>` 存储记录，并在每次 attempt / 每章 status 完成后立即写入：
-  - 这让任务中途崩溃时，已完成章节的 attempt 诊断不再完全依赖最终 result。
-  - 最终 `analysis_diagnostics.chapter_index_run_key` 会指向该记录。
-- 成功章节 `ChapterIndex` 快照会进入同一个 run 记录：
-  - `chapter_indices`
-  - 按 `chapter_id` 去重，后写入的重跑结果覆盖旧结果。
-- 章节修复 preview 支持读取上一轮 `chapter_index_run_key`：
-  - 先加载历史成功 `ChapterIndex`。
-  - 再合并本轮重跑成功 `ChapterIndex`。
-  - 最后基于组合后的章节索引重新 merge 角色、关系、时间线和世界观 preview。
-  - 诊断中会记录 `chapter_index_history_run_key` 与 `chapter_index_history_reused_chapters`。
-- 前端提取页已接入失败章节重跑诊断：
-  - `ImportAnalysisDiagnostics` 类型支持 `chapter_index_attempts / chapter_index_status / chapter_index_run_key`。
-  - “重跑章节索引”在未手动选择单章时，会把 `needs_retry` 章节、失败章节和 run key 提交给后端。
-  - 后端会基于这些字段缩小重跑范围，避免再次对整本书发起无差别提取。
-- UI 已显示历史复用状态：
-  - Extract 统计区会识别 `chapter_index_history_reused / chapter_index_combined_indices`。
-  - TaskCenter 修复 preview 摘要会显示“复用历史成功章 N 章，合并索引 M 章”。
-  - TaskCenter 修复 preview 可展开单章明细，显示：
-    - 已复用的历史成功章节
-    - 仍需重跑的章节及错误类型
-
-当前边界：
-
-- attempt 目前写入统一 StorageManager key，尚未拆成正式数据库表。
-- 多轮合并已覆盖修复 preview；正式导入主任务仍以当前任务结果为主。
-- `chapter_index_run_*` 已补独立查询 API，可按 `session_id / parent_id` 边界查询单个 run 或当前项目 run 列表：
-  - `GET /api/extraction/chapter-index-runs?session_id=...&parent_id=...`
-  - `GET /api/extraction/chapter-index-runs/{run_key}?session_id=...&parent_id=...&include_indices=true`
-  - 默认返回 attempt/status/章节索引摘要；需要完整 `chapter_indices` 时显式传 `include_indices=true`。
-- Extract 页已能展示最近 run，并可从某个 run 的失败/需重跑章节直接提交 `chapter_index_rerun` preview 任务：
-  - payload 携带 `chapter_index_run_key`、失败章 `chapter_index_status`、`failed_chapters` 与精确 `chapter_ids`。
-  - 后端会复用历史成功 `ChapterIndex`，只重跑失败章，再合并 preview。
-- 下一步仍应把该 run 结构从通用 StorageManager key 升级为正式数据库中间表，以便支持分页、长期保留、模型健康统计和更高效的项目级查询。
-
-### P3：多模型提取流水线
-
-- 快速模型做广覆盖。
-- 深度模型只补核心角色、主线关系和世界观。
-- JSON 修复任务使用最擅长格式修复的模型。
-- 写作模型与提取模型分开评估。
-
-### P4：真实验收标准调整
-
-新的 smoke 报告必须包含：
-
-- 使用了哪些模型
-- 每个模型成功率
-- 每个模型平均延迟
-- 每类错误数量
-- 成功章节数 / 总章节数
-- 重试后成功章节数
-- 关系端点 resolved / unresolved / low_confidence_resolved
-- quality gate 结果
-
-如果模型网关波动导致未达标，报告应该显示“可恢复到哪一步”，而不是只给一个失败状态。
-
-## 当前项目状态判断
-
-当前 NovelForge 不能称为内部可用。更准确的状态是：
-
-- 章节解析和资产落库基础链路可用。
-- 关系端点归一能力明显增强。
-- 质量诊断比 Goal 20 更可解释。
-- 但长篇结构化提取仍受模型网关稳定性和单模型依赖影响，无法稳定达到 `ready`。
-
-下一轮不应继续堆 UI 或写作功能，也不应继续盲目换模型重跑。应先实现模型测速、模型路由和可恢复章节 index。否则每次更换 API 网关或模型供应商，项目都会重新变得不可用。
-
-## 2026-06-01 暂停功能堆叠后的问题复盘
-
-### 为什么这不是简单的 API 地址或模型名问题
-
-这次网关切换暴露的是系统性问题，而不是单点配置问题：
-
-- 有些模型慢，但不是不可用；如果只按固定 timeout 或一次失败判定不可用，会误杀可用的慢模型。
-- 有些模型快，但结构化抽取能力弱；如果只按速度选择，会得到空数组、浅层摘要或不稳定 JSON。
-- 同一模型在不同时段、不同上游 channel、不同请求长度下表现会变化；静态 `.env` 模型名不能代表当前真实可用能力。
-- `/models` 可见只能说明网关暴露了模型名，不能说明它能稳定完成长文本结构化提取。
-- 网关可承载 30 RPM 以内请求，不代表所有模型都适合并发；并发策略必须按模型、错误类型和任务角色动态调整。
-
-因此，NovelForge 不能再把“换一个可用模型名”当作稳定方案。模型选择必须从配置项升级为运行时策略。
-
-### AI 引入的真实价值边界
-
-用户指出的关键问题是成立的：如果系统完全依赖模型原样抽取，失败后又只从原文摘几句作为 fallback，那么 AI 的价值会变得不清晰，甚至会让用户误以为系统已经理解了小说。
-
-NovelForge 中 AI 应该承担的价值不是“把原文重新搬运进数据库”，而是：
-
-1. **语义压缩**：从长篇正文中提炼角色动机、欲望、创伤、目标、恐惧和转变。
-2. **关系理解**：判断人物之间的依赖、误解、债务、权力差、情绪张力和叙事冲突。
-3. **事件意义判断**：不仅识别发生了什么，还判断事件对角色弧光和世界观规则的影响。
-4. **世界观归类**：把散落设定归入地点、组织、规则、历史、特殊概念，并保留证据。
-5. **创作可用化**：把提取结果整理成 AI 写作时真正能调用的项目记忆，而不是只能展示的标签。
-6. **写作增益**：在创作序章、续写、改写时使用这些资产生成有情绪张力和人物选择的文本。
-
-本地规则和 fallback 的职责不同：
-
-- 本地规则负责稳定性：编码、切章、分段、候选召回、证据定位、失败恢复。
-- AI 负责理解性：性格、关系、冲突、情绪、事件意义、世界观逻辑。
-- fallback 只能生成低置信诊断种子，不能冒充 AI 理解结果，也不能让项目进入 ready 状态。
-
-如果 fallback 只是摘取原文，它必须在 UI 和 diagnostics 中被标记为 `diagnostic_seed` 或 `needs_ai_repair`，不能计入可写作资产质量。
-
-### 当前现状判断
-
-截至本复盘，项目已经具备以下基础：
-
-- 章节级 index 主链路已替代旧全书 prompt 主路径。
+- 章节级 index 已成为导入提取主链路，旧的全书 prompt 不再是唯一主路径。
 - 导入结果能记录 `model_route`、`chapter_index_attempts`、`chapter_index_status`、`chapter_index_run_key`。
-- 失败章节可以被识别，并支持基于 run key 的局部重跑 preview。
-- 前端 Extract 页能看到模型路由和章节 index run 诊断。
-- 关系端点归一、关系补强、写作 trace、editor 候选管理等产品闭环已有基础。
+- 失败章节可以通过 run key 定位，支持局部重跑 preview。
+- `ModelRouter` 已支持按任务角色读取候选模型池。
+- 模型探测已能区分 extractor 与 writer 的基础检查。
+- 章节 index run 会记录模型、延迟、错误类型、候选数量等诊断。
+- 最近模型健康事件已能持久化，并用于 extractor 候选排序。
+- Extract 页面可以展示模型路由、章节 index run 和模型健康摘要。
+- 慢模型运行参数已经按角色配置：timeout、concurrency、chunk size、max tokens。
+- `chapter_index_rerun` 已默认走 repair 角色，并可根据错误类型调整修复策略。
 
-但仍未达到“内部测试可稳定使用”的关键原因是：
+这些能力说明项目已经从“盲跑模型”推进到了“可观测、可局部恢复”的阶段。
 
-- 模型路由还是任务开始前的一次性选择，不是按章节/失败类型动态编排。
-- 慢模型缺少长 timeout / 后台队列 / 小并发策略，容易被当成不可用。
-- 快模型缺少结构化能力评分，可能速度快但提取为空。
-- 多模型协作还没有形成流水线：快速覆盖、失败修复、深度补强、质量裁判仍未拆开。
-- fallback 与 AI 结果的质量边界还需要更严格地暴露给 UI 和质量 gate。
-- 缺少跨 run 的模型健康报告，不能回答“最近哪个模型在当前网关上最适合提取”。
+## 当前仍未解决的关键缺口
 
-因此，当前状态应定义为：**提取链路可观测性已明显提升，但模型编排还不够产品化；不能继续靠人工换模型名维持可用性。**
+### 1. 模型编排还不是完整流水线
 
-### 新的模型策略原则
+当前路由主要是在任务开始时选择模型。它还没有完全做到：
 
-后续模型选择不应固定为某个模型名称，而应按任务角色和实时表现决定：
+- 每章按失败类型动态换模型。
+- 同一轮导入中把不同章节分配给不同模型。
+- 快模型广覆盖后自动交给深度模型补强核心资产。
+- JSON 修复、关系补强、世界观补强、写作生成分别使用不同角色模型。
 
-| 任务角色 | 关注指标 | 推荐策略 |
+### 2. 写作侧模型路由仍需接入完整 trace
+
+前端已有快速/Pro 模式，配置中也有 `writer_fast` / `writer_pro` 候选池。但写作 agent 还需要进一步完成：
+
+- 根据快速/Pro 选择 writer 角色候选池。
+- 使用模型健康历史选择当前更合适的写作模型。
+- 在 agent trace 中记录本轮使用的写作模型与路由原因。
+- 把写作模型成功/失败、延迟、错误类型写入模型健康事件。
+
+否则写作链路仍会和提取链路一样，容易被单个模型名拖住。
+
+### 3. fallback 与 AI 结果的 UI 边界还不够明显
+
+如果某些资产来自规则 fallback 或低置信种子，UI 必须明确显示：
+
+- 这是诊断种子，不是完整 AI 理解结果。
+- 需要 AI repair 或人工确认。
+- 不能作为 ready 状态的依据。
+
+否则用户会看到“有内容”，但实际写作时上下文仍不可用。
+
+### 4. 提取质量还没有稳定证明
+
+当前有工程结构和诊断能力，但真实长篇质量仍要以 smoke 和质量 gate 判断：
+
+- 角色是否覆盖主要角色和重要配角。
+- 关系是否有 source/target/evidence/tension，并闭环到角色池。
+- 时间线是否没有标题/描述错配。
+- 世界观是否有可写作规则和证据。
+- 生成序章是否真的使用了资产，而不是只靠氛围写作。
+
+在这些真实验收稳定前，不能把项目定义为可公开使用。
+
+## 建议的模型策略
+
+### 任务角色
+
+模型不应该按“某个模型名”直接使用，而应该先进入角色池：
+
+| 角色 | 目标 | 策略 |
 | --- | --- | --- |
-| `extractor_fast` | JSON 合规、非空候选、低延迟、稳定成功率 | 小 chunk、较高并发、失败快速切换 |
-| `extractor_repair` | 能处理失败章、能修复 JSON、能补 evidence | 只处理失败章，不跑整本 |
-| `extractor_deep` | 语义深度、人物关系张力、世界观归纳 | 低并发、长 timeout、只补核心资产 |
-| `writer_fast` | 生成速度、可读性、中文表达 | 适合灵感、短段落、候选改写 |
-| `writer_pro` | 情绪张力、审美、长文本一致性 | 适合正式序章和关键章节 |
-| `judge` | 稳定评价、结构化评分 | 用于验收关系张力、错配、资产可写性 |
+| `extractor_fast` | 快速广覆盖，召回候选 | 小 chunk、较高并发、失败快速切换 |
+| `extractor_repair` | 修复失败章节和无效 JSON | 只处理失败章节，不重跑全书 |
+| `extractor_deep` | 补核心角色、关系张力、世界观规则 | 低并发、长 timeout、只处理高价值资产 |
+| `writer_fast` | 灵感、短段落、轻量改写 | 快速响应，质量不足时可升级 |
+| `writer_pro` | 正式序章、关键章节、长文本改写 | 更长 timeout，优先叙事质量 |
+| `judge` | 质量验收与结构化评分 | 判断关系张力、错配、资产可写性 |
 
-模型测速也不能只测“能不能回复一句话”，至少要分层：
+### 探测层级
 
-1. **网关可达**：`/models` 或最小 chat 请求可达。
-2. **非空回复**：短 prompt 返回可读内容。
-3. **JSON 合规**：能按要求返回可解析 JSON。
-4. **提取有效**：对小片段能返回非空角色/关系/事件/世界观候选。
-5. **长片段耐受**：对目标 chunk 大小不空、不截断、不超时。
-6. **质量评分**：是否包含 evidence、人物性格、关系张力、事件意义。
-7. **成本和速度**：latency、429/504 率、平均 tokens、可承载并发。
+实时测速不能只测“能不能回复”。至少要分层：
 
-### 慢模型的正确处理
+1. 网关可达：最小请求或模型列表可返回。
+2. 非空回复：短 prompt 能返回内容。
+3. JSON 合规：能返回可解析 JSON。
+4. 提取有效：小片段能返回非空角色、关系、事件、世界观候选。
+5. 长片段耐受：目标 chunk 大小下不空、不截断、不超时。
+6. 质量评分：包含 evidence、关系张力、角色动机、事件意义。
+7. 成本和速度：latency、429/504 率、可承载并发。
 
-慢模型不能简单被淘汰。正确处理方式是：
+### 慢模型处理
 
-- 给慢但质量高的模型分配 `extractor_deep` / `writer_pro`，不要让它承担全书广覆盖。
-- 对慢模型设置更长 timeout、更低并发、更小任务量。
-- 快模型负责广覆盖和候选召回，慢模型只对核心角色、薄弱关系、失败章节做补强。
-- 如果慢模型连续超时，进入 cooldown；cooldown 结束后可以重新测速，而不是永久禁用。
-- smoke 报告必须区分“慢但最终成功”和“失败不可用”。
+慢模型不能直接淘汰。正确处理方式：
 
-这能避免“换一个 API 或换一批 channel，系统又不可用”的反复。
+- 慢但质量高的模型进入 `extractor_deep` / `writer_pro`。
+- 给慢模型更长 timeout、更低并发、更小任务量。
+- 快模型负责召回，慢模型负责补强。
+- 连续超时进入 cooldown，之后重新测速，而不是永久禁用。
+- smoke 报告区分“慢但成功”和“失败不可用”。
 
-### 下一轮最小落地任务
+### 并发策略
 
-当前不建议继续新增 UI 或写作功能。下一轮应围绕模型编排收敛：
+网关能承载约 30 RPM 不代表所有模型都适合同样并发。并发需要按角色控制：
 
-1. **最近模型健康报告**
-   - 从 `chapter_index_run_*` 汇总最近 run。
-   - 按模型展示：被选择次数、成功 attempt、失败 attempt、平均延迟、504/429/empty/json 错误数。
-   - 在 Extract 页显示“当前网关模型健康”，让管理员知道不是盲目失败。
+- `extractor_fast` 可以较高并发，但要限制单 chunk 大小。
+- `extractor_deep` 低并发，避免慢模型互相阻塞。
+- `extractor_repair` 根据失败章节数量分批执行。
+- `writer_pro` 不应和大批量提取共享同一并发预算。
+- 429 或 provider unavailable 后要降低并发并记录 cooldown。
 
-2. **慢模型策略配置**
-   - 支持按角色设置 timeout、max_concurrency、chunk_size。
-   - `extractor_deep` 默认低并发长 timeout。
-   - `extractor_fast` 默认小 chunk 和快速失败切换。
+## 下一轮最小落地任务
+
+当前不建议继续堆 UI 或大功能。下一轮应集中在模型编排收敛：
+
+1. **写作侧接入模型路由**
+   - 快速/Pro 映射到 `writer_fast` / `writer_pro`。
+   - 写作 trace 记录 `model_route`。
+   - 写作成功/失败写入模型健康事件。
+
+2. **模型健康报告升级**
+   - 按角色展示成功率、失败类型、平均延迟和最近选择。
+   - 区分 extractor 与 writer。
+   - 管理员能看到“当前推荐使用哪个角色模型以及原因”。
 
 3. **多模型章节失败修复**
-   - 章节 index 首轮失败后，不重复同模型硬跑。
-   - 按错误类型选择修复策略：
-     - `empty_content`：切模型。
-     - `json_invalid`：走 repair 模型或 JSON 修复 prompt。
-     - `gateway_timeout`：缩短 chunk 或切低负载模型。
-     - `rate_limited`：降低并发并冷却。
+   - `empty_content`：换模型。
+   - `json_invalid`：走 repair 模型或 JSON 修复 prompt。
+   - `gateway_timeout`：缩短 chunk 或切低负载模型。
+   - `rate_limited`：降并发并冷却。
 
-4. **fallback 质量边界硬化**
-   - 本地 fallback 资产必须标记 `diagnostic_seed` / `needs_ai_repair`。
-   - 不允许 fallback 资产让 `analysis_status=completed`。
-   - UI 必须提示“此资产来自规则种子，尚未完成 AI 理解”。
+4. **fallback 边界硬化**
+   - fallback 资产必须标记 `diagnostic_seed` / `needs_ai_repair`。
+   - fallback 资产不能让 `analysis_status=completed`。
+   - UI 明确提示“尚未完成 AI 理解”。
 
-5. **写作链路验证 AI 价值**
-   - 每次序章生成 trace 必须记录使用了哪些角色、关系、世界观和章节证据。
-   - 验收不只看文本通顺，还要看是否使用了关系张力、人物选择和世界观规则。
+5. **真实闭环验收**
+   - 导入长篇。
+   - 查看模型健康与质量诊断。
+   - repair 失败章节或薄弱关系。
+   - 用增强资产生成序章。
+   - 检查 editor 是否能管理候选与正式章节。
 
-### 当前最重要的工程判断
+## 验收标准
 
-NovelForge 的目标不是找一个“永远可用的模型名”，而是建立一个能适应网关波动和模型差异的创作系统。稳定可用的关键不是让 AI 替代所有规则，也不是让规则冒充 AI，而是把二者分层：
+下一阶段完成后，系统至少应该能回答：
 
-- 规则保证数据不丢、任务可恢复、证据可定位。
-- AI 负责小说理解和创作增益。
-- 模型路由负责根据实时健康选择合适模型。
-- 质量 gate 负责阻止低质量结果伪装成完成。
+- 当前网关下哪些模型最近可用，哪些慢，哪些失败。
+- 某次导入为什么选择这个模型。
+- 失败章节是超时、空内容、JSON 错误还是质量不足。
+- 系统是否只是摘录了原文，还是完成了 AI 理解。
+- 哪些资产可用于写作，哪些需要 repair。
+- 生成序章使用了哪些角色、关系、世界观和章节证据。
 
-只有这四层边界清楚，NovelForge 才能在更换 API、模型变慢、网关 channel 波动时保持可用。
+如果这些问题不能被系统自动回答，NovelForge 就还没有真正达到内部测试可用。
 
-#### 2026-06-01 进展：最近模型健康报告 v1
+## 安全记录
 
-- Extract 页已能从最近 `chapter_index_run_*` 汇总模型健康：
-  - 被选中次数
-  - probe 通过/失败
-  - 成功/失败 attempt
-  - 平均延迟
-  - 429 / 504 / empty content / JSON 等错误类型分布
-- 这一步先解决“管理员不知道当前网关到底哪个模型慢、哪个模型失败、失败原因是什么”的可观测性问题。
-- 慢但成功的模型会显示为成功且保留平均延迟，不会仅因慢被判定为不可用。
-- 当前仍是前端汇总，尚未升级为后端长期模型健康表。
-
-#### 2026-06-01 进展：慢模型运行参数配置 v1
-
-- 已新增按任务角色配置运行参数：`TIMEOUT / CONCURRENCY / CHUNK_SIZE / MAX_TOKENS`。
-- 章节 index 主链路会读取 `extractor_fast` 的运行参数，并把 timeout、并发、max_tokens 写入 attempt 诊断。
-- 导入切章默认使用 `extractor_fast.chunk_size`，也可用 `NOVELFORGE_IMPORT_CHAPTER_MAX_CHARS` 硬覆盖。
-- 这一步让慢但质量高的模型可以通过低并发、长 timeout、小任务量进入链路，而不是被一次测速或统一 timeout 误杀。
-
-#### 2026-06-01 进展：失败章节修复模型角色切换 v1
-
-- `chapter_index_rerun` 已默认走 `extractor_repair` 角色，而不是继续使用首轮 `extractor_fast`。
-- `chapter_index_run_*` 会保存 `model_role`，API 查询也会返回该字段，便于后续区分首轮广覆盖与失败章节修复。
-- 当前仍是任务类型级切换；后续还需要按错误类型进一步决策。
-
-#### 2026-06-01 进展：按错误类型修复策略 v1
-
-- `chapter_index_rerun` 已根据上一轮 `chapter_index_status / failed_chapters / analysis_diagnostics` 的 `error_type` 生成 repair strategy。
-- 当前策略：
-  - `gateway_timeout / timeout / provider_unavailable`：缩短 chunk、并发降到 1、延长 timeout。
-  - `rate_limited`：并发降到 1，并记录冷却/降并发动作。
-  - `json_invalid`：提高 max_tokens，进入 JSON repair 偏好。
-  - `empty_content`：记录切换模型动作。
-- repair strategy 会写入 `analysis_diagnostics`、`model_route` 和 `chapter_index_run_*`，后续 UI 与模型健康报告可以追溯本轮为什么这样重跑。
-- 当前仍是 run 级策略，尚未把不同错误类型的章节拆成多批不同策略执行。
+本文档不记录任何真实 API Key、session secret、管理员密码或样本文本正文。网关地址、Key、模型池应只存在于本地 `.env` 或部署环境变量中，不写入仓库。

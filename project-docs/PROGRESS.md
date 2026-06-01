@@ -11,6 +11,26 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-06-01 模型网关与提取策略暂停复盘
+### 本轮完成
+- 暂停继续堆功能，围绕用户指出的核心问题整理模型网关、模型快慢差异、fallback 边界和 AI 引入价值。
+- 重写 `project-docs/EXTRACTION_PROVIDER_STRATEGY.md` 为干净 UTF-8 中文，修复原文档可见 mojibake。
+- 明确当前判断：网关切换暴露的是模型编排问题，不是简单替换 API 地址或固定模型名可以长期解决的问题。
+- 明确 AI 与规则的边界：
+  - 规则负责编码、切章、分段、候选召回、证据定位、失败恢复。
+  - AI 负责角色动机、关系张力、事件意义、世界观逻辑和写作增益。
+  - fallback 只能作为诊断种子，不能冒充完整 AI 理解，也不能让项目进入 ready/completed 状态。
+- 明确下一轮最小落地任务：
+  - 写作侧接入 `writer_fast / writer_pro` 模型路由。
+  - 模型健康报告区分 extractor 与 writer。
+  - 失败章节按错误类型切换模型或策略。
+  - fallback 资产显式标记 `diagnostic_seed / needs_ai_repair`。
+  - 用真实闭环验证提取资产是否能支撑序章创作。
+
+### 验证
+- 本轮为文档和进度记录更新，未改动运行时代码，未执行前后端测试。
+- 提交前需执行 diff/sensitive scan，确认不包含真实 API Key、session secret、管理员密码或样本文本正文。
+
 ## 2026-05-25 Goal 13 编辑器候选版本与快照恢复 v1
 ### 本轮完成
 - 新增 editor 章节工作流 helper：集中处理章节筛选、AI 草稿/候选识别、转正式元数据请求、候选归档、`previous_snapshot` 恢复、`/editor?chapterId=` 选中优先级与聊天 handoff prompt。
