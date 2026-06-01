@@ -522,3 +522,10 @@ NovelForge 的目标不是找一个“永远可用的模型名”，而是建立
 - 这一步先解决“管理员不知道当前网关到底哪个模型慢、哪个模型失败、失败原因是什么”的可观测性问题。
 - 慢但成功的模型会显示为成功且保留平均延迟，不会仅因慢被判定为不可用。
 - 当前仍是前端汇总，尚未升级为后端长期模型健康表。
+
+#### 2026-06-01 进展：慢模型运行参数配置 v1
+
+- 已新增按任务角色配置运行参数：`TIMEOUT / CONCURRENCY / CHUNK_SIZE / MAX_TOKENS`。
+- 章节 index 主链路会读取 `extractor_fast` 的运行参数，并把 timeout、并发、max_tokens 写入 attempt 诊断。
+- 导入切章默认使用 `extractor_fast.chunk_size`，也可用 `NOVELFORGE_IMPORT_CHAPTER_MAX_CHARS` 硬覆盖。
+- 这一步让慢但质量高的模型可以通过低并发、长 timeout、小任务量进入链路，而不是被一次测速或统一 timeout 误杀。

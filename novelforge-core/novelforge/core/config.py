@@ -86,6 +86,50 @@ class Config:
                 [self.pro_model, self.model, *self.fallback_models],
             ),
         }
+        self.model_role_settings: dict[str, dict[str, float | int]] = {
+            "extractor_fast": self._model_role_settings_from_env(
+                "NOVELFORGE_EXTRACTOR_FAST",
+                timeout=180.0,
+                concurrency=4,
+                chunk_size=2500,
+                max_tokens=2500,
+            ),
+            "extractor_deep": self._model_role_settings_from_env(
+                "NOVELFORGE_EXTRACTOR_DEEP",
+                timeout=420.0,
+                concurrency=1,
+                chunk_size=1800,
+                max_tokens=4000,
+            ),
+            "extractor_repair": self._model_role_settings_from_env(
+                "NOVELFORGE_EXTRACTOR_REPAIR",
+                timeout=300.0,
+                concurrency=2,
+                chunk_size=2000,
+                max_tokens=3000,
+            ),
+            "writer_fast": self._model_role_settings_from_env(
+                "NOVELFORGE_WRITER_FAST",
+                timeout=120.0,
+                concurrency=3,
+                chunk_size=4000,
+                max_tokens=3000,
+            ),
+            "writer_pro": self._model_role_settings_from_env(
+                "NOVELFORGE_WRITER_PRO",
+                timeout=420.0,
+                concurrency=1,
+                chunk_size=6000,
+                max_tokens=6000,
+            ),
+            "judge": self._model_role_settings_from_env(
+                "NOVELFORGE_JUDGE",
+                timeout=240.0,
+                concurrency=2,
+                chunk_size=4000,
+                max_tokens=3000,
+            ),
+        }
         
         # SillyTavern 配置
         self.sillytavern_url: Optional[str] = os.getenv("SILLYTAVERN_URL")
@@ -174,6 +218,46 @@ class Config:
         if raw.strip():
             return cls._dedupe_model_names(raw.split(","))
         return cls._dedupe_model_names(defaults)
+
+    @staticmethod
+    def _float_from_env(env_name: str, default: float, *, minimum: float, maximum: float) -> float:
+        raw = os.getenv(env_name, "")
+        try:
+            value = float(raw) if raw.strip() else default
+        except (TypeError, ValueError):
+            value = default
+        return max(minimum, min(value, maximum))
+
+    @staticmethod
+    def _int_from_env(env_name: str, default: int, *, minimum: int, maximum: int) -> int:
+        raw = os.getenv(env_name, "")
+        try:
+            value = int(raw) if raw.strip() else default
+        except (TypeError, ValueError):
+            value = default
+        return max(minimum, min(value, maximum))
+
+    @classmethod
+    def _model_role_settings_from_env(
+        cls,
+        prefix: str,
+        *,
+        timeout: float,
+        concurrency: int,
+        chunk_size: int,
+        max_tokens: int,
+    ) -> dict[str, float | int]:
+        return {
+            "timeout": cls._float_from_env(f"{prefix}_TIMEOUT", timeout, minimum=30.0, maximum=900.0),
+            "concurrency": cls._int_from_env(f"{prefix}_CONCURRENCY", concurrency, minimum=1, maximum=8),
+            "chunk_size": cls._int_from_env(f"{prefix}_CHUNK_SIZE", chunk_size, minimum=800, maximum=12000),
+            "max_tokens": cls._int_from_env(f"{prefix}_MAX_TOKENS", max_tokens, minimum=800, maximum=12000),
+        }
+
+    def get_model_role_settings(self, role: Optional[str]) -> dict[str, float | int]:
+        if not role:
+            return {}
+        return dict(self.model_role_settings.get(role, {}))
 
     def with_openai_overrides(
         self,

@@ -5751,3 +5751,23 @@
 - 当前边界：
   - 这是前端基于最近 run 的健康汇总，不是后端长期模型健康表。
   - 下一步应落地按角色的 timeout / concurrency / chunk_size 配置，让慢模型可以进入低并发长 timeout 的深度补强路径。
+
+## 2026-06-01 慢模型运行参数配置第一版
+
+- 按模型编排规划继续推进，完成按任务角色配置运行参数的第一版。
+- `Config` 新增 `model_role_settings` / `get_model_role_settings(...)`：
+  - 支持 `NOVELFORGE_EXTRACTOR_FAST_*`、`NOVELFORGE_EXTRACTOR_DEEP_*`、`NOVELFORGE_EXTRACTOR_REPAIR_*`、`NOVELFORGE_WRITER_FAST_*`、`NOVELFORGE_WRITER_PRO_*`、`NOVELFORGE_JUDGE_*`。
+  - 每个角色可配置 `TIMEOUT / CONCURRENCY / CHUNK_SIZE / MAX_TOKENS`。
+- 章节 index 已应用 `extractor_fast` 运行参数：
+  - `timeout` 进入 `ExtractionConfig.timeout`。
+  - `concurrency` 进入 `ChapterIndexExtractor.chapter_concurrency`。
+  - `max_tokens` 进入章节索引模型输出上限。
+  - attempt 记录会保存 `timeout / max_tokens / chapter_concurrency`，便于后续模型健康报告判断慢模型是否按低并发长 timeout 运行。
+- 导入切章现在优先使用 `extractor_fast.chunk_size`，也支持 `NOVELFORGE_IMPORT_CHAPTER_MAX_CHARS` 作为硬覆盖。
+- 更新 `.env.example` 和 README，说明慢但质量高的模型应通过低并发、长 timeout 使用，而不是直接从候选池删除。
+- 测试：
+  - `PYTHONPATH=<temp clone>/novelforge-core py -m pytest novelforge-core/tests/services/test_model_router.py novelforge-core/tests/services/test_chapter_index_extractor.py novelforge-core/tests/services/test_ai_scheduler_import.py -q`：48 passed。
+  - `py -m compileall` 覆盖 `config.py / extraction_service.py / ai_scheduler.py / chapter_index_extractor.py`：通过。
+- 当前边界：
+  - 本轮只把角色运行参数接入章节 index 主链路。
+  - 多模型失败章节修复仍未完成；下一步应按 `empty_content / json_invalid / gateway_timeout / rate_limited` 选择 repair 模型或缩短 chunk。

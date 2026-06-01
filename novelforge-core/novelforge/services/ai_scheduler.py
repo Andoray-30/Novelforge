@@ -1528,6 +1528,19 @@ class AITaskScheduler:
             chapter.index = index
         return expanded
 
+    def _resolve_import_chapter_max_chars(self) -> int:
+        role_settings: Dict[str, Any] = {}
+        getter = getattr(self.config, "get_model_role_settings", None)
+        if callable(getter):
+            role_settings = getter("extractor_fast")
+        default = int(role_settings.get("chunk_size", 2500) or 2500)
+        raw = os.getenv("NOVELFORGE_IMPORT_CHAPTER_MAX_CHARS", "").strip()
+        try:
+            value = int(raw) if raw else default
+        except ValueError:
+            value = default
+        return max(800, min(value, 12000))
+
     @staticmethod
     def _build_split_segment_title(title: str, part_index: int, split_total: int) -> str:
         base_title = (title or "章节").strip() or "章节"
@@ -1939,7 +1952,10 @@ class AITaskScheduler:
                 )
             ]
         
-        chapters_to_save = self._expand_long_import_chapters(chapters_to_save, max_chars=2500)
+        chapters_to_save = self._expand_long_import_chapters(
+            chapters_to_save,
+            max_chars=self._resolve_import_chapter_max_chars(),
+        )
 
         # 2. 保存章节 (分阶段汇报进度)
         task.message = f"解析完成，正在保存 {len(chapters_to_save)} 个章节..."

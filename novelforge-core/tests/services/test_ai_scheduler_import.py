@@ -610,6 +610,24 @@ def test_import_expands_overlong_chapters_on_sentence_boundaries():
     assert parts[0].metadata["split_total"] == len(parts)
 
 
+def test_import_chapter_split_size_uses_extractor_fast_role_settings(monkeypatch):
+    class ChunkConfig(DummyConfig):
+        def get_model_role_settings(self, role):
+            if role == "extractor_fast":
+                return {"chunk_size": 1200}
+            return {}
+
+    scheduler = AITaskScheduler(DummyAIService(), MemoryStorageManager(), ChunkConfig())
+
+    assert scheduler._resolve_import_chapter_max_chars() == 1200
+
+    monkeypatch.setenv("NOVELFORGE_IMPORT_CHAPTER_MAX_CHARS", "500")
+    assert scheduler._resolve_import_chapter_max_chars() == 800
+
+    monkeypatch.setenv("NOVELFORGE_IMPORT_CHAPTER_MAX_CHARS", "9000")
+    assert scheduler._resolve_import_chapter_max_chars() == 9000
+
+
 def test_import_chapter_metadata_marks_system_split_segments():
     from novelforge.types.text_processing import Chapter
 

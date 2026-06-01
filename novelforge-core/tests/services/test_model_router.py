@@ -86,14 +86,46 @@ def test_config_model_pool_env_dedupes(monkeypatch):
     assert Config._model_pool_from_env("NOVELFORGE_EXTRACTOR_FAST_MODELS", ["fallback"]) == ["a", "b", "c"]
 
 
+def test_config_model_role_settings_are_configurable(monkeypatch):
+    monkeypatch.setenv("NOVELFORGE_EXTRACTOR_FAST_TIMEOUT", "75")
+    monkeypatch.setenv("NOVELFORGE_EXTRACTOR_FAST_CONCURRENCY", "2")
+    monkeypatch.setenv("NOVELFORGE_EXTRACTOR_FAST_CHUNK_SIZE", "1600")
+    monkeypatch.setenv("NOVELFORGE_EXTRACTOR_FAST_MAX_TOKENS", "2200")
+
+    settings = Config().get_model_role_settings("extractor_fast")
+
+    assert settings == {
+        "timeout": 75.0,
+        "concurrency": 2,
+        "chunk_size": 1600,
+        "max_tokens": 2200,
+    }
+
+
 @pytest.mark.asyncio
 async def test_extraction_service_records_model_route(monkeypatch):
     class ServiceConfig(FakeConfig):
         model_pools = {"extractor_fast": ["route-model"]}
+        model_role_settings = {
+            "extractor_fast": {
+                "timeout": 77.0,
+                "concurrency": 2,
+                "chunk_size": 1600,
+                "max_tokens": 2100,
+            }
+        }
+
+        def get_model_role_settings(self, role):
+            return dict(self.model_role_settings.get(role, {}))
 
     service = FakeRoutedAIService({"route-model": "{}"}, real_client=False)
+    observed = {}
 
     async def fake_extract_and_merge(self, chapters):
+        observed["timeout"] = self.config.timeout
+        observed["chunk_size"] = self.config.chunk_size
+        observed["chapter_concurrency"] = self.chapter_concurrency
+        observed["max_tokens"] = self.max_tokens
         return ChapterIndexMergeResult(
             diagnostics=ImportAnalysisDiagnostics(candidate_counts={"chapters_total": len(chapters)})
         )
@@ -107,4 +139,11 @@ async def test_extraction_service_records_model_route(monkeypatch):
     result = await extraction_service.extract_chapter_index_assets([{"id": "c1", "title": "第一章", "content": "正文"}])
 
     assert result["model_route"]["selected_model"] == "route-model"
+    assert result["model_route"]["runtime_settings"]["timeout"] == 77.0
     assert result["analysis_diagnostics"]["model_route"]["selected_model"] == "route-model"
+    assert observed == {
+        "timeout": 77.0,
+        "chunk_size": 1600,
+        "chapter_concurrency": 2,
+        "max_tokens": 2100,
+    }

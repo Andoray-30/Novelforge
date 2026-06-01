@@ -74,6 +74,39 @@ class ExtractionService:
             ai_service=ai_service,
         )
 
+    def _model_role_settings(self, role: str) -> Dict[str, Any]:
+        getter = getattr(self.config, "get_model_role_settings", None)
+        if callable(getter):
+            return getter(role)
+        return dict(getattr(self.config, "model_role_settings", {}).get(role, {}))
+
+    def _chapter_index_config_for_role(self, role: str) -> ExtractionConfig:
+        base_config = self.chapter_index_extractor.config
+        settings = self._model_role_settings(role)
+        return ExtractionConfig(
+            timeout=float(settings.get("timeout", base_config.timeout)),
+            max_retries=base_config.max_retries,
+            retry_delay=base_config.retry_delay,
+            chunk_size=int(settings.get("chunk_size", base_config.chunk_size)),
+            chunk_overlap=base_config.chunk_overlap,
+        )
+
+    def _build_chapter_index_extractor(
+        self,
+        *,
+        ai_service: AIService,
+        diagnostics_recorder: Optional[Any],
+        role: str,
+    ) -> ChapterIndexExtractor:
+        settings = self._model_role_settings(role)
+        return ChapterIndexExtractor(
+            config=self._chapter_index_config_for_role(role),
+            ai_service=ai_service,
+            diagnostics_recorder=diagnostics_recorder,
+            chapter_concurrency=int(settings["concurrency"]) if "concurrency" in settings else None,
+            max_tokens=int(settings["max_tokens"]) if "max_tokens" in settings else None,
+        )
+
     async def extract_characters(self, text: str) -> List[Character]:
         return await self.unified_character_extractor.extract_characters(text)
 
@@ -94,27 +127,28 @@ class ExtractionService:
         chapters: List[Dict[str, Any]],
         diagnostics_recorder: Optional[Any] = None,
     ) -> Dict[str, Any]:
-        extractor = self.chapter_index_extractor
-        if diagnostics_recorder is not None:
-            extractor = ChapterIndexExtractor(
-                config=self.chapter_index_extractor.config,
-                ai_service=self.ai_service,
-                diagnostics_recorder=diagnostics_recorder,
-            )
+        role = "extractor_fast"
+        extractor = self._build_chapter_index_extractor(
+            ai_service=self.ai_service,
+            diagnostics_recorder=diagnostics_recorder,
+            role=role,
+        )
         model_route = None
         if getattr(self.config, "enable_model_router", True):
-            decision = await self.model_router.select_model("extractor_fast")
+            decision = await self.model_router.select_model(role)
+            role = decision.role or role
             model_route = decision.to_dict()
+            model_route["runtime_settings"] = self._model_role_settings(role)
             with_overrides = getattr(self.ai_service, "with_overrides", None)
             if decision.selected_model and callable(with_overrides):
                 routed_service = with_overrides(
                     model=decision.selected_model,
                     strict_model=True,
                 )
-                extractor = ChapterIndexExtractor(
-                    config=self.chapter_index_extractor.config,
+                extractor = self._build_chapter_index_extractor(
                     ai_service=routed_service,
                     diagnostics_recorder=diagnostics_recorder,
+                    role=role,
                 )
         result = await extractor.extract_and_merge(chapters)
         diagnostics = result.diagnostics.model_dump()

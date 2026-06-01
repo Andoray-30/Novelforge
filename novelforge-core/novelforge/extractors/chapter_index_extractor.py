@@ -168,12 +168,22 @@ class ChapterIndexExtractor:
         ai_service: Any,
         config: Optional[ExtractionConfig] = None,
         diagnostics_recorder: Optional[Callable[[Dict[str, Any]], Any]] = None,
+        chapter_concurrency: Optional[int] = None,
+        max_tokens: Optional[int] = None,
     ):
         self.ai_service = ai_service
         self.config = config or ExtractionConfig(timeout=180.0, max_retries=1, retry_delay=1.0)
         self.diagnostics_recorder = diagnostics_recorder
-        self.chapter_concurrency = self._resolve_chapter_concurrency()
-        self.max_tokens = self._resolve_int_env("NOVELFORGE_CHAPTER_INDEX_MAX_TOKENS", default=2500, minimum=800, maximum=5000)
+        self.chapter_concurrency = self._clamp_int(
+            chapter_concurrency if chapter_concurrency is not None else self._resolve_chapter_concurrency(),
+            minimum=1,
+            maximum=8,
+        )
+        self.max_tokens = self._clamp_int(
+            max_tokens if max_tokens is not None else self._resolve_int_env("NOVELFORGE_CHAPTER_INDEX_MAX_TOKENS", default=2500, minimum=800, maximum=5000),
+            minimum=800,
+            maximum=12000,
+        )
 
     async def extract_and_merge(self, chapters: List[Dict[str, Any]]) -> ChapterIndexMergeResult:
         sources = [self._coerce_chapter_source(chapter) for chapter in chapters if self._chapter_content(chapter)]
@@ -278,6 +288,10 @@ class ChapterIndexExtractor:
             value = int(raw)
         except (TypeError, ValueError):
             return default
+        return ChapterIndexExtractor._clamp_int(value, minimum=minimum, maximum=maximum)
+
+    @staticmethod
+    def _clamp_int(value: int, *, minimum: int, maximum: int) -> int:
         return max(minimum, min(value, maximum))
 
     async def _extract_chapter_index(self, chapter: ChapterSource) -> ChapterIndex:
@@ -355,6 +369,9 @@ class ChapterIndexExtractor:
             "attempt_number": attempt_number,
             "status": status,
             "model_used": model_used,
+            "timeout": self.config.timeout,
+            "max_tokens": self.max_tokens,
+            "chapter_concurrency": self.chapter_concurrency,
             "latency_ms": latency_ms,
             "error_type": self._classify_error(error) if error else None,
             "error": str(error)[:500] if error else None,
