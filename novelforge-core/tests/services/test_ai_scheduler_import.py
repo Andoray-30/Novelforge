@@ -480,6 +480,180 @@ def test_novel_import_uses_chapter_index_analysis_and_returns_diagnostics(monkey
     assert result["relationship_unresolved_endpoints"] == ["陌生人"]
 
 
+def test_novel_import_marks_low_information_character_assets_for_repair(monkeypatch, tmp_path):
+    from novelforge.services import ai_scheduler as scheduler_module
+    from novelforge.types.text_processing import Chapter, ProcessedText, TextMetadata
+
+    class FakeTextProcessingService:
+        def process_file(self, file_path, config):
+            content = Path(file_path).read_text(encoding="utf-8")
+            return ProcessedText(
+                content=content,
+                metadata=TextMetadata(title="Test Novel"),
+                chapters=[Chapter(title="Chapter 1", content=content, start_position=0, end_position=len(content), index=1)],
+            )
+
+    class FakeExtractionService:
+        async def extract_chapter_index_assets(self, chapters):
+            character = Character(name="Seed", role=CharacterRole.MINOR, description="seed", source_contexts=["Seed appeared"])
+            setattr(
+                character,
+                "extraction_quality",
+                {
+                    "profile_score": 1,
+                    "confidence": "medium",
+                    "profile_type": "minimal_profile",
+                    "backfilled_from_relationship": True,
+                },
+            )
+            return {
+                "characters": [character],
+                "relationships": [],
+                "timeline_events": [],
+                "world_setting": WorldSetting(),
+                "analysis_diagnostics": {
+                    "candidate_counts": {"chapter_character_candidates": 1},
+                    "failed_chapters": [],
+                    "relationship_unresolved_endpoints": [],
+                    "timeline_mismatch_events": [],
+                },
+            }
+
+    monkeypatch.setattr(scheduler_module, "text_processing_service", FakeTextProcessingService(), raising=False)
+    import novelforge.services.extraction_service as extraction_module
+    monkeypatch.setattr(extraction_module, "get_extraction_service", lambda *args, **kwargs: FakeExtractionService())
+
+    source_path = tmp_path / "novel.txt"
+    source_path.write_text("Seed appeared in the rain.", encoding="utf-8")
+    content_manager = RecordingContentManager()
+    scheduler = build_scheduler(content_manager=content_manager)
+    task = Task(
+        id="task-low-info-character-save",
+        type="novel_import",
+        status=TaskStatus.RUNNING,
+        priority=TaskPriority.HIGH,
+        parameters={
+            "file_path": str(source_path),
+            "book_title": "Test Novel",
+            "session_id": "session-repair-flags",
+            "config": {},
+            "source_file_name": "novel.txt",
+        },
+        created_at=datetime.now(),
+    )
+
+    result = asyncio.run(scheduler._process_novel_import_task(task))
+    characters = [item for item in content_manager.items if item.metadata.type == "character"]
+
+    assert result["analysis_status"] == "low_quality"
+    assert len(characters) == 1
+    character_item = characters[0]
+    assert "high-quality" not in character_item.metadata.tags
+    assert "diagnostic_seed" in character_item.metadata.tags
+    assert "needs_ai_repair" in character_item.metadata.tags
+    assert character_item.extracted_data["diagnostic_seed"] is True
+    assert character_item.extracted_data["needs_ai_repair"] is True
+    assert character_item.extracted_data["source_type"] == "diagnostic_seed"
+
+
+def test_character_quality_metadata_marks_backfilled_seed():
+    metadata = AITaskScheduler._character_asset_quality_metadata(
+        {
+            "name": "Seed",
+            "extraction_quality": {
+                "profile_score": 1,
+                "confidence": "medium",
+                "profile_type": "minimal_profile",
+                "backfilled_from_relationship": True,
+            },
+        }
+    )
+
+    assert metadata["diagnostic_seed"] is True
+    assert metadata["needs_ai_repair"] is True
+    assert metadata["source_type"] == "diagnostic_seed"
+    assert "relationship_endpoint_backfill" in metadata["quality_flags"]
+
+
+def test_chapter_index_analysis_rejects_all_diagnostic_seed_characters():
+    class DiagnosticSeedService:
+        async def extract_chapter_index_assets(self, chapters):
+            characters = []
+            for index in range(9):
+                character = Character(
+                    name=f"Char{index}",
+                    role=CharacterRole.MINOR,
+                    description="seed",
+                    source_contexts=[f"Char{index} evidence"],
+                )
+                setattr(
+                    character,
+                    "extraction_quality",
+                    {
+                        "profile_score": 1,
+                        "confidence": "medium",
+                        "profile_type": "minimal_profile",
+                        "backfilled_from_relationship": True,
+                    },
+                )
+                characters.append(character)
+
+            return {
+                "characters": characters,
+                "relationships": [
+                    NetworkEdge(
+                        source="Char0",
+                        target=f"Char{index}",
+                        relationship_type=RelationshipType.FRIEND,
+                        description="relationship",
+                        evidence=["evidence"],
+                    )
+                    for index in range(1, 9)
+                ],
+                "timeline_events": [
+                    TimelineEvent(
+                        title=f"Event{index}",
+                        description=f"Event{index} happens",
+                        characters=["Char0"],
+                        evidence=["evidence"],
+                        chapter_reference="Chapter 1",
+                    )
+                    for index in range(6)
+                ],
+                "world_setting": WorldSetting(history="world", rules=["rule"]),
+                "analysis_diagnostics": {
+                    "candidate_counts": {"chapter_character_candidates": 9},
+                    "failed_chapters": [],
+                    "relationship_unresolved_endpoints": [],
+                    "timeline_mismatch_events": [],
+                },
+            }
+
+    scheduler = build_scheduler(storage_manager=MemoryStorageManager())
+    task = Task(
+        id="task-diagnostic-seeds",
+        type="novel_import",
+        status=TaskStatus.RUNNING,
+        priority=TaskPriority.HIGH,
+        parameters={},
+        created_at=datetime.now(),
+    )
+
+    result = asyncio.run(
+        scheduler._run_import_deep_analysis(
+            DiagnosticSeedService(),
+            "text",
+            task,
+            chapters=[{"id": "chapter-1", "title": "Chapter 1", "chapter_index": 1, "content": "text"}],
+        )
+    )
+
+    assert result["analysis_status"] == "low_quality"
+    assert result["candidate_counts"]["diagnostic_seed_characters"] == 9
+    assert result["candidate_counts"]["needs_ai_repair_characters"] == 9
+    assert any("diagnostic seeds" in issue for issue in result["quality_issues"])
+
+
 def test_import_chapter_index_analysis_persists_attempt_run_state():
     class RecorderExtractionService:
         async def extract_chapter_index_assets(self, chapters, diagnostics_recorder=None, model_role=None):

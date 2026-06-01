@@ -1769,6 +1769,29 @@ class AITaskScheduler:
         if mismatch_events:
             extracted["quality_issues"].append(f"时间线标题/描述一致性存疑：{len(mismatch_events)} 个事件")
 
+        diagnostic_seed_characters = []
+        needs_ai_repair_characters = []
+        for character in characters:
+            raw_character = character.model_dump() if hasattr(character, "model_dump") else character
+            quality_metadata = self._character_asset_quality_metadata(raw_character if isinstance(raw_character, dict) else {})
+            if quality_metadata["diagnostic_seed"]:
+                diagnostic_seed_characters.append(getattr(character, "name", "unknown"))
+            if quality_metadata["needs_ai_repair"]:
+                needs_ai_repair_characters.append(getattr(character, "name", "unknown"))
+
+        if diagnostic_seed_characters:
+            diagnostics["diagnostic_seed_characters"] = diagnostic_seed_characters
+            extracted["candidate_counts"]["diagnostic_seed_characters"] = len(diagnostic_seed_characters)
+        if needs_ai_repair_characters:
+            diagnostics["needs_ai_repair_characters"] = needs_ai_repair_characters
+            extracted["candidate_counts"]["needs_ai_repair_characters"] = len(needs_ai_repair_characters)
+        if characters and len(diagnostic_seed_characters) == len(characters):
+            extracted["quality_issues"].append("character assets are all diagnostic seeds and require AI repair")
+        elif characters and len(needs_ai_repair_characters) / max(len(characters), 1) > 0.5:
+            extracted["quality_issues"].append(
+                f"characters needing AI repair ratio is too high: {len(needs_ai_repair_characters)}/{len(characters)}"
+            )
+
         if extracted["failed_chapters"]:
             extracted["errors"].append(f"failed_chapters: {len(extracted['failed_chapters'])}")
 
@@ -2007,6 +2030,110 @@ class AITaskScheduler:
             "is_decorative": is_decorative,
             "word_count": word_count,
             "quality_flags": quality_flags,
+        }
+
+    @staticmethod
+    def _quality_dict_from_asset(asset: Any) -> Dict[str, Any]:
+        quality = getattr(asset, "extraction_quality", None)
+        if isinstance(quality, dict):
+            return quality
+        if isinstance(asset, dict):
+            nested = asset.get("extraction_quality")
+            return nested if isinstance(nested, dict) else {}
+        return {}
+
+    @classmethod
+    def _character_asset_quality_metadata(cls, raw_data: Dict[str, Any]) -> Dict[str, Any]:
+        quality = raw_data.get("extraction_quality") if isinstance(raw_data.get("extraction_quality"), dict) else {}
+        has_explicit_quality = bool(quality)
+        if quality:
+            profile_score = int(quality.get("profile_score") or 0)
+            confidence = str(quality.get("confidence") or "").lower()
+            profile_type = str(quality.get("profile_type") or quality.get("profile_level") or "").lower()
+        else:
+            profile_score = sum(
+                bool(str(raw_data.get(field) or "").strip())
+                for field in ("description", "background", "appearance", "occupation", "personality")
+            )
+            evidence = raw_data.get("source_contexts") if isinstance(raw_data.get("source_contexts"), list) else []
+            confidence = "medium" if evidence and profile_score else "low"
+            profile_type = "full_profile" if evidence and profile_score else "minimal_profile"
+        backfilled = bool(quality.get("backfilled_from_relationship"))
+
+        flags: List[str] = []
+        diagnostic_seed = False
+        needs_ai_repair = False
+
+        if backfilled:
+            flags.extend(["diagnostic_seed", "relationship_endpoint_backfill"])
+            diagnostic_seed = True
+            needs_ai_repair = True
+        if profile_type == "minimal_profile" or (has_explicit_quality and profile_score < 3):
+            flags.append("minimal_profile")
+            needs_ai_repair = True
+        if confidence == "low":
+            flags.append("low_confidence")
+            needs_ai_repair = True
+        if needs_ai_repair:
+            flags.append("needs_ai_repair")
+
+        return {
+            "quality_flags": sorted(set(flags)),
+            "diagnostic_seed": diagnostic_seed,
+            "needs_ai_repair": needs_ai_repair,
+            "source_type": "diagnostic_seed" if diagnostic_seed else "ai_extracted",
+        }
+
+    @staticmethod
+    def _relationship_asset_quality_metadata(raw_rel: Dict[str, Any]) -> Dict[str, Any]:
+        evidence = raw_rel.get("evidence") if isinstance(raw_rel.get("evidence"), list) else []
+        source = str(raw_rel.get("source") or "")
+        target = str(raw_rel.get("target") or "")
+        flags: List[str] = []
+        needs_ai_repair = False
+        diagnostic_seed = False
+
+        if not evidence:
+            flags.append("missing_evidence")
+            needs_ai_repair = True
+        if source.startswith("Unknown") or target.startswith("Unknown"):
+            flags.extend(["diagnostic_seed", "unresolved_endpoint"])
+            diagnostic_seed = True
+            needs_ai_repair = True
+        if needs_ai_repair:
+            flags.append("needs_ai_repair")
+
+        return {
+            "quality_flags": sorted(set(flags)),
+            "diagnostic_seed": diagnostic_seed,
+            "needs_ai_repair": needs_ai_repair,
+            "source_type": "diagnostic_seed" if diagnostic_seed else "ai_extracted",
+        }
+
+    @staticmethod
+    def _timeline_asset_quality_metadata(raw_event: Dict[str, Any], mismatch_keys: set[str]) -> Dict[str, Any]:
+        evidence = raw_event.get("evidence") if isinstance(raw_event.get("evidence"), list) else []
+        chapter_reference = raw_event.get("chapter_reference")
+        title = str(raw_event.get("title") or "")
+        description = str(raw_event.get("description") or "")
+        flags: List[str] = []
+        needs_ai_repair = False
+
+        if not evidence and not chapter_reference:
+            flags.append("missing_evidence")
+            needs_ai_repair = True
+        mismatch_key = f"{title}\n{description[:120]}"
+        if mismatch_key in mismatch_keys:
+            flags.append("timeline_title_description_mismatch")
+            needs_ai_repair = True
+        if needs_ai_repair:
+            flags.append("needs_ai_repair")
+
+        return {
+            "quality_flags": sorted(set(flags)),
+            "diagnostic_seed": False,
+            "needs_ai_repair": needs_ai_repair,
+            "source_type": "ai_extracted",
         }
 
     async def _update_import_conversation_title(
@@ -2475,6 +2602,12 @@ class AITaskScheduler:
                 
                 # 构建用于快速展示的简介
                 summary = raw_data.get('personality', '') or raw_data.get('description', '')
+                quality_metadata = self._character_asset_quality_metadata(raw_data if isinstance(raw_data, dict) else {})
+                quality_tags = (
+                    ["extracted", f"project-{session_id}", f"import-run-{import_run_id}"]
+                    + (["high-quality"] if not quality_metadata["needs_ai_repair"] else [])
+                    + quality_metadata["quality_flags"]
+                )
                 
                 char_item = ContentItem(
                     metadata=ContentMetadata(
@@ -2483,7 +2616,7 @@ class AITaskScheduler:
                         type="character",
                         session_id=session_id,
                         parent_id=parent_id,
-                        tags=["extracted", "high-quality", f"project-{session_id}", f"import-run-{import_run_id}"]
+                        tags=sorted(set(quality_tags))
                     ),
                     content=summary,
                     extracted_data={
@@ -2494,6 +2627,13 @@ class AITaskScheduler:
                         "raw_upload_sha256": raw_upload_sha256,
                     } # 这里的 raw_data 包含您要的所有高质量字段（台词、背景、因果等）
                 )
+                if isinstance(char_item.extracted_data, dict):
+                    char_item.extracted_data.update({
+                        "source_type": quality_metadata["source_type"],
+                        "quality_flags": quality_metadata["quality_flags"],
+                        "needs_ai_repair": quality_metadata["needs_ai_repair"],
+                        "diagnostic_seed": quality_metadata["diagnostic_seed"],
+                    })
                 await self.content_manager.create_content(char_item)
                 characters_count += 1
             except Exception as e:
@@ -2554,6 +2694,11 @@ class AITaskScheduler:
                 if not isinstance(rel_type, str) or not rel_type.strip():
                     rel_type = "other"
                 rel_id = f"rel_{session_id}_{uuid.uuid4().hex[:8]}"
+                rel_quality_metadata = self._relationship_asset_quality_metadata(raw_rel)
+                rel_tags = (
+                    ["extracted", "interaction", f"project-{session_id}", f"import-run-{import_run_id}"]
+                    + rel_quality_metadata["quality_flags"]
+                )
                 
                 rel_item = ContentItem(
                     metadata=ContentMetadata(
@@ -2562,7 +2707,7 @@ class AITaskScheduler:
                         type="relationship",
                         session_id=session_id,
                         parent_id=parent_id,
-                        tags=["extracted", "interaction", f"project-{session_id}", f"import-run-{import_run_id}"]
+                        tags=sorted(set(rel_tags))
                     ),
                     content=raw_rel.get('description', ''),
                     extracted_data={
@@ -2571,6 +2716,10 @@ class AITaskScheduler:
                         "source_file": source_file_name,
                         "source_fingerprint": source_fingerprint,
                         "raw_upload_sha256": raw_upload_sha256,
+                        "source_type": rel_quality_metadata["source_type"],
+                        "quality_flags": rel_quality_metadata["quality_flags"],
+                        "needs_ai_repair": rel_quality_metadata["needs_ai_repair"],
+                        "diagnostic_seed": rel_quality_metadata["diagnostic_seed"],
                     },
                     # 记录关联实体，以便世界树精准绘图
                     relations={"source": [rel_source], "target": [rel_target]}
@@ -2583,6 +2732,11 @@ class AITaskScheduler:
         # 保存时间线事件
         timeline_events = extracted.get("timeline_events", [])
         timeline_count = 0
+        timeline_mismatch_keys = {
+            f"{item.get('title') or ''}\n{str(item.get('description_preview') or '')[:120]}"
+            for item in timeline_mismatch_events
+            if isinstance(item, dict)
+        }
         for i, event in enumerate(timeline_events):
             try:
                 raw_event = event.model_dump() if hasattr(event, 'model_dump') else event
@@ -2592,6 +2746,11 @@ class AITaskScheduler:
                 relative_time = raw_event.get("relative_time") or ""
                 characters = raw_event.get("characters") if isinstance(raw_event.get("characters"), list) else []
                 locations = raw_event.get("locations") if isinstance(raw_event.get("locations"), list) else []
+                event_quality_metadata = self._timeline_asset_quality_metadata(raw_event, timeline_mismatch_keys)
+                event_tags = (
+                    ["extracted", f"project-{session_id}", f"import-run-{import_run_id}"]
+                    + event_quality_metadata["quality_flags"]
+                )
 
                 event_id = f"timeline_{session_id}_{uuid.uuid4().hex[:10]}"
                 event_content = f"""
@@ -2610,7 +2769,7 @@ class AITaskScheduler:
                         type="timeline",
                         session_id=session_id,
                         parent_id=parent_id,
-                        tags=["extracted", f"project-{session_id}", f"import-run-{import_run_id}"]
+                        tags=sorted(set(event_tags))
                     ),
                     content=event_content,
                     extracted_data={
@@ -2619,6 +2778,10 @@ class AITaskScheduler:
                         "source_file": source_file_name,
                         "source_fingerprint": source_fingerprint,
                         "raw_upload_sha256": raw_upload_sha256,
+                        "source_type": event_quality_metadata["source_type"],
+                        "quality_flags": event_quality_metadata["quality_flags"],
+                        "needs_ai_repair": event_quality_metadata["needs_ai_repair"],
+                        "diagnostic_seed": event_quality_metadata["diagnostic_seed"],
                     },
                     relations={
                         "characters": characters,

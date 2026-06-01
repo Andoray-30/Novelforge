@@ -271,6 +271,31 @@ AI 负责理解性：性格、关系、冲突、情绪、事件意义、世界�
 - 前端 trace 已能拿到 `model_route`，但仍需要后续把 writer 路由摘要做成更清晰的用户可见信息。
 - writer 健康事件已进入统一模型健康汇总，后续 Extract/Settings 页面还需要按角色更明确地区分 extractor 与 writer。
 
+## 2026-06-01 进展：fallback 资产边界硬化 v1
+
+本轮已完成第一版 fallback / 低置信资产边界硬化：
+
+- 导入保存角色资产时会写入：
+  - `source_type`
+  - `quality_flags`
+  - `needs_ai_repair`
+  - `diagnostic_seed`
+- 由关系端点回补出来的最小角色会标记为：
+  - `source_type=diagnostic_seed`
+  - `diagnostic_seed=true`
+  - `needs_ai_repair=true`
+  - `quality_flags` 包含 `diagnostic_seed`、`relationship_endpoint_backfill`、`minimal_profile`、`needs_ai_repair`
+- 低信息角色不再默认带 `high-quality` tag，避免 UI 或 agent 把诊断种子当作高质量角色档案。
+- 关系资产会按 evidence 和端点状态标记 `missing_evidence / unresolved_endpoint / needs_ai_repair`。
+- 时间线资产会按 evidence 和标题/描述错配诊断标记 `missing_evidence / timeline_title_description_mismatch / needs_ai_repair`。
+- 章节级导入质量门槛会把全为 diagnostic seed 或过半角色需要 AI repair 的结果判为 `low_quality`，不会误报 `completed`。
+
+当前边界：
+
+- 本轮只硬化导入保存与章节级质量门槛；前端还需要把这些 flags 做成更直观的低置信/需修复展示。
+- 角色 repair 的自动重跑策略还未实现；当前只是阻止低质量资产伪装为完成态。
+- 世界观资产仍需要后续补更细的 evidence/repair 标记。
+
 ## 安全记录
 
 本文档不记录任何真实 API Key、session secret、管理员密码或样本文本正文。网关地址、Key、模型池应只存在于本地 `.env` 或部署环境变量中，不写入仓库。

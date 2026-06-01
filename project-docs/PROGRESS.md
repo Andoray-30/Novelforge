@@ -11,6 +11,34 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-06-01 fallback 资产边界硬化 v1
+### 本轮完成
+- 导入保存角色、关系、时间线资产时新增质量边界字段：
+  - `source_type`
+  - `quality_flags`
+  - `needs_ai_repair`
+  - `diagnostic_seed`
+- 关系端点回补出来的最小角色会标记为诊断种子，不再带 `high-quality` tag。
+- 低信息/低置信/最小档案角色会标记 `needs_ai_repair`，供后续前端和 repair 队列识别。
+- 缺 evidence 的关系资产会标记 `missing_evidence / needs_ai_repair`；端点未知时标记 `diagnostic_seed / unresolved_endpoint`。
+- 缺 evidence 或标题/描述错配的时间线资产会标记 `needs_ai_repair`。
+- 章节级导入质量门槛新增诊断：
+  - `diagnostic_seed_characters`
+  - `needs_ai_repair_characters`
+  - `candidate_counts.diagnostic_seed_characters`
+  - `candidate_counts.needs_ai_repair_characters`
+- 如果角色资产全部来自诊断种子，或过半角色需要 AI repair，导入状态会进入 `low_quality`，不能误报 `completed`。
+
+### 验证
+- `pytest novelforge-core/tests/services/test_ai_scheduler_import.py -q -p no:cacheprovider`：34 passed。
+- `pytest novelforge-core/tests -q -p no:cacheprovider`：138 passed。
+- `python -m compileall novelforge-core/novelforge/services/ai_scheduler.py`：passed。
+
+### 后续注意
+- 前端还需要把 `diagnostic_seed / needs_ai_repair / quality_flags` 明确展示给用户，而不是只藏在 extracted_data。
+- 世界观资产的 evidence/repair 标记还需要单独补强。
+- 下一步应继续做“可修复资产可见化”：在 Extract/Characters/World/TaskCenter 中展示低置信和需 repair 的资产，并提供局部 repair 入口。
+
 ## 2026-06-01 写作侧模型路由与健康记录 v1
 ### 本轮完成
 - 聊天写作链路接入 `ModelRouter`：
