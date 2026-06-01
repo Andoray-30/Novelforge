@@ -535,3 +535,14 @@ NovelForge 的目标不是找一个“永远可用的模型名”，而是建立
 - `chapter_index_rerun` 已默认走 `extractor_repair` 角色，而不是继续使用首轮 `extractor_fast`。
 - `chapter_index_run_*` 会保存 `model_role`，API 查询也会返回该字段，便于后续区分首轮广覆盖与失败章节修复。
 - 当前仍是任务类型级切换；后续还需要按错误类型进一步决策。
+
+#### 2026-06-01 进展：按错误类型修复策略 v1
+
+- `chapter_index_rerun` 已根据上一轮 `chapter_index_status / failed_chapters / analysis_diagnostics` 的 `error_type` 生成 repair strategy。
+- 当前策略：
+  - `gateway_timeout / timeout / provider_unavailable`：缩短 chunk、并发降到 1、延长 timeout。
+  - `rate_limited`：并发降到 1，并记录冷却/降并发动作。
+  - `json_invalid`：提高 max_tokens，进入 JSON repair 偏好。
+  - `empty_content`：记录切换模型动作。
+- repair strategy 会写入 `analysis_diagnostics`、`model_route` 和 `chapter_index_run_*`，后续 UI 与模型健康报告可以追溯本轮为什么这样重跑。
+- 当前仍是 run 级策略，尚未把不同错误类型的章节拆成多批不同策略执行。

@@ -587,8 +587,9 @@ def test_chapter_index_rerun_uses_repair_model_role():
     captured = {}
 
     class RecorderExtractionService:
-        async def extract_chapter_index_assets(self, chapters, diagnostics_recorder=None, model_role=None):
+        async def extract_chapter_index_assets(self, chapters, diagnostics_recorder=None, model_role=None, repair_strategy=None):
             captured["model_role"] = model_role
+            captured["repair_strategy"] = repair_strategy
             return {
                 "characters": [],
                 "relationships": [],
@@ -622,7 +623,13 @@ def test_chapter_index_rerun_uses_repair_model_role():
         type="chapter_index_rerun",
         status=TaskStatus.RUNNING,
         priority=TaskPriority.HIGH,
-        parameters={"session_id": "session-repair", "parent_id": "novel-repair"},
+        parameters={
+            "session_id": "session-repair",
+            "parent_id": "novel-repair",
+            "chapter_index_status": [
+                {"chapter_id": "chapter-1", "status": "failed", "needs_retry": True, "error_type": "gateway_timeout"}
+            ],
+        },
         created_at=datetime.now(),
     )
 
@@ -633,8 +640,52 @@ def test_chapter_index_rerun_uses_repair_model_role():
     ))
 
     assert captured["model_role"] == "extractor_repair"
+    assert captured["repair_strategy"]["error_types"] == ["gateway_timeout"]
+    assert captured["repair_strategy"]["actions"] == ["shrink_chunk_and_extend_timeout"]
+    assert captured["repair_strategy"]["runtime_settings_overrides"]["concurrency"] == 1
+    assert captured["repair_strategy"]["runtime_settings_overrides"]["chunk_size"] == 1200
     assert storage.saved["chapter_index_run_repair-role"]["model_role"] == "extractor_repair"
+    assert storage.saved["chapter_index_run_repair-role"]["repair_strategy"]["actions"] == ["shrink_chunk_and_extend_timeout"]
     assert result["model_route"]["role"] == "extractor_repair"
+    assert result["analysis_diagnostics"]["repair_strategy"]["error_types"] == ["gateway_timeout"]
+
+
+def test_chapter_index_repair_strategy_combines_error_type_actions():
+    class RepairConfig(DummyConfig):
+        def get_model_role_settings(self, role):
+            if role == "extractor_repair":
+                return {"timeout": 240.0, "concurrency": 3, "chunk_size": 2200, "max_tokens": 2600}
+            return {}
+
+    scheduler = AITaskScheduler(DummyAIService(), MemoryStorageManager(), RepairConfig())
+    task = Task(
+        id="repair-strategy",
+        type="chapter_index_rerun",
+        status=TaskStatus.RUNNING,
+        priority=TaskPriority.HIGH,
+        parameters={
+            "chapter_index_status": [
+                {"chapter_id": "a", "status": "failed", "error_type": "json_invalid"},
+                {"chapter_id": "b", "status": "failed", "error_type": "rate_limited"},
+            ],
+            "analysis_diagnostics": {
+                "failed_chapters": [{"chapter_id": "c", "error_type": "empty_content"}],
+            },
+        },
+        created_at=datetime.now(),
+    )
+
+    strategy = scheduler._chapter_index_repair_strategy_for_task(task, "extractor_repair")
+
+    assert strategy["error_types"] == ["empty_content", "json_invalid", "rate_limited"]
+    assert strategy["actions"] == [
+        "cooldown_and_lower_concurrency",
+        "prefer_json_repair",
+        "switch_model_after_empty_content",
+    ]
+    assert strategy["runtime_settings_overrides"]["concurrency"] == 1
+    assert strategy["runtime_settings_overrides"]["max_tokens"] == 4000
+    assert strategy["runtime_settings_overrides"]["timeout"] == 300.0
 
 
 def test_import_expands_overlong_chapters_on_sentence_boundaries():

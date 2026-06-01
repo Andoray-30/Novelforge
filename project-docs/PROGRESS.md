@@ -5787,3 +5787,23 @@
   - 前端 `npx tsc --noEmit --incremental false`：通过。
 - 当前边界：
   - 这还不是按错误类型的完整决策器；下一步应区分 `empty_content / json_invalid / gateway_timeout / rate_limited`，分别选择切模型、JSON repair、缩短 chunk 或冷却限流。
+
+## 2026-06-01 失败章节按错误类型修复策略 v1
+
+- 按模型编排规划继续推进，完成 `chapter_index_rerun` 的错误类型修复策略第一版。
+- `AITaskScheduler` 新增章节索引错误类型收集与 repair strategy：
+  - `gateway_timeout / timeout / provider_unavailable`：缩短 chunk、并发降到 1、延长 timeout。
+  - `rate_limited`：并发降到 1，并记录 cooldown / 降并发动作。
+  - `json_invalid`：进入 JSON repair 偏好，提高 `max_tokens` 并延长 timeout。
+  - `empty_content`：记录切换模型动作，避免把空响应模型继续当作正常候选。
+- `ExtractionService.extract_chapter_index_assets(...)` 支持 `repair_strategy`：
+  - 将 `runtime_settings_overrides` 合并到当前角色配置。
+  - 写入 `model_route.repair_strategy` 与 `analysis_diagnostics.repair_strategy`。
+- `chapter_index_run_*` 状态和 API 现在会保留 `repair_strategy`，前端类型同步增加该字段。
+- 测试：
+  - `PYTHONPATH=<temp clone>/novelforge-core py -m pytest novelforge-core/tests/services/test_model_router.py novelforge-core/tests/services/test_chapter_index_extractor.py novelforge-core/tests/services/test_ai_scheduler_import.py novelforge-core/tests/api/test_chapter_index_runs_api.py -q`：53 passed。
+  - `py -m compileall` 覆盖相关后端文件：通过。
+  - 前端 `npx tsc --noEmit --incremental false`：通过。
+- 当前边界：
+  - 策略已经能影响 repair 运行参数，但还没有做到同一次 repair 内按单章错误类型拆分多批执行。
+  - 下一步应继续硬化 fallback 质量边界，确保规则种子不会让导入状态误报 completed / ready。

@@ -136,14 +136,25 @@ async def test_extraction_service_records_model_route(monkeypatch):
     )
 
     extraction_service = ExtractionService(service, ServiceConfig())
-    result = await extraction_service.extract_chapter_index_assets([{"id": "c1", "title": "第一章", "content": "正文"}])
+    result = await extraction_service.extract_chapter_index_assets(
+        [{"id": "c1", "title": "第一章", "content": "正文"}],
+        repair_strategy={
+            "model_role": "extractor_fast",
+            "error_types": ["gateway_timeout"],
+            "actions": ["shrink_chunk_and_extend_timeout"],
+            "runtime_settings_overrides": {"chunk_size": 1200, "concurrency": 1},
+        },
+    )
 
     assert result["model_route"]["selected_model"] == "route-model"
     assert result["model_route"]["runtime_settings"]["timeout"] == 77.0
+    assert result["model_route"]["runtime_settings"]["chunk_size"] == 1200
+    assert result["model_route"]["runtime_settings"]["concurrency"] == 1
+    assert result["analysis_diagnostics"]["repair_strategy"]["actions"] == ["shrink_chunk_and_extend_timeout"]
     assert result["analysis_diagnostics"]["model_route"]["selected_model"] == "route-model"
     assert observed == {
         "timeout": 77.0,
-        "chunk_size": 1600,
-        "chapter_concurrency": 2,
+        "chunk_size": 1200,
+        "chapter_concurrency": 1,
         "max_tokens": 2100,
     }

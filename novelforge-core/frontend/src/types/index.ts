@@ -481,6 +481,7 @@ export interface ChapterIndexRun {
   task_id?: string;
   task_type?: string;
   model_role?: string;
+  repair_strategy?: Record<string, unknown> | null;
   session_id?: string;
   parent_id?: string | null;
   total_chapters?: number;

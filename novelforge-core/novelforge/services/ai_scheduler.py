@@ -430,6 +430,74 @@ class AITaskScheduler:
             return "extractor_repair"
         return "extractor_fast"
 
+    @staticmethod
+    def _collect_chapter_index_error_types(parameters: Dict[str, Any]) -> set[str]:
+        error_types: set[str] = set()
+
+        def visit(value: Any) -> None:
+            if isinstance(value, dict):
+                raw_error_type = value.get("error_type")
+                if isinstance(raw_error_type, str) and raw_error_type.strip():
+                    error_types.add(raw_error_type.strip())
+                for key in ("failed_chapters", "chapter_index_status", "chapter_index_attempts", "analysis_diagnostics"):
+                    if key in value:
+                        visit(value.get(key))
+            elif isinstance(value, list):
+                for item in value:
+                    visit(item)
+
+        visit(parameters)
+        return error_types
+
+    def _chapter_index_repair_strategy_for_task(self, task: Task, model_role: str) -> Optional[Dict[str, Any]]:
+        if task.type != "chapter_index_rerun":
+            return None
+
+        error_types = self._collect_chapter_index_error_types(task.parameters if isinstance(task.parameters, dict) else {})
+        base_settings: Dict[str, Any] = {}
+        getter = getattr(self.config, "get_model_role_settings", None)
+        if callable(getter):
+            base_settings = getter(model_role)
+
+        def base_number(key: str, default: float) -> float:
+            value = base_settings.get(key, default)
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+
+        runtime_overrides: Dict[str, Any] = {}
+        actions: List[str] = []
+
+        if error_types & {"gateway_timeout", "timeout", "provider_unavailable"}:
+            actions.append("shrink_chunk_and_extend_timeout")
+            runtime_overrides["chunk_size"] = int(min(base_number("chunk_size", 2000), 1200))
+            runtime_overrides["concurrency"] = 1
+            runtime_overrides["timeout"] = max(base_number("timeout", 300.0), 420.0)
+
+        if "rate_limited" in error_types:
+            actions.append("cooldown_and_lower_concurrency")
+            runtime_overrides["concurrency"] = 1
+            runtime_overrides["timeout"] = max(base_number("timeout", 300.0), 300.0)
+
+        if "json_invalid" in error_types:
+            actions.append("prefer_json_repair")
+            runtime_overrides["max_tokens"] = int(max(base_number("max_tokens", 3000), 4000))
+            runtime_overrides["timeout"] = max(base_number("timeout", 300.0), 300.0)
+
+        if "empty_content" in error_types:
+            actions.append("switch_model_after_empty_content")
+
+        if not actions:
+            actions.append("repair_role_rerun")
+
+        return {
+            "model_role": model_role,
+            "error_types": sorted(error_types),
+            "actions": actions,
+            "runtime_settings_overrides": runtime_overrides,
+        }
+
     async def _extract_chapter_index_assets_with_persisted_diagnostics(
         self,
         extraction_service: Any,
@@ -439,10 +507,12 @@ class AITaskScheduler:
         run_key = self._chapter_index_run_key(task.id)
         now = datetime.now().isoformat()
         model_role = self._chapter_index_model_role_for_task(task)
+        repair_strategy = self._chapter_index_repair_strategy_for_task(task, model_role)
         run_state: Dict[str, Any] = {
             "task_id": task.id,
             "task_type": task.type,
             "model_role": model_role,
+            "repair_strategy": repair_strategy,
             "session_id": task.parameters.get("session_id"),
             "parent_id": task.parameters.get("parent_id") or task.parameters.get("novel_id"),
             "total_chapters": len(chapters),
@@ -507,6 +577,8 @@ class AITaskScheduler:
                 kwargs["diagnostics_recorder"] = diagnostics_recorder
             if accepts_kwargs or "model_role" in parameters:
                 kwargs["model_role"] = model_role
+            if accepts_kwargs or "repair_strategy" in parameters:
+                kwargs["repair_strategy"] = repair_strategy
         except (TypeError, ValueError):
             kwargs = {"diagnostics_recorder": diagnostics_recorder}
 
@@ -530,6 +602,8 @@ class AITaskScheduler:
                 run_state["model_route"] = model_route
                 run_state["updated_at"] = datetime.now().isoformat()
                 await self.storage.save(run_key, run_state)
+            if repair_strategy:
+                diagnostics["repair_strategy"] = repair_strategy
             diagnostics["chapter_index_run_key"] = run_key
             diagnostics["chapter_index_attempts"] = (
                 persisted_state.get("chapter_index_attempts")

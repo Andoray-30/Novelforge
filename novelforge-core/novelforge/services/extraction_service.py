@@ -74,15 +74,22 @@ class ExtractionService:
             ai_service=ai_service,
         )
 
-    def _model_role_settings(self, role: str) -> Dict[str, Any]:
+    def _model_role_settings(self, role: str, overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         getter = getattr(self.config, "get_model_role_settings", None)
         if callable(getter):
-            return getter(role)
-        return dict(getattr(self.config, "model_role_settings", {}).get(role, {}))
+            settings = getter(role)
+        else:
+            settings = dict(getattr(self.config, "model_role_settings", {}).get(role, {}))
+        settings = dict(settings or {})
+        if overrides:
+            for key in ("timeout", "concurrency", "chunk_size", "max_tokens"):
+                if key in overrides and overrides[key] is not None:
+                    settings[key] = overrides[key]
+        return settings
 
-    def _chapter_index_config_for_role(self, role: str) -> ExtractionConfig:
+    def _chapter_index_config_for_role(self, role: str, runtime_settings: Optional[Dict[str, Any]] = None) -> ExtractionConfig:
         base_config = self.chapter_index_extractor.config
-        settings = self._model_role_settings(role)
+        settings = self._model_role_settings(role, runtime_settings)
         return ExtractionConfig(
             timeout=float(settings.get("timeout", base_config.timeout)),
             max_retries=base_config.max_retries,
@@ -97,10 +104,11 @@ class ExtractionService:
         ai_service: AIService,
         diagnostics_recorder: Optional[Any],
         role: str,
+        runtime_settings: Optional[Dict[str, Any]] = None,
     ) -> ChapterIndexExtractor:
-        settings = self._model_role_settings(role)
+        settings = self._model_role_settings(role, runtime_settings)
         return ChapterIndexExtractor(
-            config=self._chapter_index_config_for_role(role),
+            config=self._chapter_index_config_for_role(role, settings),
             ai_service=ai_service,
             diagnostics_recorder=diagnostics_recorder,
             chapter_concurrency=int(settings["concurrency"]) if "concurrency" in settings else None,
@@ -127,19 +135,28 @@ class ExtractionService:
         chapters: List[Dict[str, Any]],
         diagnostics_recorder: Optional[Any] = None,
         model_role: str = "extractor_fast",
+        repair_strategy: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         role = model_role or "extractor_fast"
+        runtime_settings = (
+            repair_strategy.get("runtime_settings_overrides")
+            if isinstance(repair_strategy, dict) and isinstance(repair_strategy.get("runtime_settings_overrides"), dict)
+            else None
+        )
         extractor = self._build_chapter_index_extractor(
             ai_service=self.ai_service,
             diagnostics_recorder=diagnostics_recorder,
             role=role,
+            runtime_settings=runtime_settings,
         )
         model_route = None
         if getattr(self.config, "enable_model_router", True):
             decision = await self.model_router.select_model(role)
             role = decision.role or role
             model_route = decision.to_dict()
-            model_route["runtime_settings"] = self._model_role_settings(role)
+            model_route["runtime_settings"] = self._model_role_settings(role, runtime_settings)
+            if repair_strategy:
+                model_route["repair_strategy"] = repair_strategy
             with_overrides = getattr(self.ai_service, "with_overrides", None)
             if decision.selected_model and callable(with_overrides):
                 routed_service = with_overrides(
@@ -150,11 +167,14 @@ class ExtractionService:
                     ai_service=routed_service,
                     diagnostics_recorder=diagnostics_recorder,
                     role=role,
+                    runtime_settings=runtime_settings,
                 )
         result = await extractor.extract_and_merge(chapters)
         diagnostics = result.diagnostics.model_dump()
         if model_route:
             diagnostics["model_route"] = model_route
+        if repair_strategy:
+            diagnostics["repair_strategy"] = repair_strategy
         return {
             "characters": result.characters,
             "world_setting": result.world_setting,

@@ -462,6 +462,7 @@ def _serialize_chapter_index_run_state(
         "task_id": state.get("task_id"),
         "task_type": state.get("task_type"),
         "model_role": state.get("model_role"),
+        "repair_strategy": state.get("repair_strategy") if isinstance(state.get("repair_strategy"), dict) else None,
         "session_id": state.get("session_id"),
         "parent_id": state.get("parent_id"),
         "total_chapters": state.get("total_chapters"),
