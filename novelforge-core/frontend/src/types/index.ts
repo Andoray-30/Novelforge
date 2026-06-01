@@ -445,6 +445,9 @@ export interface ImportAnalysisDiagnostics {
   weak_relationships?: Array<Record<string, unknown>>;
   suspected_mojibake_assets?: Array<Record<string, unknown>>;
   weak_world_facts?: Array<Record<string, unknown>>;
+  diagnostic_seed_assets?: Array<Record<string, unknown>>;
+  fallback_quality_boundary?: Record<string, unknown>;
+  recovered_from_assets?: boolean;
   model_route?: ModelRouteDecision;
 }
 
@@ -474,6 +477,7 @@ export interface NovelImportTaskResult {
   relationship_low_confidence_resolved_endpoints?: Array<Record<string, unknown>>;
   timeline_mismatch_events?: Array<Record<string, unknown>>;
   model_route?: ModelRouteDecision;
+  recovered_from_assets?: boolean;
 }
 
 export interface ChapterIndexRun {

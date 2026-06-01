@@ -2573,10 +2573,29 @@ class AITaskScheduler:
         if counts["novel"] <= 0 or counts["chapter"] <= 0:
             return task
 
+        recovered_counts = {
+            "recovered_novels": counts["novel"],
+            "recovered_chapters": counts["chapter"],
+            "recovered_characters": counts["character"],
+            "recovered_relationships": counts["relationship"],
+            "recovered_timeline_events": counts["timeline"],
+            "recovered_world_assets": counts["world"],
+        }
+        recovery_quality_issue = "任务状态由内容库资产恢复，未证明本轮 AI 深度分析完整完成"
+        analysis_diagnostics = {
+            "recovered_from_assets": True,
+            "candidate_counts": recovered_counts,
+            "fallback_quality_boundary": {
+                "source": "content_library_recovery",
+                "ready_state_allowed": False,
+                "reason": recovery_quality_issue,
+            },
+        }
+
         task.status = TaskStatus.COMPLETED
         task.progress = 1.0
         task.completed_at = task.completed_at or datetime.now()
-        task.message = "导入任务已完成，已根据内容库资产恢复任务状态。"
+        task.message = "导入任务已从当前项目资产库恢复；质量状态保持低质量，需重新提取或复核。"
         task.result = {
             "session_id": session_id,
             "parent_id": novel_id,
@@ -2585,7 +2604,11 @@ class AITaskScheduler:
             "relationships_count": counts["relationship"],
             "timeline_count": counts["timeline"],
             "world_count": counts["world"],
-            "analysis_status": "completed" if counts["character"] and counts["relationship"] else "partial",
+            "analysis_status": "low_quality",
+            "analysis_warning": recovery_quality_issue,
+            "analysis_quality_issues": [recovery_quality_issue],
+            "analysis_diagnostics": analysis_diagnostics,
+            "candidate_counts": recovered_counts,
             "analysis_stage_results": {
                 "chapter_index": "completed" if counts["chapter"] else "failed",
                 "characters": "completed" if counts["character"] else "failed",
@@ -2757,7 +2780,19 @@ class AITaskScheduler:
             )
             task = await self._recover_completed_import_task_from_assets(task)
             if isinstance(task.result, dict) and task.result.get("recovered_from_assets"):
-                task.message = "已从当前项目资产库恢复导入状态。"
+                recovery_quality_issue = "任务状态由内容库资产恢复，未证明本轮 AI 深度分析完整完成"
+                task.message = "已从当前项目资产库恢复导入状态；质量状态保持低质量，需重新提取或复核。"
+                task.result["analysis_status"] = "low_quality"
+                task.result.setdefault("analysis_warning", recovery_quality_issue)
+                task.result.setdefault("analysis_quality_issues", [recovery_quality_issue])
+                diagnostics = task.result.setdefault("analysis_diagnostics", {})
+                if isinstance(diagnostics, dict):
+                    diagnostics["recovered_from_assets"] = True
+                    diagnostics.setdefault("fallback_quality_boundary", {
+                        "source": "content_library_recovery",
+                        "ready_state_allowed": False,
+                        "reason": recovery_quality_issue,
+                    })
                 task.result.setdefault("analysis_stage_results", {
                     "chapter_index": "completed" if task.result.get("chapters_count") else "failed",
                     "characters": "completed" if task.result.get("characters_count") else "failed",

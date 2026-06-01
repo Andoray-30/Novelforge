@@ -136,6 +136,16 @@ def test_active_task_recovery_hides_stale_completed_import():
         ),
         content="character",
     )))
+    asyncio.run(content_manager.create_content(ContentItem(
+        metadata=ContentMetadata(
+            id="rel-imported",
+            title="Imported relationship",
+            type=ContentType.RELATIONSHIP,
+            parent_id="novel-imported",
+            session_id=session_id,
+        ),
+        content="relationship",
+    )))
 
     scheduler = build_scheduler(content_manager=content_manager, storage_manager=storage)
 
@@ -147,6 +157,11 @@ def test_active_task_recovery_hides_stale_completed_import():
     assert recovered["progress"] == 1.0
     assert recovered["result"]["chapters_count"] == 1
     assert recovered["result"]["characters_count"] == 1
+    assert recovered["result"]["relationships_count"] == 1
+    assert recovered["result"]["analysis_status"] == "low_quality"
+    assert recovered["result"]["recovered_from_assets"] is True
+    assert "未证明本轮 AI 深度分析完整完成" in recovered["result"]["analysis_quality_issues"][0]
+    assert recovered["result"]["analysis_diagnostics"]["fallback_quality_boundary"]["ready_state_allowed"] is False
 
 
 def test_find_existing_import_by_upload_hash_returns_asset_counts():

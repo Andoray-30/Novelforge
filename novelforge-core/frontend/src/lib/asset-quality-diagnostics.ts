@@ -18,12 +18,6 @@ function asStringArray(value: unknown): string[] {
     : [];
 }
 
-function asRecordArray(value: unknown): Array<Record<string, unknown>> {
-  return Array.isArray(value)
-    ? value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && !Array.isArray(item)))
-    : [];
-}
-
 function normalizeName(value: string): string {
   return value.trim().toLowerCase();
 }
@@ -43,8 +37,24 @@ function decodeBasicEntities(value: string): string {
 export function looksLikeMojibake(value: string): boolean {
   if (!value) return false;
   const text = decodeBasicEntities(value);
-  if (text.includes(String.fromCharCode(0xfffd)) || text.includes('????')) return true;
-  const suspiciousFragments = ['Ã', 'Â', 'ä¸', 'äº', 'è§', 'ç»', 'å°', 'é—', 'è¶', 'æ', 'ç©', '锟', '鐢', '绋', '璧'];
+  if (text.includes(String.fromCharCode(0xfffd)) || text.includes('?'.repeat(4))) return true;
+  const suspiciousFragments = [
+    '脙',
+    '脗',
+    '盲赂',
+    '盲潞',
+    '猫搂',
+    '猫露',
+    '忙聴',
+    '莽漏',
+    '莽禄',
+    '氓掳',
+    '茅鈥',
+    '閿',
+    '閻',
+    '缁',
+    '鐠',
+  ];
   return suspiciousFragments.some((fragment) => text.includes(fragment));
 }
 
@@ -54,6 +64,13 @@ function getTitle(item: ContentItem): string {
 
 function getDescription(item: ContentItem, payload = getContentAssetPayload(item)): string {
   return asString(payload.description) || asString(payload.summary) || asString(payload.content) || item.content || '';
+}
+
+function getQualityFlags(item: ContentItem, payload = getContentAssetPayload(item)): string[] {
+  return [
+    ...asStringArray(payload.quality_flags),
+    ...asStringArray(item.metadata.tags),
+  ].map((flag) => flag.toLowerCase());
 }
 
 function getCharacterNames(items: ContentItem[]): Set<string> {
@@ -85,8 +102,20 @@ function isDecorativeChapter(item: ContentItem): boolean {
   const content = item.content || asString(payload.content);
   if (payload.is_decorative === true) return true;
   if (/插图|illustration|cover|封面/i.test(title)) return true;
-  const symbolCount = (content.match(/[◆◇※＊*=_\-—~]/g) || []).length;
+  const symbolCount = (content.match(/[◆◇●○■□*=_\-—]/g) || []).length;
   return content.trim().length > 0 && content.trim().length < 120 && symbolCount >= Math.max(8, content.trim().length * 0.35);
+}
+
+function isDiagnosticSeedAsset(item: ContentItem): boolean {
+  const payload = getContentAssetPayload(item);
+  const sourceType = asString(payload.source_type).toLowerCase();
+  const flags = getQualityFlags(item, payload);
+  return sourceType === 'diagnostic_seed'
+    || sourceType === 'fallback'
+    || sourceType === 'rule_fallback'
+    || flags.includes('diagnostic_seed')
+    || flags.includes('needs_ai_repair')
+    || flags.includes('fallback_seed');
 }
 
 function isLowInformationCharacter(item: ContentItem): boolean {
@@ -142,6 +171,19 @@ export function buildAssetQualityDiagnostics(items: ContentItem[]): AssetQuality
     .filter((item) => looksLikeMojibake(item.metadata.title) || looksLikeMojibake(getTitle(item)))
     .map((item) => ({ id: item.metadata.id, title: getTitle(item), type: item.metadata.type }));
 
+  const diagnosticSeedAssets = items
+    .filter(isDiagnosticSeedAsset)
+    .map((item) => {
+      const payload = getContentAssetPayload(item);
+      return {
+        id: item.metadata.id,
+        title: getTitle(item),
+        type: item.metadata.type,
+        source_type: asString(payload.source_type),
+        quality_flags: getQualityFlags(item, payload),
+      };
+    });
+
   const decorativeChapters = chapters
     .filter(isDecorativeChapter)
     .map((item) => ({ id: item.metadata.id, title: getTitle(item), reason: '疑似插图、封面或符号分隔章节' }));
@@ -189,7 +231,15 @@ export function buildAssetQualityDiagnostics(items: ContentItem[]): AssetQuality
     weak_relationships: weakRelationships,
     timeline_mismatch_events: timelineMismatchEvents,
     weak_world_facts: weakWorldFacts,
+    diagnostic_seed_assets: diagnosticSeedAssets,
   };
+
+  if (diagnosticSeedAssets.length > 0) {
+    diagnostics.fallback_quality_boundary = {
+      ready_state_allowed: false,
+      reason: '检测到规则 fallback 或诊断种子资产，不能作为已完成的 AI 理解结果。',
+    };
+  }
 
   const candidateCounts = {
     recovered_assets_total: items.length,
@@ -199,6 +249,7 @@ export function buildAssetQualityDiagnostics(items: ContentItem[]): AssetQuality
     recovered_timeline_events: timelines.length,
     recovered_world_assets: worlds.length,
     suspected_mojibake_assets: suspectedMojibakeAssets.length,
+    diagnostic_seed_assets: diagnosticSeedAssets.length,
     decorative_chapters: decorativeChapters.length,
     low_information_characters: lowConfidenceCharacters.length,
     unresolved_relationship_edges: unresolvedRelationshipEdges.length,
@@ -209,6 +260,7 @@ export function buildAssetQualityDiagnostics(items: ContentItem[]): AssetQuality
 
   const issues: string[] = [];
   if (suspectedMojibakeAssets.length) issues.push(`发现 ${suspectedMojibakeAssets.length} 个疑似乱码资产标题`);
+  if (diagnosticSeedAssets.length) issues.push(`发现 ${diagnosticSeedAssets.length} 个规则 fallback 或诊断种子资产，需要 AI 修复`);
   if (decorativeChapters.length) issues.push(`发现 ${decorativeChapters.length} 个疑似装饰章节`);
   if (lowConfidenceCharacters.length) issues.push(`发现 ${lowConfidenceCharacters.length} 个低信息角色`);
   if (unresolvedRelationshipEdges.length) issues.push(`发现 ${unresolvedRelationshipEdges.length} 条关系端点未闭合`);
@@ -216,7 +268,7 @@ export function buildAssetQualityDiagnostics(items: ContentItem[]): AssetQuality
   if (timelineMismatchEvents.length) issues.push(`发现 ${timelineMismatchEvents.length} 个时间线事件需要复核`);
   if (weakWorldFacts.length) issues.push(`发现 ${weakWorldFacts.length} 个世界观资产缺少结构化分类`);
 
-  const hasHighRisk = suspectedMojibakeAssets.length > 0 || unresolvedRelationshipEdges.length > 0;
+  const hasHighRisk = suspectedMojibakeAssets.length > 0 || unresolvedRelationshipEdges.length > 0 || diagnosticSeedAssets.length > 0;
   const hasMediumRisk = lowConfidenceCharacters.length > 0 || weakRelationships.length > 0 || timelineMismatchEvents.length > 0 || weakWorldFacts.length > 0;
 
   return {

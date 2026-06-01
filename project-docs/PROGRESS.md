@@ -5807,3 +5807,28 @@
 - 当前边界：
   - 策略已经能影响 repair 运行参数，但还没有做到同一次 repair 内按单章错误类型拆分多批执行。
   - 下一步应继续硬化 fallback 质量边界，确保规则种子不会让导入状态误报 completed / ready。
+
+## 2026-06-01 fallback / 恢复态质量边界硬化 v1
+
+- 继续推进 `EXTRACTION_PROVIDER_STRATEGY.md` 中的 fallback 质量边界收口。
+- 修复 stale import task 恢复逻辑：
+  - 任务生命周期仍可标记为 `completed`，用于从 active task 列表移除已无后台进程的旧导入任务。
+  - 但 AI 分析质量状态固定为 `analysis_status=low_quality`，不再因为内容库里已有角色/关系资产就误报 `completed`。
+  - 恢复结果新增 `analysis_warning`、`analysis_quality_issues`、`analysis_diagnostics.fallback_quality_boundary` 和恢复资产 `candidate_counts`。
+  - 明确诊断原因：任务状态由内容库资产恢复，未证明本轮 AI 深度分析完整完成。
+- 前端恢复态资产诊断增强：
+  - `asset-quality-diagnostics` 能识别 `source_type=diagnostic_seed/fallback/rule_fallback` 以及 `quality_flags=diagnostic_seed/needs_ai_repair/fallback_seed`。
+  - 这些资产会进入 `diagnostic_seed_assets`，并触发 `fallback_quality_boundary.ready_state_allowed=false`。
+  - 修复该诊断模块中用户可见的乱码 reason / issue 文案。
+- 类型同步：
+  - `ImportAnalysisDiagnostics` 增加 `diagnostic_seed_assets / fallback_quality_boundary / recovered_from_assets`。
+  - `NovelImportTaskResult` 增加 `recovered_from_assets`。
+- 验证：
+  - `PYTHONPATH=<temp clone>/novelforge-core py -m pytest novelforge-core/tests/services/test_model_router.py novelforge-core/tests/services/test_chapter_index_extractor.py novelforge-core/tests/services/test_ai_scheduler_import.py novelforge-core/tests/api/test_chapter_index_runs_api.py -q`：53 passed。
+  - `cmd /c npx tsc --noEmit --incremental false`：通过。
+  - `cmd /c npm test -- --run`：31 files / 123 tests passed。
+  - `py -m compileall` 覆盖相关后端文件：通过。
+  - `cmd /c npm run build`：通过。
+- 当前边界：
+  - 本轮没有新增真正的本地 fallback 资产生成器，只是硬化现有恢复态和未来规则种子的质量边界。
+  - 下一步应继续把 `chapter_index_rerun` 从 run 级策略推进到“按错误类型拆批执行”，避免同一次修复里所有失败章节被同一套参数处理。
