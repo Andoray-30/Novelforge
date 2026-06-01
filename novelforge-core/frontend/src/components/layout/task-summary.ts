@@ -2,6 +2,7 @@ import {
   formatNovelImportStageSummary,
   parseNovelImportTaskResult,
 } from '@/lib/task-events'
+import { getModelHealthRankingReasonLabel } from '@/lib/model-route-summary'
 
 export const REPAIR_PREVIEW_TASK_TYPES = new Set(['chapter_index_rerun', 'relationship_backfill', 'timeline_rebuild'])
 
@@ -28,6 +29,7 @@ export interface RepairBatchPreviewDetail {
   actionLabel: string
   errorTypeLabel: string
   modelLabel: string
+  healthRankingLabel?: string
 }
 
 export interface RepairApplyWrittenAsset {
@@ -71,6 +73,24 @@ function asRecordArray(value: unknown): Array<Record<string, unknown>> {
 
 function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim()) : []
+}
+
+function healthRankingLabel(route: Record<string, unknown> | undefined, selectedModel: string): string | undefined {
+  if (!route) return undefined
+  const rankings = asRecordArray(route.health_rankings)
+  const ranking = rankings.find((item) => item.model === selectedModel) || rankings[0]
+  if (!ranking) return undefined
+  const score = numberFromRecord(ranking, 'score')
+  const reason = typeof ranking.reason === 'string' ? getModelHealthRankingReasonLabel(ranking.reason) : null
+  const success = numberFromRecord(ranking, 'successful_attempts') ?? 0
+  const failed = numberFromRecord(ranking, 'failed_attempts') ?? 0
+  const parts = [
+    score !== null ? `健康分 ${score}` : null,
+    reason,
+    `成功 ${success}`,
+    `失败 ${failed}`,
+  ].filter((item): item is string => Boolean(item))
+  return parts.length > 0 ? parts.join(' · ') : undefined
 }
 
 function labelList(values: string[], labels: Record<string, string>, fallback: string): string {
@@ -211,6 +231,7 @@ export function getRepairPreviewBatchDetails(resultValue: unknown): RepairBatchP
       actionLabel: labelList(actions, REPAIR_ACTION_LABELS, '默认修复策略'),
       errorTypeLabel: labelList(errorTypes, ERROR_TYPE_LABELS, '未记录错误类型'),
       modelLabel: selectedModel,
+      healthRankingLabel: healthRankingLabel(route, selectedModel),
     }
   }).filter((item): item is RepairBatchPreviewDetail => item !== null)
 }

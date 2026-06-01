@@ -423,6 +423,9 @@ export interface ModelRouteDecision {
   reason?: string;
   candidates?: string[];
   probe_results?: ModelProbeResult[];
+  original_candidates?: string[];
+  candidate_order_source?: string;
+  health_rankings?: Array<Record<string, unknown>>;
 }
 
 export interface ImportAnalysisDiagnostics {

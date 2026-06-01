@@ -5966,3 +5966,26 @@
 - 当前边界：
   - 这是候选排序 v1，还没有实现真正的多模型并行竞速或按任务阶段动态切换模型。
   - 下一步建议把 route 的 `health_rankings` 展示到 Extract 页/TaskCenter，并开始引入“fast/pro/repair 角色池策略”而不是只对 extractor 路径生效。
+
+## 2026-06-01 前端展示模型健康排序依据 v1
+
+- 继续补齐模型编排可解释性。
+- `model-route-summary.ts` 现在会解析后端 `health_rankings / original_candidates / candidate_order_source`：
+  - 输出健康分。
+  - 输出历史排序原因。
+  - 输出成功/失败 attempt、probe 统计、平均延迟和错误类型。
+  - 顺手把该模块中的用户可见模型路由文案改回可读中文。
+- Extract 页详细诊断新增“历史健康排序”区：
+  - 显示候选顺序是否由历史健康记录调整。
+  - 显示原始候选顺序。
+  - 显示每个候选模型的健康分、成功/失败、平均延迟和错误摘要。
+- 章节索引 run 卡片也会显示路由是否来自健康历史，以及前三个候选的健康分。
+- TaskCenter 的 repair batch 详情会显示该批使用模型的健康排序摘要，例如“健康分 / 历史成功率 / 成功 / 失败”。
+- 验证：
+  - `npm test -- src/lib/model-route-summary.test.ts src/app/extract/model-health-summary.test.ts src/components/layout/TaskCenter.test.ts --run`：3 files / 14 tests passed。
+  - `npx tsc --noEmit --incremental false`：通过。
+  - 前端全量 Vitest：31 files / 128 tests passed。
+  - 前端 build：通过。
+- 当前边界：
+  - 仍然没有做浏览器截图验收。
+  - 下一步应进入“角色池策略”或真实 smoke：用当前 NewAPI 网关跑一次完整导入，观察健康排序是否改善章节 index 成功率。

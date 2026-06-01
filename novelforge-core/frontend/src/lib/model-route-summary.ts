@@ -1,4 +1,4 @@
-import type { ModelRouteDecision, ModelProbeResult, NovelImportTaskResult } from '@/types';
+import type { ModelProbeResult, ModelRouteDecision, NovelImportTaskResult } from '@/types';
 
 export type ModelRouteProbeSummary = {
   model: string;
@@ -12,13 +12,30 @@ export type ModelRouteProbeSummary = {
   extractionRich: boolean;
 };
 
+export type ModelHealthRankingSummary = {
+  model: string;
+  score: number | null;
+  reason: string | null;
+  reasonLabel: string | null;
+  selectedCount: number;
+  successfulAttempts: number;
+  failedAttempts: number;
+  probePassed: number;
+  probeFailed: number;
+  averageLatencyMs: number | null;
+  errorCounts: Array<{ type: string; label: string; count: number }>;
+};
+
 export type ModelRouteSummary = {
   role: string;
   selectedModel: string;
   reason: string;
   reasonLabel: string;
   candidates: string[];
+  originalCandidates: string[];
+  candidateOrderSource: string | null;
   probeResults: ModelRouteProbeSummary[];
+  healthRankings: ModelHealthRankingSummary[];
 };
 
 const ROUTE_REASON_LABELS: Record<string, string> = {
@@ -31,6 +48,7 @@ const ROUTE_REASON_LABELS: Record<string, string> = {
 const ERROR_TYPE_LABELS: Record<string, string> = {
   rate_limited: '请求限流',
   gateway_timeout: '网关超时',
+  timeout: '请求超时',
   auth_failed: '鉴权失败',
   empty_content: '空响应',
   json_invalid: 'JSON 不合规',
@@ -39,16 +57,28 @@ const ERROR_TYPE_LABELS: Record<string, string> = {
   probe_not_suitable: '探测不合格',
 };
 
+const HEALTH_RANKING_REASON_LABELS: Record<string, string> = {
+  positive_history: '历史成功率较高',
+  negative_history: '近期失败较多',
+  neutral_history: '历史表现中性',
+  no_recent_health: '暂无近期健康记录',
+};
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' ? value as Record<string, unknown> : null;
 }
 
 function asString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim().length > 0 ? value : null;
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
 }
 
 function asNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
 }
 
 function asBoolean(value: unknown): boolean {
@@ -61,8 +91,20 @@ function asStringArray(value: unknown): string[] {
     : [];
 }
 
-function normalizeProbe(value: unknown): ModelRouteProbeSummary | null {
+function errorCountsToList(value: unknown): Array<{ type: string; label: string; count: number }> {
   const payload = asRecord(value);
+  if (!payload) return [];
+  return Object.entries(payload)
+    .map(([type, rawCount]) => {
+      const count = asNumber(rawCount);
+      return count !== null && count > 0 ? { type, label: getModelErrorTypeLabel(type), count } : null;
+    })
+    .filter((item): item is { type: string; label: string; count: number } => item !== null)
+    .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
+}
+
+function normalizeProbe(value: unknown): ModelRouteProbeSummary | null {
+  const payload = asRecord(value) as ModelProbeResult | null;
   if (!payload) return null;
   const model = asString(payload.model);
   if (!model) return null;
@@ -79,6 +121,27 @@ function normalizeProbe(value: unknown): ModelRouteProbeSummary | null {
   };
 }
 
+function normalizeHealthRanking(value: unknown): ModelHealthRankingSummary | null {
+  const payload = asRecord(value);
+  if (!payload) return null;
+  const model = asString(payload.model);
+  if (!model) return null;
+  const reason = asString(payload.reason);
+  return {
+    model,
+    score: asNumber(payload.score),
+    reason,
+    reasonLabel: getModelHealthRankingReasonLabel(reason),
+    selectedCount: asNumber(payload.selected_count) ?? 0,
+    successfulAttempts: asNumber(payload.successful_attempts) ?? 0,
+    failedAttempts: asNumber(payload.failed_attempts) ?? 0,
+    probePassed: asNumber(payload.probe_passed) ?? 0,
+    probeFailed: asNumber(payload.probe_failed) ?? 0,
+    averageLatencyMs: asNumber(payload.average_latency_ms),
+    errorCounts: errorCountsToList(payload.error_counts),
+  };
+}
+
 export function normalizeModelRoute(value: unknown): ModelRouteSummary | null {
   const payload = asRecord(value) as ModelRouteDecision | null;
   if (!payload) return null;
@@ -89,8 +152,13 @@ export function normalizeModelRoute(value: unknown): ModelRouteSummary | null {
   const reason = asString(payload.reason) || 'unknown';
   const role = asString(payload.role) || 'unknown';
   const candidates = asStringArray(payload.candidates);
+  const originalCandidates = asStringArray(payload.original_candidates);
+  const candidateOrderSource = asString(payload.candidate_order_source);
   const probeResults = Array.isArray(payload.probe_results)
     ? payload.probe_results.map(normalizeProbe).filter((item): item is ModelRouteProbeSummary => item !== null)
+    : [];
+  const healthRankings = Array.isArray(payload.health_rankings)
+    ? payload.health_rankings.map(normalizeHealthRanking).filter((item): item is ModelHealthRankingSummary => item !== null)
     : [];
 
   return {
@@ -99,7 +167,10 @@ export function normalizeModelRoute(value: unknown): ModelRouteSummary | null {
     reason,
     reasonLabel: ROUTE_REASON_LABELS[reason] || reason,
     candidates,
+    originalCandidates,
+    candidateOrderSource,
     probeResults,
+    healthRankings,
   };
 }
 
@@ -110,6 +181,11 @@ export function getModelRouteSummary(result: NovelImportTaskResult | null | unde
 export function getModelErrorTypeLabel(errorType: string | null | undefined): string {
   if (!errorType) return '未知错误';
   return ERROR_TYPE_LABELS[errorType] || errorType;
+}
+
+export function getModelHealthRankingReasonLabel(reason: string | null | undefined): string | null {
+  if (!reason) return null;
+  return HEALTH_RANKING_REASON_LABELS[reason] || reason;
 }
 
 export function getModelProbeStatusLabel(probe: ModelRouteProbeSummary): string {

@@ -95,7 +95,18 @@ describe('TaskCenter summaries', () => {
         model_route_batches: [
           {
             batch_key: 'repair_batch_1_shrink_chunk_and_extend_timeout',
-            model_route: { selected_model: 'slow-stable-model' },
+            model_route: {
+              selected_model: 'slow-stable-model',
+              health_rankings: [
+                {
+                  model: 'slow-stable-model',
+                  score: 28,
+                  reason: 'positive_history',
+                  successful_attempts: 2,
+                  failed_attempts: 0,
+                },
+              ],
+            },
           },
           {
             batch_key: 'repair_batch_2_prefer_json_repair',
@@ -111,6 +122,7 @@ describe('TaskCenter summaries', () => {
       actionLabel: '缩短分段并延长超时',
       errorTypeLabel: '网关超时',
       modelLabel: 'slow-stable-model',
+      healthRankingLabel: '健康分 28 · 历史成功率较高 · 成功 2 · 失败 0',
     })
     expect(details[1]).toMatchObject({
       chapterCount: 2,

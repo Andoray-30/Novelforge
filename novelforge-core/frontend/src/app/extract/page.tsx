@@ -1371,8 +1371,45 @@ export default function ExtractPage() {
                             <span key={model} className="nf-chip break-all">{model}</span>
                           ))}
                         </div>
+                        {modelRouteSummary.candidateOrderSource === 'health_history' ? (
+                          <p className="mt-2 text-xs leading-5 text-[var(--nf-text-subtle)]">
+                            候选顺序已根据当前项目的历史健康记录动态调整。
+                          </p>
+                        ) : null}
+                        {modelRouteSummary.originalCandidates.length > 0 ? (
+                          <p className="mt-1 break-all text-xs leading-5 text-[var(--nf-text-subtle)]">
+                            原始顺序：{modelRouteSummary.originalCandidates.join(', ')}
+                          </p>
+                        ) : null}
                       </div>
                     </div>
+                    {modelRouteSummary.healthRankings.length > 0 ? (
+                      <div className="mt-4 rounded-xl border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] p-3">
+                        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                          <p className="text-xs font-bold text-[var(--nf-text)]">历史健康排序</p>
+                          <span className="text-xs text-[var(--nf-text-subtle)]">{modelRouteSummary.healthRankings.length} 个候选</span>
+                        </div>
+                        <div className="mt-2 grid gap-2 md:grid-cols-2">
+                          {modelRouteSummary.healthRankings.slice(0, 4).map((ranking) => (
+                            <div key={ranking.model} className="rounded-lg border border-[var(--nf-border)] bg-[var(--nf-surface)] px-3 py-2 text-xs leading-5">
+                              <div className="flex items-start justify-between gap-3">
+                                <p className="break-all font-semibold text-[var(--nf-text)]">{ranking.model}</p>
+                                <span className="shrink-0 text-[var(--nf-text-subtle)]">{ranking.score ?? 0} 分</span>
+                              </div>
+                              <p className="mt-1 text-[var(--nf-text-muted)]">
+                                {ranking.reasonLabel || '未记录原因'} · 成功 {ranking.successfulAttempts} · 失败 {ranking.failedAttempts}
+                                {ranking.averageLatencyMs !== null ? ` · 平均 ${ranking.averageLatencyMs}ms` : ''}
+                              </p>
+                              {ranking.errorCounts.length > 0 ? (
+                                <p className="mt-1 text-[var(--nf-warning)]">
+                                  {ranking.errorCounts.slice(0, 2).map((error) => `${error.label}×${error.count}`).join('，')}
+                                </p>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                     {modelRouteSummary.probeResults.length > 0 ? (
                       <div className="mt-4 grid gap-2 md:grid-cols-2">
                         {modelRouteSummary.probeResults.map((probe) => {

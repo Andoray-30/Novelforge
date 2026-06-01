@@ -489,6 +489,9 @@ export const TaskCenter = () => {
                         <div key={batch.batchKey} className="rounded border border-border/60 bg-background/60 p-2">
                           <div className="font-semibold text-foreground">{batch.actionLabel}</div>
                           <div className="mt-0.5">{batch.errorTypeLabel} · {batch.chapterCount} 章 · {batch.modelLabel}</div>
+                          {batch.healthRankingLabel ? (
+                            <div className="mt-0.5 text-muted-foreground">{batch.healthRankingLabel}</div>
+                          ) : null}
                           {batch.chapterIds.length > 0 ? (
                             <div className="mt-0.5 break-all text-muted-foreground">
                               章节：{batch.chapterIds.slice(0, 4).join(', ')}
