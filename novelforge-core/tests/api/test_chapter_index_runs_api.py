@@ -24,6 +24,16 @@ def _run_state(session_id="session-a", parent_id="novel-a"):
             "error_types": ["gateway_timeout"],
             "actions": ["shrink_chunk_and_extend_timeout"],
         },
+        "repair_strategy_batches": [
+            {
+                "batch_key": "repair_batch_1_shrink_chunk_and_extend_timeout",
+                "chapter_ids": ["chapter-2"],
+                "repair_strategy": {
+                    "actions": ["shrink_chunk_and_extend_timeout"],
+                    "error_types": ["gateway_timeout"],
+                },
+            }
+        ],
         "session_id": session_id,
         "parent_id": parent_id,
         "total_chapters": 2,
@@ -65,6 +75,13 @@ def _run_state(session_id="session-a", parent_id="novel-a"):
             "reason": "probe_passed",
             "candidates": ["route-model"],
         },
+        "model_route_batches": [
+            {
+                "batch_key": "repair_batch_1_shrink_chunk_and_extend_timeout",
+                "chapter_ids": ["chapter-2"],
+                "model_route": {"selected_model": "repair-model"},
+            }
+        ],
     }
 
 
@@ -88,7 +105,10 @@ def test_chapter_index_run_query_is_scoped_and_summarized(monkeypatch):
     assert payload["chapter_indices_summary"][0]["characters_count"] == 1
     assert payload["model_role"] == "extractor_fast"
     assert payload["repair_strategy"]["actions"] == ["shrink_chunk_and_extend_timeout"]
+    assert payload["repair_strategy_batches"][0]["batch_key"] == "repair_batch_1_shrink_chunk_and_extend_timeout"
     assert payload["model_route"]["selected_model"] == "route-model"
+    assert payload["model_route_batches"][0]["model_route"]["selected_model"] == "repair-model"
+    assert payload["candidate_counts"]["chapter_index_repair_batch_count"] == 1
     assert "chapter_indices" not in payload
 
     with_indices = client.get(

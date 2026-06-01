@@ -449,11 +449,39 @@ class AITaskScheduler:
         visit(parameters)
         return error_types
 
-    def _chapter_index_repair_strategy_for_task(self, task: Task, model_role: str) -> Optional[Dict[str, Any]]:
-        if task.type != "chapter_index_rerun":
-            return None
+    @staticmethod
+    def _collect_chapter_index_error_types_by_chapter(parameters: Dict[str, Any]) -> Dict[str, set[str]]:
+        by_chapter: Dict[str, set[str]] = {}
 
-        error_types = self._collect_chapter_index_error_types(task.parameters if isinstance(task.parameters, dict) else {})
+        def visit(value: Any) -> None:
+            if isinstance(value, dict):
+                chapter_id = value.get("chapter_id") or value.get("id")
+                raw_error_type = value.get("error_type")
+                if (
+                    isinstance(chapter_id, str)
+                    and chapter_id.strip()
+                    and isinstance(raw_error_type, str)
+                    and raw_error_type.strip()
+                ):
+                    by_chapter.setdefault(chapter_id.strip(), set()).add(raw_error_type.strip())
+                for key in ("failed_chapters", "chapter_index_status", "chapter_index_attempts", "analysis_diagnostics"):
+                    if key in value:
+                        visit(value.get(key))
+            elif isinstance(value, list):
+                for item in value:
+                    visit(item)
+
+        visit(parameters)
+        return by_chapter
+
+    def _chapter_index_repair_strategy_for_error_types(
+        self,
+        error_types: set[str],
+        model_role: str,
+        *,
+        batch_key: Optional[str] = None,
+        chapter_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         base_settings: Dict[str, Any] = {}
         getter = getattr(self.config, "get_model_role_settings", None)
         if callable(getter):
@@ -491,12 +519,166 @@ class AITaskScheduler:
         if not actions:
             actions.append("repair_role_rerun")
 
-        return {
+        strategy: Dict[str, Any] = {
             "model_role": model_role,
             "error_types": sorted(error_types),
             "actions": actions,
             "runtime_settings_overrides": runtime_overrides,
         }
+        if batch_key:
+            strategy["batch_key"] = batch_key
+        if chapter_ids is not None:
+            strategy["chapter_ids"] = chapter_ids
+            strategy["chapter_count"] = len(chapter_ids)
+        return strategy
+
+    def _chapter_index_repair_strategy_for_task(self, task: Task, model_role: str) -> Optional[Dict[str, Any]]:
+        if task.type != "chapter_index_rerun":
+            return None
+
+        error_types = self._collect_chapter_index_error_types(task.parameters if isinstance(task.parameters, dict) else {})
+        return self._chapter_index_repair_strategy_for_error_types(error_types, model_role)
+
+    def _chapter_index_repair_batches_for_task(
+        self,
+        task: Task,
+        chapters: List[Dict[str, Any]],
+        model_role: str,
+    ) -> List[Dict[str, Any]]:
+        if task.type != "chapter_index_rerun" or len(chapters) <= 1:
+            return [{
+                "batch_key": "default",
+                "chapters": chapters,
+                "repair_strategy": self._chapter_index_repair_strategy_for_task(task, model_role),
+            }]
+
+        parameters = task.parameters if isinstance(task.parameters, dict) else {}
+        by_chapter = self._collect_chapter_index_error_types_by_chapter(parameters)
+        if not by_chapter:
+            return [{
+                "batch_key": "default",
+                "chapters": chapters,
+                "repair_strategy": self._chapter_index_repair_strategy_for_task(task, model_role),
+            }]
+
+        grouped: Dict[tuple, Dict[str, Any]] = {}
+        for chapter in chapters:
+            chapter_id = str(chapter.get("id") or "").strip()
+            chapter_error_types = by_chapter.get(chapter_id, set())
+            preview_strategy = self._chapter_index_repair_strategy_for_error_types(chapter_error_types, model_role)
+            group_key = (
+                tuple(preview_strategy.get("actions") or []),
+                tuple(sorted((preview_strategy.get("runtime_settings_overrides") or {}).items())),
+            )
+            group = grouped.setdefault(group_key, {"chapters": [], "error_types": set()})
+            group["chapters"].append(chapter)
+            group["error_types"].update(chapter_error_types)
+
+        batches: List[Dict[str, Any]] = []
+        for index, group in enumerate(grouped.values(), start=1):
+            batch_chapters = group["chapters"]
+            chapter_ids = [str(chapter.get("id") or "") for chapter in batch_chapters if str(chapter.get("id") or "").strip()]
+            actions_preview = self._chapter_index_repair_strategy_for_error_types(group["error_types"], model_role).get("actions") or []
+            action_label = actions_preview[0] if actions_preview else "repair_role_rerun"
+            batch_key = f"repair_batch_{index}_{action_label}"
+            strategy = self._chapter_index_repair_strategy_for_error_types(
+                group["error_types"],
+                model_role,
+                batch_key=batch_key,
+                chapter_ids=chapter_ids,
+            )
+            batches.append({
+                "batch_key": batch_key,
+                "chapters": batch_chapters,
+                "repair_strategy": strategy,
+            })
+        return batches
+
+    def _merge_chapter_index_batch_analyses(
+        self,
+        batch_analyses: List[Dict[str, Any]],
+        repair_strategy: Dict[str, Any],
+        model_route_batches: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        from ..extractors.chapter_index_extractor import ChapterIndex, ChapterIndexExtractor
+
+        combined_indices: List[ChapterIndex] = []
+        failed_chapters: List[Dict[str, Any]] = []
+        chapter_index_attempts: List[Dict[str, Any]] = []
+        chapter_index_status: List[Dict[str, Any]] = []
+
+        for analysis in batch_analyses:
+            diagnostics = analysis.get("analysis_diagnostics") if isinstance(analysis, dict) else None
+            if not isinstance(diagnostics, dict):
+                diagnostics = {}
+            failed_chapters.extend([
+                item for item in (analysis.get("failed_chapters") or diagnostics.get("failed_chapters") or [])
+                if isinstance(item, dict)
+            ])
+            chapter_index_attempts.extend([
+                item for item in (analysis.get("chapter_index_attempts") or diagnostics.get("chapter_index_attempts") or [])
+                if isinstance(item, dict)
+            ])
+            chapter_index_status.extend([
+                item for item in (analysis.get("chapter_index_status") or diagnostics.get("chapter_index_status") or [])
+                if isinstance(item, dict)
+            ])
+            for raw_index in analysis.get("chapter_indices") or []:
+                if not isinstance(raw_index, dict):
+                    continue
+                try:
+                    combined_indices.append(ChapterIndex(**raw_index))
+                except Exception:
+                    continue
+
+        if combined_indices:
+            combined_indices.sort(key=lambda item: item.chapter_order)
+            merge_result = ChapterIndexExtractor(ai_service=self.ai_service).merge_chapter_indices(combined_indices)
+            diagnostics = merge_result.diagnostics.model_dump()
+            analysis: Dict[str, Any] = {
+                "characters": merge_result.characters,
+                "world_setting": merge_result.world_setting,
+                "timeline_events": merge_result.timeline_events,
+                "relationships": merge_result.relationships,
+                "chapter_indices": [index.model_dump() for index in combined_indices],
+                "relationship_unresolved_endpoints": merge_result.diagnostics.relationship_unresolved_endpoints,
+                "timeline_mismatch_events": merge_result.diagnostics.timeline_mismatch_events,
+            }
+        else:
+            diagnostics = {}
+            analysis = {
+                "characters": [],
+                "world_setting": None,
+                "timeline_events": [],
+                "relationships": [],
+                "chapter_indices": [],
+                "relationship_unresolved_endpoints": [],
+                "timeline_mismatch_events": [],
+            }
+
+        diagnostics["repair_strategy"] = repair_strategy
+        diagnostics["repair_strategy_batches"] = repair_strategy.get("batches") or []
+        diagnostics["model_route_batches"] = model_route_batches
+        diagnostics["failed_chapters"] = failed_chapters
+        diagnostics["chapter_index_attempts"] = chapter_index_attempts
+        diagnostics["chapter_index_status"] = chapter_index_status
+
+        counts = diagnostics.setdefault("candidate_counts", {})
+        if isinstance(counts, dict):
+            counts["chapter_index_repair_batch_count"] = int(repair_strategy.get("batch_count") or 1)
+            counts["chapter_index_attempts"] = len(chapter_index_attempts)
+            counts["chapter_index_needs_retry"] = sum(
+                1 for status in chapter_index_status
+                if isinstance(status, dict) and status.get("needs_retry")
+            )
+
+        analysis["analysis_diagnostics"] = diagnostics
+        analysis["candidate_counts"] = counts if isinstance(counts, dict) else {}
+        analysis["failed_chapters"] = failed_chapters
+        analysis["chapter_index_attempts"] = chapter_index_attempts
+        analysis["chapter_index_status"] = chapter_index_status
+        analysis["model_route_batches"] = model_route_batches
+        return analysis
 
     async def _extract_chapter_index_assets_with_persisted_diagnostics(
         self,
@@ -569,26 +751,84 @@ class AITaskScheduler:
                 await self.storage.save(run_key, run_state)
 
         method = extraction_service.extract_chapter_index_assets
-        kwargs: Dict[str, Any] = {}
-        try:
-            parameters = inspect.signature(method).parameters
-            accepts_kwargs = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values())
-            if accepts_kwargs or "diagnostics_recorder" in parameters:
-                kwargs["diagnostics_recorder"] = diagnostics_recorder
-            if accepts_kwargs or "model_role" in parameters:
-                kwargs["model_role"] = model_role
-            if accepts_kwargs or "repair_strategy" in parameters:
-                kwargs["repair_strategy"] = repair_strategy
-        except (TypeError, ValueError):
-            kwargs = {"diagnostics_recorder": diagnostics_recorder}
 
-        try:
-            analysis = await method(chapters, **kwargs)
-        except TypeError as exc:
-            if kwargs and ("diagnostics_recorder" in str(exc) or "model_role" in str(exc)):
-                analysis = await method(chapters)
-            else:
+        async def run_extraction_batch(
+            batch_chapters: List[Dict[str, Any]],
+            batch_repair_strategy: Optional[Dict[str, Any]],
+        ) -> Dict[str, Any]:
+            kwargs: Dict[str, Any] = {}
+            try:
+                parameters = inspect.signature(method).parameters
+                accepts_kwargs = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values())
+                if accepts_kwargs or "diagnostics_recorder" in parameters:
+                    kwargs["diagnostics_recorder"] = diagnostics_recorder
+                if accepts_kwargs or "model_role" in parameters:
+                    kwargs["model_role"] = model_role
+                if accepts_kwargs or "repair_strategy" in parameters:
+                    kwargs["repair_strategy"] = batch_repair_strategy
+            except (TypeError, ValueError):
+                kwargs = {"diagnostics_recorder": diagnostics_recorder}
+
+            try:
+                return await method(batch_chapters, **kwargs)
+            except TypeError as exc:
+                if kwargs and ("diagnostics_recorder" in str(exc) or "model_role" in str(exc)):
+                    return await method(batch_chapters)
                 raise
+
+        batches = self._chapter_index_repair_batches_for_task(task, chapters, model_role)
+        split_repair_batches = len(batches) > 1
+        if split_repair_batches:
+            run_state["repair_strategy_batches"] = [
+                {
+                    "batch_key": batch["batch_key"],
+                    "chapter_ids": [
+                        str(chapter.get("id") or "")
+                        for chapter in batch.get("chapters", [])
+                        if str(chapter.get("id") or "").strip()
+                    ],
+                    "repair_strategy": batch.get("repair_strategy"),
+                }
+                for batch in batches
+            ]
+            run_state["repair_strategy"] = {
+                "model_role": model_role,
+                "split_by_error_type": True,
+                "batch_count": len(batches),
+                "batches": run_state["repair_strategy_batches"],
+            }
+            repair_strategy = run_state["repair_strategy"]
+            await self.storage.save(run_key, run_state)
+
+            batch_analyses: List[Dict[str, Any]] = []
+            model_route_batches: List[Dict[str, Any]] = []
+            for batch in batches:
+                batch_analysis = await run_extraction_batch(batch["chapters"], batch.get("repair_strategy"))
+                batch_analyses.append(batch_analysis)
+                batch_model_route = batch_analysis.get("model_route")
+                batch_diagnostics = batch_analysis.get("analysis_diagnostics")
+                if not isinstance(batch_model_route, dict) and isinstance(batch_diagnostics, dict):
+                    candidate_route = batch_diagnostics.get("model_route")
+                    if isinstance(candidate_route, dict):
+                        batch_model_route = candidate_route
+                if isinstance(batch_model_route, dict):
+                    model_route_batches.append({
+                        "batch_key": batch["batch_key"],
+                        "chapter_ids": [
+                            str(chapter.get("id") or "")
+                            for chapter in batch.get("chapters", [])
+                            if str(chapter.get("id") or "").strip()
+                        ],
+                        "model_route": batch_model_route,
+                    })
+            analysis = self._merge_chapter_index_batch_analyses(batch_analyses, repair_strategy, model_route_batches)
+            if model_route_batches:
+                run_state["model_route_batches"] = model_route_batches
+                run_state["updated_at"] = datetime.now().isoformat()
+                await self.storage.save(run_key, run_state)
+        else:
+            batch_strategy = batches[0].get("repair_strategy") if batches else repair_strategy
+            analysis = await run_extraction_batch(chapters, batch_strategy)
 
         persisted_state = await self._load_chapter_index_run_state(task.id)
         if isinstance(persisted_state, dict):

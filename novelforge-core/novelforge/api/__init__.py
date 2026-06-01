@@ -463,6 +463,7 @@ def _serialize_chapter_index_run_state(
         "task_type": state.get("task_type"),
         "model_role": state.get("model_role"),
         "repair_strategy": state.get("repair_strategy") if isinstance(state.get("repair_strategy"), dict) else None,
+        "repair_strategy_batches": state.get("repair_strategy_batches") if isinstance(state.get("repair_strategy_batches"), list) else [],
         "session_id": state.get("session_id"),
         "parent_id": state.get("parent_id"),
         "total_chapters": state.get("total_chapters"),
@@ -472,12 +473,16 @@ def _serialize_chapter_index_run_state(
         "chapter_index_status": statuses,
         "chapter_indices_summary": summaries,
         "model_route": state.get("model_route") if isinstance(state.get("model_route"), dict) else None,
+        "model_route_batches": state.get("model_route_batches") if isinstance(state.get("model_route_batches"), list) else [],
         "candidate_counts": {
             "chapter_index_attempts": len(attempts),
             "chapter_index_failed_attempts": sum(1 for item in attempts if isinstance(item, dict) and item.get("status") == "failed"),
             "chapter_index_needs_retry": sum(1 for item in statuses if isinstance(item, dict) and item.get("needs_retry")),
             "chapter_index_successful": sum(1 for item in statuses if isinstance(item, dict) and item.get("status") == "success"),
             "chapter_indices": len(chapter_indices),
+            "chapter_index_repair_batch_count": len(state.get("repair_strategy_batches") or [])
+            if isinstance(state.get("repair_strategy_batches"), list)
+            else 0,
         },
     }
     if include_indices:

@@ -5832,3 +5832,28 @@
 - 当前边界：
   - 本轮没有新增真正的本地 fallback 资产生成器，只是硬化现有恢复态和未来规则种子的质量边界。
   - 下一步应继续把 `chapter_index_rerun` 从 run 级策略推进到“按错误类型拆批执行”，避免同一次修复里所有失败章节被同一套参数处理。
+
+## 2026-06-01 失败章节按错误类型拆批执行 v1
+
+- 继续推进模型编排和可恢复章节 index 主线。
+- `chapter_index_rerun` 现在会按章节收集上一轮 `error_type`，并把同一次修复拆成多批执行：
+  - `gateway_timeout / timeout / provider_unavailable` 批次使用缩短 chunk、并发 1、延长 timeout。
+  - `json_invalid` 批次使用 JSON repair 偏好和更高 `max_tokens`。
+  - `rate_limited` 批次使用降并发和冷却语义。
+  - `empty_content` 批次保留切换模型动作。
+- 每个批次独立调用 `extract_chapter_index_assets(...)`，但共用同一个 `chapter_index_run_*`：
+  - run state 新增 `repair_strategy_batches`。
+  - split repair 会保留 `model_route_batches`，便于追踪每批实际使用的模型路由。
+  - 最终 preview 会把各批成功的 `ChapterIndex` 合并后再生成角色、关系、时间线和世界观预览。
+- API / 类型同步：
+  - `GET /api/extraction/chapter-index-runs...` 返回 `repair_strategy_batches` 与 `model_route_batches`。
+  - 前端 `ImportAnalysisDiagnostics` / `ChapterIndexRun` 类型同步增加 batch 字段。
+- 验证：
+  - `pytest test_model_router.py test_chapter_index_extractor.py test_ai_scheduler_import.py test_chapter_index_runs_api.py`：54 passed。
+  - `compileall` 覆盖 `ai_scheduler.py` 与 `api/__init__.py`：通过。
+  - `npx tsc --noEmit --incremental false`：通过。
+  - 前端全量 Vitest：31 files / 123 tests passed。
+  - 前端 build：通过。
+- 当前边界：
+  - 拆批已经在调度层完成，但 UI 还没有专门展示“本次修复分了几批、每批用了什么策略”的详细视图。
+  - 下一步应把 Extract 页的 run 详情补上 batch 展示，并继续把慢模型/快模型策略纳入可视化诊断。

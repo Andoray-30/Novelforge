@@ -703,6 +703,97 @@ def test_chapter_index_repair_strategy_combines_error_type_actions():
     assert strategy["runtime_settings_overrides"]["timeout"] == 300.0
 
 
+def test_chapter_index_rerun_splits_batches_by_error_type():
+    calls = []
+
+    class SplitRecorderExtractionService:
+        async def extract_chapter_index_assets(self, chapters, diagnostics_recorder=None, model_role=None, repair_strategy=None):
+            calls.append({
+                "chapter_ids": [chapter["id"] for chapter in chapters],
+                "repair_strategy": repair_strategy,
+                "model_role": model_role,
+            })
+            return {
+                "characters": [],
+                "relationships": [],
+                "timeline_events": [],
+                "world_setting": None,
+                "chapter_indices": [
+                    {
+                        "chapter_id": chapter["id"],
+                        "chapter_title": chapter["title"],
+                        "chapter_order": chapter["chapter_index"],
+                        "chapter_characters": [],
+                        "chapter_interactions": [],
+                        "chapter_events": [],
+                        "chapter_world_facts": [],
+                    }
+                    for chapter in chapters
+                ],
+                "analysis_diagnostics": {
+                    "candidate_counts": {},
+                    "model_route": {
+                        "role": model_role,
+                        "selected_model": f"{repair_strategy['actions'][0]}-model",
+                        "reason": "probe_skipped",
+                        "candidates": [f"{repair_strategy['actions'][0]}-model"],
+                    },
+                },
+                "candidate_counts": {},
+                "failed_chapters": [],
+                "chapter_index_attempts": [],
+                "chapter_index_status": [],
+                "model_route": {
+                    "role": model_role,
+                    "selected_model": f"{repair_strategy['actions'][0]}-model",
+                    "reason": "probe_skipped",
+                    "candidates": [f"{repair_strategy['actions'][0]}-model"],
+                },
+            }
+
+    storage = MemoryStorageManager()
+    scheduler = build_scheduler(storage_manager=storage)
+    task = Task(
+        id="repair-split",
+        type="chapter_index_rerun",
+        status=TaskStatus.RUNNING,
+        priority=TaskPriority.HIGH,
+        parameters={
+            "session_id": "session-repair",
+            "parent_id": "novel-repair",
+            "chapter_index_status": [
+                {"chapter_id": "chapter-timeout", "status": "failed", "needs_retry": True, "error_type": "gateway_timeout"},
+                {"chapter_id": "chapter-json", "status": "failed", "needs_retry": True, "error_type": "json_invalid"},
+            ],
+        },
+        created_at=datetime.now(),
+    )
+
+    result = asyncio.run(scheduler._extract_chapter_index_assets_with_persisted_diagnostics(
+        SplitRecorderExtractionService(),
+        [
+            {"id": "chapter-timeout", "title": "timeout", "chapter_index": 1, "content": "text"},
+            {"id": "chapter-json", "title": "json", "chapter_index": 2, "content": "text"},
+        ],
+        task,
+    ))
+
+    assert len(calls) == 2
+    assert {tuple(call["chapter_ids"]) for call in calls} == {("chapter-timeout",), ("chapter-json",)}
+    actions_by_chapter = {
+        call["chapter_ids"][0]: call["repair_strategy"]["actions"]
+        for call in calls
+    }
+    assert actions_by_chapter["chapter-timeout"] == ["shrink_chunk_and_extend_timeout"]
+    assert actions_by_chapter["chapter-json"] == ["prefer_json_repair"]
+    assert storage.saved["chapter_index_run_repair-split"]["repair_strategy"]["split_by_error_type"] is True
+    assert storage.saved["chapter_index_run_repair-split"]["repair_strategy"]["batch_count"] == 2
+    assert len(result["analysis_diagnostics"]["repair_strategy_batches"]) == 2
+    assert len(result["analysis_diagnostics"]["model_route_batches"]) == 2
+    assert result["candidate_counts"]["chapter_index_repair_batch_count"] == 2
+    assert [item["chapter_id"] for item in result["chapter_indices"]] == ["chapter-timeout", "chapter-json"]
+
+
 def test_import_expands_overlong_chapters_on_sentence_boundaries():
     from novelforge.types.text_processing import Chapter
 
