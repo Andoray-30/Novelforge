@@ -1,6 +1,6 @@
-﻿import { describe, expect, it } from 'vitest';
-import type { ChapterIndexRun } from '@/types';
-import { buildRecentModelHealthSummary } from './model-health-summary';
+import { describe, expect, it } from 'vitest';
+import type { ChapterIndexRun, ModelHealthReport } from '@/types';
+import { buildPersistedModelHealthSummary, buildRecentModelHealthSummary } from './model-health-summary';
 
 function run(overrides: Partial<ChapterIndexRun>): ChapterIndexRun {
   return {
@@ -142,5 +142,63 @@ describe('buildRecentModelHealthSummary', () => {
       selectedCount: 1,
       lastReasonLabel: '未执行测速，使用候选模型',
     });
+  });
+});
+
+describe('buildPersistedModelHealthSummary', () => {
+  it('normalizes backend model health report summaries', () => {
+    const report: ModelHealthReport = {
+      generated_at: '2026-06-01T10:00:00',
+      event_count: 3,
+      items: [
+        {
+          model: 'persisted-fast',
+          roles: ['extractor_fast'],
+          selected_count: 2,
+          probe_count: 1,
+          probe_passed: 1,
+          probe_failed: 0,
+          attempt_count: 2,
+          successful_attempts: 1,
+          failed_attempts: 1,
+          average_latency_ms: 1800,
+          error_counts: { gateway_timeout: 1 },
+        },
+      ],
+      events: [
+        {
+          id: 'old',
+          model: 'persisted-fast',
+          role: 'extractor_fast',
+          reason: 'probe_skipped',
+          created_at: '2026-06-01T09:59:00',
+        },
+        {
+          id: 'new',
+          model: 'persisted-fast',
+          role: 'extractor_repair',
+          reason: 'probe_passed',
+          created_at: '2026-06-01T10:00:00',
+        },
+      ],
+    };
+
+    const [summary] = buildPersistedModelHealthSummary(report);
+
+    expect(summary).toMatchObject({
+      model: 'persisted-fast',
+      selectedCount: 2,
+      probeCount: 1,
+      probePassed: 1,
+      attemptCount: 2,
+      successfulAttempts: 1,
+      failedAttempts: 1,
+      averageLatencyMs: 1800,
+      lastRole: 'extractor_repair',
+      lastReasonLabel: '测速通过',
+    });
+    expect(summary.errorCounts).toEqual([
+      { type: 'gateway_timeout', label: '网关超时', count: 1 },
+    ]);
   });
 });

@@ -18,6 +18,7 @@ import type {
   ExtractionResult,
   NovelType,
   LengthType,
+  ModelHealthReport,
   OpenAIConfig,
   OpenAIModelListResponse,
   Session,
@@ -425,6 +426,16 @@ export const chapterIndexRunService = {
     if (params.parentId) query.append('parent_id', params.parentId);
     if (params.includeIndices) query.append('include_indices', 'true');
     return novelforgeClient.get(`/api/extraction/chapter-index-runs/${encodeURIComponent(runKey)}?${query.toString()}`);
+  },
+};
+
+export const modelHealthService = {
+  get: (params: { sessionId: string; parentId?: string | null; role?: string | null; limit?: number }): Promise<ModelHealthReport> => {
+    const query = new URLSearchParams({ session_id: params.sessionId });
+    if (params.parentId) query.append('parent_id', params.parentId);
+    if (params.role) query.append('role', params.role);
+    if (params.limit) query.append('limit', String(params.limit));
+    return novelforgeClient.get(`/api/extraction/model-health?${query.toString()}`);
   },
 };
 

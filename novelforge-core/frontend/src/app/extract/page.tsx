@@ -20,16 +20,16 @@ import {
   Users,
   Wrench,
 } from 'lucide-react';
-import { chapterIndexRunService, contentService, taskService, textProcessingService } from '@/lib/api';
+import { chapterIndexRunService, contentService, modelHealthService, taskService, textProcessingService } from '@/lib/api';
 import { buildAssetQualityDiagnostics, type AssetQualityDiagnosticsResult } from '@/lib/asset-quality-diagnostics';
 import { getModelProbeStatusLabel, getModelRouteSummary, normalizeModelRoute } from '@/lib/model-route-summary';
-import { buildRecentModelHealthSummary } from './model-health-summary';
+import { buildPersistedModelHealthSummary, buildRecentModelHealthSummary } from './model-health-summary';
 import { getNovelImportStageLabel, parseNovelImportTaskResult } from '@/lib/task-events';
 import { useAppStore } from '@/lib/hooks/use-app-store';
 import { useSessionTaskEvents } from '@/lib/hooks/use-session-task-events';
 import { useSessions } from '@/lib/hooks/use-sessions';
 import { formatFileSize } from '@/lib/utils';
-import type { ChapterIndexRun, ImportAnalysisDiagnostics, NovelImportAnalysisStageKey, NovelImportTaskResult, OpenAIConfig } from '@/types';
+import type { ChapterIndexRun, ImportAnalysisDiagnostics, ModelHealthReport, NovelImportAnalysisStageKey, NovelImportTaskResult, OpenAIConfig } from '@/types';
 import {
   buildChapterIndexRunRerunPayload,
   getChapterStatusPreview,
@@ -613,6 +613,9 @@ export default function ExtractPage() {
   const [chapterIndexRuns, setChapterIndexRuns] = useState<ChapterIndexRun[]>([]);
   const [chapterIndexRunError, setChapterIndexRunError] = useState<string | null>(null);
   const [chapterIndexRunsLoading, setChapterIndexRunsLoading] = useState(false);
+  const [modelHealthReport, setModelHealthReport] = useState<ModelHealthReport | null>(null);
+  const [modelHealthError, setModelHealthError] = useState<string | null>(null);
+  const [modelHealthLoading, setModelHealthLoading] = useState(false);
 
   const { currentSession, currentSessionId, createSession, switchSession, loadSessions } = useSessions();
   const setSelectedNovelId = useAppStore((state) => state.setSelectedNovelId);
@@ -637,6 +640,9 @@ export default function ExtractPage() {
     setChapterIndexRuns([]);
     setChapterIndexRunError(null);
     setChapterIndexRunsLoading(false);
+    setModelHealthReport(null);
+    setModelHealthError(null);
+    setModelHealthLoading(false);
   }, [currentSessionId]);
 
   const ensureSessionId = useCallback(async (selectedFile: File): Promise<string> => {
@@ -789,12 +795,17 @@ export default function ExtractPage() {
       setChapterIndexRuns([]);
       setChapterIndexRunError(null);
       setChapterIndexRunsLoading(false);
+      setModelHealthReport(null);
+      setModelHealthError(null);
+      setModelHealthLoading(false);
       return;
     }
 
     let disposed = false;
     setChapterIndexRunsLoading(true);
     setChapterIndexRunError(null);
+    setModelHealthLoading(true);
+    setModelHealthError(null);
     const loadChapterIndexRuns = async () => {
       try {
         const runs = await chapterIndexRunService.list({ sessionId, parentId, limit: 5 });
@@ -808,7 +819,21 @@ export default function ExtractPage() {
         if (!disposed) setChapterIndexRunsLoading(false);
       }
     };
+    const loadModelHealth = async () => {
+      try {
+        const report = await modelHealthService.get({ sessionId, parentId, limit: 200 });
+        if (!disposed) setModelHealthReport(report);
+      } catch (error) {
+        if (!disposed) {
+          setModelHealthReport(null);
+          setModelHealthError(error instanceof Error ? error.message : '模型健康记录读取失败');
+        }
+      } finally {
+        if (!disposed) setModelHealthLoading(false);
+      }
+    };
     void loadChapterIndexRuns();
+    void loadModelHealth();
     return () => {
       disposed = true;
     };
@@ -1056,7 +1081,12 @@ export default function ExtractPage() {
     [analysisResult, qualityRepairGroups, savedSummary]
   );
   const modelRouteSummary = useMemo(() => getModelRouteSummary(analysisResult), [analysisResult]);
-  const modelHealthSummary = useMemo(() => buildRecentModelHealthSummary(chapterIndexRuns), [chapterIndexRuns]);
+  const persistedModelHealthSummary = useMemo(() => buildPersistedModelHealthSummary(modelHealthReport), [modelHealthReport]);
+  const recentModelHealthSummary = useMemo(() => buildRecentModelHealthSummary(chapterIndexRuns), [chapterIndexRuns]);
+  const modelHealthSummary = persistedModelHealthSummary.length > 0 ? persistedModelHealthSummary : recentModelHealthSummary;
+  const modelHealthSourceLabel = persistedModelHealthSummary.length > 0
+    ? `基于后端 ${modelHealthReport?.event_count ?? 0} 条健康事件`
+    : `基于最近 ${chapterIndexRuns.length} 次章节索引 run`;
   const topQualityIssues = analysisResult?.analysis_quality_issues?.slice(0, 3) ?? [];
   const statusLabel = analysisResult?.analysis_status ? ANALYSIS_STATUS_LABELS[analysisResult.analysis_status] : status === 'error' ? '需要处理' : status === 'success' ? '已完成' : '等待导入';
   const progressStageLabel = status === 'uploading'
@@ -1372,8 +1402,15 @@ export default function ExtractPage() {
                 <div>
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <h3 className="text-sm font-bold text-[var(--nf-text)]">最近模型健康</h3>
-                    <span className="text-xs text-[var(--nf-text-subtle)]">基于最近 {chapterIndexRuns.length} 次章节索引 run</span>
+                    <span className="text-xs text-[var(--nf-text-subtle)]">
+                      {modelHealthLoading ? '正在读取模型健康记录...' : modelHealthSourceLabel}
+                    </span>
                   </div>
+                  {modelHealthError ? (
+                    <p className="mt-2 text-xs leading-5 text-[var(--nf-warning)]">
+                      后端模型健康记录读取失败，已回退到最近章节 run 汇总：{modelHealthError}
+                    </p>
+                  ) : null}
                   <div className="mt-3 grid gap-3 lg:grid-cols-2">
                     {modelHealthSummary.map((item) => (
                       <article key={item.model} className="rounded-2xl border border-[var(--nf-border)] bg-[var(--nf-surface)] p-4">

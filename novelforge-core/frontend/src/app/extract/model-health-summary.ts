@@ -1,4 +1,4 @@
-﻿import type { ChapterIndexRun } from '@/types';
+import type { ChapterIndexRun, ModelHealthEvent, ModelHealthReport } from '@/types';
 import { getModelErrorTypeLabel, normalizeModelRoute, type ModelRouteProbeSummary } from '@/lib/model-route-summary';
 
 export interface ModelHealthErrorCount {
@@ -38,6 +38,13 @@ interface MutableModelHealthSummary {
   lastReasonLabel: string | null;
 }
 
+const ROUTE_REASON_LABELS: Record<string, string> = {
+  probe_passed: '测速通过',
+  probe_skipped: '未执行测速，使用候选模型',
+  no_probe_passed_using_best_score: '无模型完全通过，使用最高分候选',
+  all_candidates_in_cooldown: '候选模型均在冷却中',
+};
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' ? value as Record<string, unknown> : null;
 }
@@ -53,6 +60,17 @@ function asNumber(value: unknown): number | null {
     return Number.isFinite(parsed) ? parsed : null;
   }
   return null;
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : [];
+}
+
+function routeReasonLabel(reason: string | null): string | null {
+  if (!reason) return null;
+  return ROUTE_REASON_LABELS[reason] || reason;
 }
 
 function ensureModel(store: Map<string, MutableModelHealthSummary>, model: string): MutableModelHealthSummary {
@@ -107,6 +125,71 @@ function errorCountsToList(errorCounts: Map<string, number>): ModelHealthErrorCo
   return Array.from(errorCounts.entries())
     .map(([type, count]) => ({ type, label: getModelErrorTypeLabel(type), count }))
     .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
+}
+
+function backendErrorCountsToList(value: unknown): ModelHealthErrorCount[] {
+  const payload = asRecord(value);
+  if (!payload) return [];
+  const errorCounts = new Map<string, number>();
+  Object.entries(payload).forEach(([type, count]) => {
+    const parsed = asNumber(count);
+    if (parsed !== null && parsed > 0) {
+      errorCounts.set(type, parsed);
+    }
+  });
+  return errorCountsToList(errorCounts);
+}
+
+function latestEventByModel(events: ModelHealthEvent[] | undefined, options: { requireReason?: boolean } = {}): Map<string, ModelHealthEvent> {
+  const store = new Map<string, ModelHealthEvent>();
+  (events || []).forEach((event) => {
+    const model = asString(event.model);
+    if (!model) return;
+    if (options.requireReason && !asString(event.reason)) return;
+    const previous = store.get(model);
+    const currentTime = asString(event.created_at) || asString(event.observed_at) || '';
+    const previousTime = previous ? (asString(previous.created_at) || asString(previous.observed_at) || '') : '';
+    if (!previous || currentTime >= previousTime) {
+      store.set(model, event);
+    }
+  });
+  return store;
+}
+
+export function buildPersistedModelHealthSummary(report: ModelHealthReport | null | undefined): ModelHealthSummaryItem[] {
+  if (!report || !Array.isArray(report.items)) return [];
+  const eventByModel = latestEventByModel(report.events);
+  const reasonEventByModel = latestEventByModel(report.events, { requireReason: true });
+
+  return report.items
+    .map((item) => {
+      const model = asString(item.model);
+      if (!model) return null;
+      const latest = eventByModel.get(model);
+      const latestReason = reasonEventByModel.get(model);
+      const roles = asStringArray(item.roles);
+      return {
+        model,
+        selectedCount: asNumber(item.selected_count) ?? 0,
+        probeCount: asNumber(item.probe_count) ?? 0,
+        probePassed: asNumber(item.probe_passed) ?? 0,
+        probeFailed: asNumber(item.probe_failed) ?? 0,
+        attemptCount: asNumber(item.attempt_count) ?? 0,
+        successfulAttempts: asNumber(item.successful_attempts) ?? 0,
+        failedAttempts: asNumber(item.failed_attempts) ?? 0,
+        averageLatencyMs: asNumber(item.average_latency_ms),
+        errorCounts: backendErrorCountsToList(item.error_counts),
+        lastRole: asString(latest?.role) || roles[0] || null,
+        lastReasonLabel: routeReasonLabel(asString(latestReason?.reason)),
+      };
+    })
+    .filter((item): item is ModelHealthSummaryItem => item !== null)
+    .sort((left, right) => (
+      right.selectedCount - left.selectedCount ||
+      right.attemptCount - left.attemptCount ||
+      right.probeCount - left.probeCount ||
+      left.model.localeCompare(right.model)
+    ));
 }
 
 export function buildRecentModelHealthSummary(runs: ChapterIndexRun[]): ModelHealthSummaryItem[] {

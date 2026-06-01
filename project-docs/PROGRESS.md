@@ -5920,3 +5920,24 @@
 - 当前边界：
   - 本轮只完成后端持久化与查询；前端“最近模型健康”仍主要从 run 列表临时汇总。
   - 下一步应把 Extract 页模型健康区切到后端 API，并在后续路由策略中利用历史健康事件做动态优先级，而不是硬编码某个模型名称。
+
+## 2026-06-01 Extract 页接入持久化模型健康 v1
+
+- 继续推进模型可观测闭环，把上一轮后端 `GET /api/extraction/model-health` 接到前端。
+- 前端新增 `ModelHealthReport / ModelHealthEvent / ModelHealthReportItem` 类型，并新增 `modelHealthService.get(...)`。
+- Extract 页“最近模型健康”现在优先使用后端持久化健康事件：
+  - 显示模型被选中次数、探测通过/失败、章节尝试成功/失败、平均延迟、错误类型。
+  - 标明数据来源为“后端健康事件”。
+  - 如果后端健康 API 失败或还没有事件，自动回退到最近章节索引 run 的临时汇总。
+- `model-health-summary.ts` 增加 `buildPersistedModelHealthSummary(...)`：
+  - 将后端 snake_case 统计转换为前端卡片需要的 camelCase 结构。
+  - 用最新健康事件补足最近角色和路由原因标签。
+  - 保留慢但成功模型，不把高延迟直接判为失败。
+- 验证：
+  - `npm test -- src/app/extract/model-health-summary.test.ts --run`：1 file / 4 tests passed。
+  - `npx tsc --noEmit --incremental false`：通过。
+  - 前端全量 Vitest：31 files / 128 tests passed。
+  - 前端 build：通过。
+- 当前边界：
+  - 本轮仍是“可观测接入”，还没有让模型路由器直接读取历史健康事件调整候选优先级。
+  - 下一步建议实现后端路由历史评分：按角色统计近期成功率、错误类型、平均延迟，在候选模型测速前做动态排序。

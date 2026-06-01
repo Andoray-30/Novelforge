@@ -504,6 +504,53 @@ export interface ChapterIndexRun {
   model_route?: ModelRouteDecision | null;
 }
 
+export interface ModelHealthReportItem {
+  model: string;
+  roles?: string[];
+  sources?: string[];
+  selected_count?: number;
+  probe_count?: number;
+  probe_passed?: number;
+  probe_failed?: number;
+  attempt_count?: number;
+  successful_attempts?: number;
+  failed_attempts?: number;
+  average_latency_ms?: number | null;
+  error_counts?: Record<string, number>;
+  last_seen_at?: string | null;
+}
+
+export interface ModelHealthEvent {
+  id?: string;
+  source?: string;
+  role?: string;
+  model?: string;
+  status?: string;
+  available?: boolean;
+  latency_ms?: number | null;
+  error_type?: string | null;
+  reason?: string | null;
+  score?: number | null;
+  task_id?: string;
+  task_type?: string;
+  session_id?: string;
+  parent_id?: string | null;
+  run_key?: string;
+  batch_key?: string;
+  chapter_id?: string;
+  attempt_number?: number;
+  needs_retry?: boolean;
+  observed_at?: string;
+  created_at?: string;
+}
+
+export interface ModelHealthReport {
+  generated_at?: string;
+  event_count: number;
+  items: ModelHealthReportItem[];
+  events?: ModelHealthEvent[];
+}
+
 export interface AITask {
   id: string;
   type: string;
