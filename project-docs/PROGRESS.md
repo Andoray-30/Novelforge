@@ -5857,3 +5857,24 @@
 - 当前边界：
   - 拆批已经在调度层完成，但 UI 还没有专门展示“本次修复分了几批、每批用了什么策略”的详细视图。
   - 下一步应把 Extract 页的 run 详情补上 batch 展示，并继续把慢模型/快模型策略纳入可视化诊断。
+
+## 2026-06-01 Extract 页 repair batch 可视化 v1
+
+- 继续补齐上一轮拆批执行的可解释 UI。
+- Extract 页“章节索引运行记录”现在会展示 split repair batch：
+  - 批次数。
+  - 每批的修复动作，例如缩短分段并延长超时、JSON 修复优先、降并发并冷却。
+  - 每批对应的错误类型。
+  - 每批章节数与章节 id 预览。
+  - 每批实际记录到的模型。
+- `chapter-index-run-utils` 增加 `getRepairBatchSummaries(...)`，集中把后端 `repair_strategy_batches / model_route_batches` 转换为可读摘要。
+- “最近模型健康”统计现在会纳入 `model_route_batches`，避免 split repair 后只统计 run 顶层模型，漏掉每批实际使用的 repair 模型。
+- 顺手修复 `chapter-index-run-utils` 中用户可见的乱码文本。
+- 验证：
+  - `npm test -- src/app/extract/chapter-index-run-utils.test.ts src/app/extract/model-health-summary.test.ts --run`：2 files / 6 tests passed。
+  - `npx tsc --noEmit --incremental false`：通过。
+  - 前端全量 Vitest：31 files / 125 tests passed。
+  - 前端 build：通过。
+- 当前边界：
+  - 本轮未做浏览器截图验收；当前可用工具没有暴露 Browser 控制接口。
+  - 下一步可以继续把 batch 信息接入 TaskCenter 修复 preview 摘要，或补后端长期模型健康表。

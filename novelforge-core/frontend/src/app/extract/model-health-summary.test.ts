@@ -107,4 +107,40 @@ describe('buildRecentModelHealthSummary', () => {
     expect(summary.failedAttempts).toBe(0);
     expect(summary.errorCounts).toEqual([]);
   });
+
+  it('counts split repair batch routes as selected models', () => {
+    const summary = buildRecentModelHealthSummary([
+      run({
+        run_key: 'run-repair',
+        model_route_batches: [
+          {
+            batch_key: 'repair_batch_1_shrink_chunk_and_extend_timeout',
+            model_route: {
+              role: 'extractor_repair',
+              selected_model: 'slow-stable-model',
+              reason: 'probe_passed',
+            },
+          },
+          {
+            batch_key: 'repair_batch_2_prefer_json_repair',
+            model_route: {
+              role: 'extractor_repair',
+              selected_model: 'json-repair-model',
+              reason: 'probe_skipped',
+            },
+          },
+        ],
+      }),
+    ]);
+
+    expect(summary.map((item) => item.model)).toEqual(['json-repair-model', 'slow-stable-model']);
+    expect(summary.find((item) => item.model === 'slow-stable-model')).toMatchObject({
+      selectedCount: 1,
+      lastRole: 'extractor_repair',
+    });
+    expect(summary.find((item) => item.model === 'json-repair-model')).toMatchObject({
+      selectedCount: 1,
+      lastReasonLabel: '未执行测速，使用候选模型',
+    });
+  });
 });

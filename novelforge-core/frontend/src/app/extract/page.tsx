@@ -33,6 +33,7 @@ import type { ChapterIndexRun, ImportAnalysisDiagnostics, NovelImportAnalysisSta
 import {
   buildChapterIndexRunRerunPayload,
   getChapterStatusPreview,
+  getRepairBatchSummaries,
   getRetryableChapterIndexRunStatuses,
   getRunTimestampLabel,
 } from './chapter-index-run-utils';
@@ -1457,6 +1458,7 @@ export default function ExtractPage() {
                       const successCount = counts.chapter_index_successful ?? 0;
                       const statusPreview = getChapterStatusPreview(run);
                       const runModelRoute = normalizeModelRoute(run.model_route);
+                      const repairBatchSummaries = getRepairBatchSummaries(run);
                       return (
                         <article key={run.run_key} className="rounded-2xl border border-[var(--nf-border)] bg-[var(--nf-surface)] p-4">
                           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -1492,6 +1494,36 @@ export default function ExtractPage() {
                             <div className="mt-3 rounded-xl border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] px-3 py-2 text-xs leading-5 text-[var(--nf-text-muted)]">
                               <p className="font-semibold text-[var(--nf-text)]">模型：{runModelRoute.selectedModel}</p>
                               <p>{runModelRoute.role} · {runModelRoute.reasonLabel}</p>
+                            </div>
+                          ) : null}
+                          {repairBatchSummaries.length > 0 ? (
+                            <div className="mt-3 rounded-xl border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] p-3">
+                              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                                <p className="text-xs font-bold text-[var(--nf-text)]">错误类型拆批修复</p>
+                                <span className="text-xs text-[var(--nf-text-subtle)]">{repairBatchSummaries.length} 批</span>
+                              </div>
+                              <div className="mt-2 space-y-2">
+                                {repairBatchSummaries.slice(0, 3).map((batch) => (
+                                  <div key={batch.batchKey} className="rounded-lg border border-[var(--nf-border)] bg-[var(--nf-surface)] px-3 py-2 text-xs leading-5">
+                                    <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                                      <div>
+                                        <p className="font-semibold text-[var(--nf-text)]">{batch.actionLabel}</p>
+                                        <p className="text-[var(--nf-text-muted)]">{batch.errorTypeLabel} · {batch.chapterCount} 章</p>
+                                      </div>
+                                      <span className="text-[var(--nf-text-subtle)]">{batch.modelLabel}</span>
+                                    </div>
+                                    {batch.chapterIds.length > 0 ? (
+                                      <p className="mt-1 break-all text-[var(--nf-text-subtle)]">
+                                        章节：{batch.chapterIds.slice(0, 4).join(', ')}
+                                        {batch.chapterIds.length > 4 ? ` 等 ${batch.chapterIds.length} 章` : ''}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                ))}
+                                {repairBatchSummaries.length > 3 ? (
+                                  <p className="text-xs text-[var(--nf-text-subtle)]">还有 {repairBatchSummaries.length - 3} 批未展开</p>
+                                ) : null}
+                              </div>
                             </div>
                           ) : null}
                           <div className="mt-4 flex flex-wrap gap-2">

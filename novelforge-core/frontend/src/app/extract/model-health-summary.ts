@@ -113,8 +113,14 @@ export function buildRecentModelHealthSummary(runs: ChapterIndexRun[]): ModelHea
   const store = new Map<string, MutableModelHealthSummary>();
 
   runs.forEach((run) => {
-    const route = normalizeModelRoute(run.model_route);
-    if (route) {
+    const batchRoutePayloads = (run.model_route_batches || [])
+      .map((item) => asRecord(item)?.model_route)
+      .filter((item) => item !== undefined);
+    const routePayloads = batchRoutePayloads.length > 0 ? batchRoutePayloads : [run.model_route];
+
+    routePayloads.forEach((routePayload) => {
+      const route = normalizeModelRoute(routePayload);
+      if (!route) return;
       const selected = ensureModel(store, route.selectedModel);
       selected.selectedCount += 1;
       selected.lastRole = route.role;
@@ -131,7 +137,7 @@ export function buildRecentModelHealthSummary(runs: ChapterIndexRun[]): ModelHea
           addError(summary, probe.errorType || 'probe_not_suitable');
         }
       });
-    }
+    });
 
     run.chapter_index_attempts.forEach((attempt) => {
       const payload = asRecord(attempt);
