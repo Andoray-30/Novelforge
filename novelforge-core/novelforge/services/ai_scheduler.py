@@ -6,6 +6,7 @@ import time
 import logging
 import sys
 import os
+import inspect
 from typing import Dict, List, Optional, Callable, Any
 from datetime import datetime
 from enum import Enum
@@ -420,6 +421,15 @@ class AITaskScheduler:
         loaded = await self.storage.load(self._chapter_index_run_key(task_id))
         return loaded if isinstance(loaded, dict) else None
 
+    @staticmethod
+    def _chapter_index_model_role_for_task(task: Task) -> str:
+        requested_role = task.parameters.get("model_role") if isinstance(task.parameters, dict) else None
+        if isinstance(requested_role, str) and requested_role in {"extractor_fast", "extractor_deep", "extractor_repair"}:
+            return requested_role
+        if task.type == "chapter_index_rerun":
+            return "extractor_repair"
+        return "extractor_fast"
+
     async def _extract_chapter_index_assets_with_persisted_diagnostics(
         self,
         extraction_service: Any,
@@ -428,9 +438,11 @@ class AITaskScheduler:
     ) -> Dict[str, Any]:
         run_key = self._chapter_index_run_key(task.id)
         now = datetime.now().isoformat()
+        model_role = self._chapter_index_model_role_for_task(task)
         run_state: Dict[str, Any] = {
             "task_id": task.id,
             "task_type": task.type,
+            "model_role": model_role,
             "session_id": task.parameters.get("session_id"),
             "parent_id": task.parameters.get("parent_id") or task.parameters.get("novel_id"),
             "total_chapters": len(chapters),
@@ -486,15 +498,25 @@ class AITaskScheduler:
                 run_state["updated_at"] = datetime.now().isoformat()
                 await self.storage.save(run_key, run_state)
 
+        method = extraction_service.extract_chapter_index_assets
+        kwargs: Dict[str, Any] = {}
         try:
-            analysis = await extraction_service.extract_chapter_index_assets(
-                chapters,
-                diagnostics_recorder=diagnostics_recorder,
-            )
+            parameters = inspect.signature(method).parameters
+            accepts_kwargs = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values())
+            if accepts_kwargs or "diagnostics_recorder" in parameters:
+                kwargs["diagnostics_recorder"] = diagnostics_recorder
+            if accepts_kwargs or "model_role" in parameters:
+                kwargs["model_role"] = model_role
+        except (TypeError, ValueError):
+            kwargs = {"diagnostics_recorder": diagnostics_recorder}
+
+        try:
+            analysis = await method(chapters, **kwargs)
         except TypeError as exc:
-            if "diagnostics_recorder" not in str(exc):
+            if kwargs and ("diagnostics_recorder" in str(exc) or "model_role" in str(exc)):
+                analysis = await method(chapters)
+            else:
                 raise
-            analysis = await extraction_service.extract_chapter_index_assets(chapters)
 
         persisted_state = await self._load_chapter_index_run_state(task.id)
         if isinstance(persisted_state, dict):

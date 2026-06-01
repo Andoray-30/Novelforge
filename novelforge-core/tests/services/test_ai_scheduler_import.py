@@ -467,8 +467,9 @@ def test_novel_import_uses_chapter_index_analysis_and_returns_diagnostics(monkey
 
 def test_import_chapter_index_analysis_persists_attempt_run_state():
     class RecorderExtractionService:
-        async def extract_chapter_index_assets(self, chapters, diagnostics_recorder=None):
+        async def extract_chapter_index_assets(self, chapters, diagnostics_recorder=None, model_role=None):
             assert diagnostics_recorder is not None
+            assert model_role == "extractor_fast"
             await diagnostics_recorder({
                 "event_type": "attempt",
                 "record": {
@@ -572,6 +573,7 @@ def test_import_chapter_index_analysis_persists_attempt_run_state():
     run_key = "chapter_index_run_import-attempt-persist"
     persisted = storage.saved[run_key]
     assert persisted["total_chapters"] == 1
+    assert persisted["model_role"] == "extractor_fast"
     assert persisted["chapter_index_attempts"][0]["model_used"] == "route-model"
     assert persisted["chapter_index_status"][0]["status"] == "success"
     assert persisted["model_route"]["selected_model"] == "route-model"
@@ -579,6 +581,60 @@ def test_import_chapter_index_analysis_persists_attempt_run_state():
     assert result["analysis_diagnostics"]["chapter_index_attempts"][0]["raw_response_hash"] == "abc123"
     assert result["candidate_counts"]["chapter_index_attempts"] == 1
     assert result["candidate_counts"]["chapter_index_needs_retry"] == 0
+
+
+def test_chapter_index_rerun_uses_repair_model_role():
+    captured = {}
+
+    class RecorderExtractionService:
+        async def extract_chapter_index_assets(self, chapters, diagnostics_recorder=None, model_role=None):
+            captured["model_role"] = model_role
+            return {
+                "characters": [],
+                "relationships": [],
+                "timeline_events": [],
+                "world_setting": None,
+                "analysis_diagnostics": {
+                    "candidate_counts": {},
+                    "model_route": {
+                        "role": model_role,
+                        "selected_model": "repair-model",
+                        "reason": "probe_skipped",
+                        "candidates": ["repair-model"],
+                    },
+                },
+                "candidate_counts": {},
+                "failed_chapters": [],
+                "chapter_index_attempts": [],
+                "chapter_index_status": [],
+                "model_route": {
+                    "role": model_role,
+                    "selected_model": "repair-model",
+                    "reason": "probe_skipped",
+                    "candidates": ["repair-model"],
+                },
+            }
+
+    storage = MemoryStorageManager()
+    scheduler = build_scheduler(storage_manager=storage)
+    task = Task(
+        id="repair-role",
+        type="chapter_index_rerun",
+        status=TaskStatus.RUNNING,
+        priority=TaskPriority.HIGH,
+        parameters={"session_id": "session-repair", "parent_id": "novel-repair"},
+        created_at=datetime.now(),
+    )
+
+    result = asyncio.run(scheduler._extract_chapter_index_assets_with_persisted_diagnostics(
+        RecorderExtractionService(),
+        [{"id": "chapter-1", "title": "第一章", "chapter_index": 1, "content": "正文"}],
+        task,
+    ))
+
+    assert captured["model_role"] == "extractor_repair"
+    assert storage.saved["chapter_index_run_repair-role"]["model_role"] == "extractor_repair"
+    assert result["model_route"]["role"] == "extractor_repair"
 
 
 def test_import_expands_overlong_chapters_on_sentence_boundaries():

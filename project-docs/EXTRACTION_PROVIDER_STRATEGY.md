@@ -529,3 +529,9 @@ NovelForge 的目标不是找一个“永远可用的模型名”，而是建立
 - 章节 index 主链路会读取 `extractor_fast` 的运行参数，并把 timeout、并发、max_tokens 写入 attempt 诊断。
 - 导入切章默认使用 `extractor_fast.chunk_size`，也可用 `NOVELFORGE_IMPORT_CHAPTER_MAX_CHARS` 硬覆盖。
 - 这一步让慢但质量高的模型可以通过低并发、长 timeout、小任务量进入链路，而不是被一次测速或统一 timeout 误杀。
+
+#### 2026-06-01 进展：失败章节修复模型角色切换 v1
+
+- `chapter_index_rerun` 已默认走 `extractor_repair` 角色，而不是继续使用首轮 `extractor_fast`。
+- `chapter_index_run_*` 会保存 `model_role`，API 查询也会返回该字段，便于后续区分首轮广覆盖与失败章节修复。
+- 当前仍是任务类型级切换；后续还需要按错误类型进一步决策。

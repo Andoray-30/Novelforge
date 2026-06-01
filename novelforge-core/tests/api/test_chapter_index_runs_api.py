@@ -18,6 +18,7 @@ def _run_state(session_id="session-a", parent_id="novel-a"):
     return {
         "task_id": "task-a",
         "task_type": "novel_import",
+        "model_role": "extractor_fast",
         "session_id": session_id,
         "parent_id": parent_id,
         "total_chapters": 2,
@@ -80,6 +81,7 @@ def test_chapter_index_run_query_is_scoped_and_summarized(monkeypatch):
     assert payload["candidate_counts"]["chapter_index_failed_attempts"] == 1
     assert payload["candidate_counts"]["chapter_index_needs_retry"] == 1
     assert payload["chapter_indices_summary"][0]["characters_count"] == 1
+    assert payload["model_role"] == "extractor_fast"
     assert payload["model_route"]["selected_model"] == "route-model"
     assert "chapter_indices" not in payload
 

@@ -5771,3 +5771,19 @@
 - 当前边界：
   - 本轮只把角色运行参数接入章节 index 主链路。
   - 多模型失败章节修复仍未完成；下一步应按 `empty_content / json_invalid / gateway_timeout / rate_limited` 选择 repair 模型或缩短 chunk。
+
+## 2026-06-01 失败章节修复模型角色切换 v1
+
+- 按模型编排规划继续推进，完成失败章节重跑的第一步模型角色切换。
+- `ExtractionService.extract_chapter_index_assets(...)` 新增 `model_role` 参数，默认 `extractor_fast`。
+- `AITaskScheduler` 会根据任务类型选择章节 index 角色：
+  - 正常 `novel_import` 使用 `extractor_fast`。
+  - `chapter_index_rerun` 使用 `extractor_repair`，避免失败章节继续默认走首轮 fast 模型。
+  - 任务参数可显式传 `model_role`，仅允许 `extractor_fast / extractor_deep / extractor_repair`。
+- `chapter_index_run_*` 状态新增 `model_role`，API 查询也会返回该字段。
+- 测试：
+  - `PYTHONPATH=<temp clone>/novelforge-core py -m pytest novelforge-core/tests/services/test_model_router.py novelforge-core/tests/services/test_chapter_index_extractor.py novelforge-core/tests/services/test_ai_scheduler_import.py novelforge-core/tests/api/test_chapter_index_runs_api.py -q`：52 passed。
+  - `py -m compileall` 覆盖相关后端文件：通过。
+  - 前端 `npx tsc --noEmit --incremental false`：通过。
+- 当前边界：
+  - 这还不是按错误类型的完整决策器；下一步应区分 `empty_content / json_invalid / gateway_timeout / rate_limited`，分别选择切模型、JSON repair、缩短 chunk 或冷却限流。

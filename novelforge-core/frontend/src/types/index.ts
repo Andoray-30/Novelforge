@@ -480,6 +480,7 @@ export interface ChapterIndexRun {
   run_key: string;
   task_id?: string;
   task_type?: string;
+  model_role?: string;
   session_id?: string;
   parent_id?: string | null;
   total_chapters?: number;

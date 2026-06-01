@@ -126,8 +126,9 @@ class ExtractionService:
         self,
         chapters: List[Dict[str, Any]],
         diagnostics_recorder: Optional[Any] = None,
+        model_role: str = "extractor_fast",
     ) -> Dict[str, Any]:
-        role = "extractor_fast"
+        role = model_role or "extractor_fast"
         extractor = self._build_chapter_index_extractor(
             ai_service=self.ai_service,
             diagnostics_recorder=diagnostics_recorder,
