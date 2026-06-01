@@ -14,6 +14,7 @@ from dataclasses import dataclass
 import uuid
 import re
 from .ai_service import AIService
+from .model_health import record_model_health_from_chapter_index_run
 from ..storage.storage_manager import StorageManager
 from ..core.config import Config
 
@@ -869,6 +870,11 @@ class AITaskScheduler:
                     1 for status in diagnostics["chapter_index_status"]
                     if isinstance(status, dict) and status.get("needs_retry")
                 )
+        health_state = persisted_state if isinstance(persisted_state, dict) else run_state
+        try:
+            await record_model_health_from_chapter_index_run(self.storage, run_key, health_state)
+        except Exception as exc:
+            logger.warning("Failed to record model health for %s: %s", run_key, exc)
         return analysis
 
     def _build_relationship_repair_key(self, relationship: Dict[str, Any]) -> Optional[str]:

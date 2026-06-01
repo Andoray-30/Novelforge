@@ -598,6 +598,85 @@ def test_import_chapter_index_analysis_persists_attempt_run_state():
     assert result["candidate_counts"]["chapter_index_needs_retry"] == 0
 
 
+def test_chapter_index_analysis_records_model_health_events():
+    class RecorderExtractionService:
+        async def extract_chapter_index_assets(self, chapters, diagnostics_recorder=None, model_role=None, repair_strategy=None):
+            if diagnostics_recorder:
+                await diagnostics_recorder({
+                    "event_type": "attempt",
+                    "record": {
+                        "chapter_id": "chapter-1",
+                        "chapter_title": "chapter",
+                        "chapter_order": 1,
+                        "attempt_number": 1,
+                        "status": "success",
+                        "model_used": "route-model",
+                        "latency_ms": 1200,
+                        "raw_response_hash": "abc123",
+                        "needs_retry": False,
+                    },
+                })
+                await diagnostics_recorder({
+                    "event_type": "status",
+                    "record": {
+                        "chapter_id": "chapter-1",
+                        "chapter_title": "chapter",
+                        "chapter_order": 1,
+                        "status": "success",
+                        "model_used": "route-model",
+                        "needs_retry": False,
+                    },
+                })
+            return {
+                "characters": [],
+                "relationships": [],
+                "timeline_events": [],
+                "world_setting": None,
+                "analysis_diagnostics": {
+                    "candidate_counts": {},
+                    "model_route": {
+                        "role": model_role,
+                        "selected_model": "route-model",
+                        "reason": "probe_skipped",
+                        "candidates": ["route-model"],
+                    },
+                },
+                "model_route": {
+                    "role": model_role,
+                    "selected_model": "route-model",
+                    "reason": "probe_skipped",
+                    "candidates": ["route-model"],
+                },
+            }
+
+    storage = MemoryStorageManager()
+    scheduler = build_scheduler(storage_manager=storage)
+    task = Task(
+        id="model-health",
+        type="novel_import",
+        status=TaskStatus.RUNNING,
+        priority=TaskPriority.HIGH,
+        parameters={"session_id": "session-health", "parent_id": "novel-health"},
+        created_at=datetime.now(),
+    )
+
+    asyncio.run(scheduler._extract_chapter_index_assets_with_persisted_diagnostics(
+        RecorderExtractionService(),
+        [{"id": "chapter-1", "title": "chapter", "chapter_index": 1, "content": "text"}],
+        task,
+    ))
+
+    health_events = [
+        item
+        for key, item in storage.saved.items()
+        if key.startswith("model_health_event_")
+    ]
+    assert len(health_events) == 2
+    assert {event["source"] for event in health_events} == {"model_route_selected", "chapter_index_attempt"}
+    assert all(event["session_id"] == "session-health" for event in health_events)
+    assert all(event["parent_id"] == "novel-health" for event in health_events)
+
+
 def test_chapter_index_rerun_uses_repair_model_role():
     captured = {}
 

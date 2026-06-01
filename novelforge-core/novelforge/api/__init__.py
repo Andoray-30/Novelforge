@@ -63,6 +63,7 @@ from ..services.extraction_service import get_extraction_service, ExtractionServ
 # FIXME: Resolve the TaskPriority name clash with api.types.
 from ..services.ai_scheduler import get_ai_scheduler, AITaskScheduler, TaskPriority as SchedulerTaskPriority
 from ..services.ai_service import AIService
+from ..services.model_health import get_model_health_report
 
 from ..core.config import Config
 from .ai_planning_service import get_ai_planning_service, AIPlanningService
@@ -1953,6 +1954,29 @@ async def list_chapter_index_runs(
        raise HTTPException(
            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
            detail=f"章节索引运行记录查询失败: {str(e)}",
+       )
+
+
+@app.get("/api/extraction/model-health", response_model=dict)
+async def get_extraction_model_health(
+    session_id: str = Query(..., min_length=1),
+    parent_id: Optional[str] = Query(None),
+    role: Optional[str] = Query(None),
+    limit: int = Query(200, ge=1, le=1000),
+):
+   """Return persisted model health observations for a project/session."""
+   try:
+       return await get_model_health_report(
+           storage_manager,
+           session_id=session_id,
+           parent_id=parent_id,
+           role=role,
+           limit=limit,
+       )
+   except Exception as e:
+       raise HTTPException(
+           status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+           detail=f"模型健康记录查询失败: {str(e)}",
        )
 
 

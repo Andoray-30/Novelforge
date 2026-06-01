@@ -5898,3 +5898,25 @@
 - 当前边界：
   - 本轮只改前端任务中心与摘要 helper，没有改后端。
   - 下一步建议进入后端长期模型健康表，避免“最近模型健康”只依赖前端从 run 列表临时汇总。
+
+## 2026-06-01 后端模型健康事件持久化 v1
+
+- 继续处理“网关模型速度/可用性随时间波动，不能把提取完全押在单个固定模型上”的核心问题。
+- 新增 `novelforge.services.model_health`：
+  - 从 `chapter_index_run_*` 中提取模型路由选择、probe 结果、章节 index attempt。
+  - 持久化为 `model_health_event_*` 事件。
+  - 只记录模型名、角色、状态、延迟、错误类型、任务/项目范围等元数据，不保存 prompt、小说正文、原始响应或 API key。
+  - 按模型聚合 `selected_count / probe_count / probe_passed / probe_failed / attempt_count / successful_attempts / failed_attempts / average_latency_ms / error_counts`。
+- `AITaskScheduler` 在章节 index 分析结束后自动写入模型健康事件：
+  - 普通导入会记录顶层 route 与章节 attempt。
+  - split repair 会同时记录每个 batch 的 route。
+  - 写健康事件失败只记录 warning，不阻断导入/修复主流程。
+- 新增 API：
+  - `GET /api/extraction/model-health?session_id=...&parent_id=...&role=...`
+  - 返回项目范围内的模型健康事件与聚合摘要。
+- 验证：
+  - `pytest test_model_health.py test_model_router.py test_chapter_index_extractor.py test_ai_scheduler_import.py test_chapter_index_runs_api.py -q`：58 passed。
+  - `compileall` 覆盖 `model_health.py / ai_scheduler.py / api/__init__.py`：通过。
+- 当前边界：
+  - 本轮只完成后端持久化与查询；前端“最近模型健康”仍主要从 run 列表临时汇总。
+  - 下一步应把 Extract 页模型健康区切到后端 API，并在后续路由策略中利用历史健康事件做动态优先级，而不是硬编码某个模型名称。

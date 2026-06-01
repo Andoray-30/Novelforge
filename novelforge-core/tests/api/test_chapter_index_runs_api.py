@@ -159,3 +159,54 @@ def test_chapter_index_run_list_filters_by_project_scope(monkeypatch):
     assert response.status_code == 200
     payload = response.json()
     assert [item["run_key"] for item in payload] == ["chapter_index_run_task-a"]
+
+
+def test_model_health_query_filters_and_summarizes_project_scope(monkeypatch):
+    storage = FakeStorageManager()
+    storage.data["model_health_event_a"] = {
+        "id": "a",
+        "source": "model_route_selected",
+        "role": "extractor_fast",
+        "model": "fast-model",
+        "status": "selected",
+        "session_id": "session-a",
+        "parent_id": "novel-a",
+        "created_at": "2026-05-30T12:00:00",
+    }
+    storage.data["model_health_event_b"] = {
+        "id": "b",
+        "source": "chapter_index_attempt",
+        "role": "extractor_fast",
+        "model": "fast-model",
+        "status": "success",
+        "latency_ms": 1800,
+        "session_id": "session-a",
+        "parent_id": "novel-a",
+        "created_at": "2026-05-30T12:01:00",
+    }
+    storage.data["model_health_event_other_project"] = {
+        "id": "c",
+        "source": "model_route_selected",
+        "role": "extractor_fast",
+        "model": "other-model",
+        "status": "selected",
+        "session_id": "session-a",
+        "parent_id": "novel-b",
+        "created_at": "2026-05-30T12:02:00",
+    }
+    monkeypatch.setattr(api_module.config, "auth_required", False, raising=False)
+    monkeypatch.setattr(api_module, "storage_manager", storage, raising=False)
+
+    client = TestClient(api_module.app)
+    response = client.get(
+        "/api/extraction/model-health",
+        params={"session_id": "session-a", "parent_id": "novel-a"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["event_count"] == 2
+    assert payload["items"][0]["model"] == "fast-model"
+    assert payload["items"][0]["selected_count"] == 1
+    assert payload["items"][0]["successful_attempts"] == 1
+    assert payload["items"][0]["average_latency_ms"] == 1800
