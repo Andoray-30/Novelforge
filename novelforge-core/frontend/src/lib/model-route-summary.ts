@@ -107,12 +107,17 @@ export function getModelRouteSummary(result: NovelImportTaskResult | null | unde
   return normalizeModelRoute(result?.model_route || result?.analysis_diagnostics?.model_route);
 }
 
+export function getModelErrorTypeLabel(errorType: string | null | undefined): string {
+  if (!errorType) return '未知错误';
+  return ERROR_TYPE_LABELS[errorType] || errorType;
+}
+
 export function getModelProbeStatusLabel(probe: ModelRouteProbeSummary): string {
   if (probe.available && probe.nonEmptyChat && probe.jsonCapable && probe.extractionRich) {
     return '通过';
   }
   if (probe.errorType) {
-    return ERROR_TYPE_LABELS[probe.errorType] || probe.errorType;
+    return getModelErrorTypeLabel(probe.errorType);
   }
   if (!probe.available) return '不可用';
   if (!probe.jsonCapable) return 'JSON 不合规';

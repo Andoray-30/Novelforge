@@ -23,6 +23,7 @@ import {
 import { chapterIndexRunService, contentService, taskService, textProcessingService } from '@/lib/api';
 import { buildAssetQualityDiagnostics, type AssetQualityDiagnosticsResult } from '@/lib/asset-quality-diagnostics';
 import { getModelProbeStatusLabel, getModelRouteSummary, normalizeModelRoute } from '@/lib/model-route-summary';
+import { buildRecentModelHealthSummary } from './model-health-summary';
 import { getNovelImportStageLabel, parseNovelImportTaskResult } from '@/lib/task-events';
 import { useAppStore } from '@/lib/hooks/use-app-store';
 import { useSessionTaskEvents } from '@/lib/hooks/use-session-task-events';
@@ -1054,6 +1055,7 @@ export default function ExtractPage() {
     [analysisResult, qualityRepairGroups, savedSummary]
   );
   const modelRouteSummary = useMemo(() => getModelRouteSummary(analysisResult), [analysisResult]);
+  const modelHealthSummary = useMemo(() => buildRecentModelHealthSummary(chapterIndexRuns), [chapterIndexRuns]);
   const topQualityIssues = analysisResult?.analysis_quality_issues?.slice(0, 3) ?? [];
   const statusLabel = analysisResult?.analysis_status ? ANALYSIS_STATUS_LABELS[analysisResult.analysis_status] : status === 'error' ? '需要处理' : status === 'success' ? '已完成' : '等待导入';
   const progressStageLabel = status === 'uploading'
@@ -1361,6 +1363,63 @@ export default function ExtractPage() {
                     ) : (
                       <p className="mt-3 text-xs leading-5 text-[var(--nf-text-subtle)]">本次没有执行模型探测，通常表示本地 mock、路由关闭或服务端复用了默认模型。</p>
                     )}
+                  </div>
+                </div>
+              ) : null}
+
+              {modelHealthSummary.length > 0 ? (
+                <div>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <h3 className="text-sm font-bold text-[var(--nf-text)]">最近模型健康</h3>
+                    <span className="text-xs text-[var(--nf-text-subtle)]">基于最近 {chapterIndexRuns.length} 次章节索引 run</span>
+                  </div>
+                  <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                    {modelHealthSummary.map((item) => (
+                      <article key={item.model} className="rounded-2xl border border-[var(--nf-border)] bg-[var(--nf-surface)] p-4">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <p className="break-all text-sm font-black text-[var(--nf-text)]">{item.model}</p>
+                            <p className="mt-1 text-xs leading-5 text-[var(--nf-text-subtle)]">
+                              {item.lastRole ? `最近角色：${item.lastRole}` : '未记录任务角色'}
+                              {item.lastReasonLabel ? ` · ${item.lastReasonLabel}` : ''}
+                            </p>
+                          </div>
+                          <span className={[
+                            'inline-flex min-h-8 items-center rounded-full border px-3 text-xs font-bold',
+                            item.failedAttempts > 0 || item.probeFailed > 0
+                              ? 'border-[color-mix(in_srgb,var(--nf-warning)_35%,transparent)] text-[var(--nf-warning)]'
+                              : 'border-[color-mix(in_srgb,var(--nf-success)_30%,transparent)] text-[var(--nf-success)]',
+                          ].join(' ')}>
+                            {item.failedAttempts > 0 || item.probeFailed > 0 ? '有失败信号' : '近期通过'}
+                          </span>
+                        </div>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-4">
+                          {[
+                            ['被选中', item.selectedCount],
+                            ['成功尝试', item.successfulAttempts],
+                            ['失败尝试', item.failedAttempts],
+                            ['平均延迟', item.averageLatencyMs !== null ? `${item.averageLatencyMs}ms` : 'n/a'],
+                          ].map(([label, value]) => (
+                            <div key={String(label)} className="rounded-xl border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] px-3 py-2">
+                              <p className="text-xs text-[var(--nf-text-subtle)]">{label}</p>
+                              <p className="mt-1 break-words text-sm font-black text-[var(--nf-text)]">{String(value)}</p>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="mt-3 text-xs leading-5 text-[var(--nf-text-muted)]">
+                          探测 {item.probeCount} 次，{item.probePassed} 次通过，{item.probeFailed} 次失败。慢模型如果最终成功，会保留为可用信号，不会只因延迟高被判死。
+                        </p>
+                        {item.errorCounts.length > 0 ? (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {item.errorCounts.slice(0, 4).map((error) => (
+                              <span key={error.type} className="nf-chip border-[color-mix(in_srgb,var(--nf-warning)_28%,transparent)] text-[var(--nf-warning)]">
+                                {error.label} × {error.count}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
+                      </article>
+                    ))}
                   </div>
                 </div>
               ) : null}

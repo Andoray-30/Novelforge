@@ -5731,3 +5731,23 @@
   - 补充慢模型策略：慢但质量高的模型应进入 `extractor_deep` / `writer_pro`，通过低并发、长 timeout、小任务量使用，而不是被一次测速淘汰。
   - 下一轮建议优先实现最近模型健康报告、按角色 timeout/concurrency/chunk 配置、多模型失败章节修复和 fallback 质量边界硬化。
 - 本轮没有改业务代码，没有写入任何 API Key 或真实密钥。
+
+## 2026-06-01 模型健康报告第一版
+
+- 按 `EXTRACTION_PROVIDER_STRATEGY.md` 的下一轮最小落地任务，完成 Extract 页“最近模型健康”第一版。
+- 新增 `model-health-summary.ts`：
+  - 从最近 `chapter_index_run_*` 汇总 `model_route.probe_results` 与 `chapter_index_attempts`。
+  - 按模型统计：被选中次数、探测次数、探测通过/失败、成功尝试、失败尝试、平均延迟、错误类型分布。
+  - 慢但成功的模型会保留为可用信号，不再因为 latency 高被直接等同于不可用。
+- Extract 详细诊断新增“最近模型健康”区块：
+  - 管理员可以看到当前网关下每个模型的成功/失败与常见错误。
+  - 错误标签使用中文展示，如网关超时、空响应、JSON 不合规、请求限流。
+- `model-route-summary.ts` 导出统一错误类型中文标签，避免页面和汇总逻辑各自维护一套错误翻译。
+- 测试：
+  - `cmd /c npm test -- src/app/extract/model-health-summary.test.ts src/lib/model-route-summary.test.ts`：5 passed。
+  - `cmd /c npx tsc --noEmit --incremental false`：通过。
+  - `cmd /c npm test -- --run`：31 files / 123 tests passed。
+  - `cmd /c npm run build`：通过。
+- 当前边界：
+  - 这是前端基于最近 run 的健康汇总，不是后端长期模型健康表。
+  - 下一步应落地按角色的 timeout / concurrency / chunk_size 配置，让慢模型可以进入低并发长 timeout 的深度补强路径。
