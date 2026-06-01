@@ -5941,3 +5941,28 @@
 - 当前边界：
   - 本轮仍是“可观测接入”，还没有让模型路由器直接读取历史健康事件调整候选优先级。
   - 下一步建议实现后端路由历史评分：按角色统计近期成功率、错误类型、平均延迟，在候选模型测速前做动态排序。
+
+## 2026-06-01 模型健康驱动候选排序 v1
+
+- 继续处理“不同模型速度/稳定性随时间变化，不能固定押注某个模型”的问题。
+- `model_health.py` 新增 `rank_model_candidates_by_health(...)`：
+  - 根据同项目、同角色的近期健康事件对候选模型排序。
+  - 成功章节 attempt、通过 probe、被选中次数会提高分数。
+  - 失败 attempt、失败 probe、网关/鉴权/限流等硬错误会降低分数。
+  - 高延迟只作为轻微惩罚，慢但成功的模型仍然保留为可用候选。
+- `ModelRouter.select_model(...)` 现在支持 `session_id / parent_id`：
+  - 在 probe 前先读取持久化模型健康事件并重排候选。
+  - `ModelRouteDecision.to_dict()` 会输出 `original_candidates / health_rankings / candidate_order_source=health_history`，方便后续 UI 和诊断追踪。
+  - 如果没有 storage、没有 session、健康事件读取失败或关闭配置，则保持原候选顺序。
+- `ExtractionService` 支持注入 `storage_manager`，章节 index 提取时把项目范围传给 `ModelRouter`。
+- `AITaskScheduler` 导入与修复任务创建 `ExtractionService` 时传入 storage，并把 `session_id / parent_id` 注入章节 index 提取调用。
+- 新增配置：
+  - `NOVELFORGE_ENABLE_MODEL_HEALTH_ROUTING`，默认 `true`。
+  - `NOVELFORGE_MODEL_HEALTH_ROUTING_LIMIT`，默认 `200`。
+  - 已同步到 `novelforge-core/.env.example` 与 `novelforge-core/README.md`。
+- 验证：
+  - `pytest test_model_health.py test_model_router.py test_ai_scheduler_import.py test_chapter_index_runs_api.py -q`：47 passed。
+  - `compileall` 覆盖 `model_health.py / model_router.py / extraction_service.py / ai_scheduler.py / config.py / api/__init__.py`：通过。
+- 当前边界：
+  - 这是候选排序 v1，还没有实现真正的多模型并行竞速或按任务阶段动态切换模型。
+  - 下一步建议把 route 的 `health_rankings` 展示到 Extract 页/TaskCenter，并开始引入“fast/pro/repair 角色池策略”而不是只对 extractor 路径生效。

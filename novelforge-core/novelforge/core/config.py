@@ -58,6 +58,8 @@ class Config:
             if item.strip()
         ]
         self.enable_model_router: bool = os.getenv("NOVELFORGE_ENABLE_MODEL_ROUTER", "true").lower() == "true"
+        self.enable_model_health_routing: bool = os.getenv("NOVELFORGE_ENABLE_MODEL_HEALTH_ROUTING", "true").lower() == "true"
+        self.model_health_routing_limit: int = int(os.getenv("NOVELFORGE_MODEL_HEALTH_ROUTING_LIMIT", "200"))
         self.model_probe_timeout: float = float(os.getenv("NOVELFORGE_MODEL_PROBE_TIMEOUT", "25.0"))
         self.model_cooldown_seconds: float = float(os.getenv("NOVELFORGE_MODEL_COOLDOWN_SECONDS", "180.0"))
         self.model_pools: dict[str, list[str]] = {

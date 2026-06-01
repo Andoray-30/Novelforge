@@ -259,7 +259,7 @@ content_manager = ContentManager(
 )
 
 # Create extraction service.
-extraction_service = get_extraction_service(ai_service, config)
+extraction_service = get_extraction_service(ai_service, config, storage_manager)
 
 # Create AI scheduler.
 ai_scheduler = get_ai_scheduler(ai_service, storage_manager, config, content_manager)
@@ -754,7 +754,7 @@ def _resolve_runtime_ai_planning_service(openai_config: Optional[dict] = None) -
 
 
 def _resolve_runtime_extraction_service(openai_config: Optional[dict] = None) -> ExtractionService:
-    return get_extraction_service(_resolve_runtime_ai_service(openai_config), config)
+    return get_extraction_service(_resolve_runtime_ai_service(openai_config), config, storage_manager)
 
 
 def _build_content_item_from_request(

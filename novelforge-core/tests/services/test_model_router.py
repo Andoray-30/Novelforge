@@ -46,6 +46,17 @@ class FakeRoutedAIService:
         return response
 
 
+class FakeStorage:
+    def __init__(self, data):
+        self.data = data
+
+    async def load(self, key, storage_type=None):  # noqa: ANN001
+        return self.data.get(key)
+
+    async def list_keys(self, storage_type=None):  # noqa: ANN001
+        return list(self.data.keys())
+
+
 @pytest.mark.asyncio
 async def test_model_router_selects_first_extractor_model_with_rich_json():
     responses = {
@@ -74,6 +85,45 @@ async def test_model_router_skips_probe_without_real_client():
     assert service.calls == []
 
 
+@pytest.mark.asyncio
+async def test_model_router_orders_candidates_by_persisted_health_without_probe():
+    class HealthConfig(FakeConfig):
+        model_pools = {"extractor_fast": ["flaky-model", "stable-model"]}
+
+    storage = FakeStorage({
+        "model_health_event_flaky": {
+            "source": "chapter_index_attempt",
+            "role": "extractor_fast",
+            "model": "flaky-model",
+            "status": "failed",
+            "error_type": "gateway_timeout",
+            "session_id": "session-a",
+            "parent_id": "novel-a",
+            "created_at": "2026-06-01T10:00:00",
+        },
+        "model_health_event_stable": {
+            "source": "chapter_index_attempt",
+            "role": "extractor_fast",
+            "model": "stable-model",
+            "status": "success",
+            "latency_ms": 26000,
+            "session_id": "session-a",
+            "parent_id": "novel-a",
+            "created_at": "2026-06-01T10:01:00",
+        },
+    })
+    service = FakeRoutedAIService({"stable-model": "ok", "flaky-model": "bad"}, real_client=False)
+    router = ModelRouter(service, HealthConfig(), storage=storage)
+
+    decision = await router.select_model("extractor_fast", session_id="session-a", parent_id="novel-a")
+
+    assert decision.selected_model == "stable-model"
+    assert decision.candidates == ["stable-model", "flaky-model"]
+    assert decision.original_candidates == ["flaky-model", "stable-model"]
+    assert decision.health_rankings[0]["model"] == "stable-model"
+    assert decision.to_dict()["candidate_order_source"] == "health_history"
+
+
 def test_model_router_classifies_gateway_and_auth_errors():
     assert ModelRouter.classify_error(RuntimeError("504 Gateway Time-out")) == "gateway_timeout"
     assert ModelRouter.classify_error(RuntimeError("Authorization failed")) == "auth_failed"
@@ -100,6 +150,16 @@ def test_config_model_role_settings_are_configurable(monkeypatch):
         "chunk_size": 1600,
         "max_tokens": 2200,
     }
+
+
+def test_config_model_health_routing_is_configurable(monkeypatch):
+    monkeypatch.setenv("NOVELFORGE_ENABLE_MODEL_HEALTH_ROUTING", "false")
+    monkeypatch.setenv("NOVELFORGE_MODEL_HEALTH_ROUTING_LIMIT", "77")
+
+    config = Config()
+
+    assert config.enable_model_health_routing is False
+    assert config.model_health_routing_limit == 77
 
 
 @pytest.mark.asyncio
@@ -158,3 +218,49 @@ async def test_extraction_service_records_model_route(monkeypatch):
         "chapter_concurrency": 1,
         "max_tokens": 2100,
     }
+
+
+@pytest.mark.asyncio
+async def test_extraction_service_uses_project_scoped_health_for_model_route(monkeypatch):
+    class ServiceConfig(FakeConfig):
+        model_pools = {"extractor_fast": ["flaky-model", "stable-model"]}
+        model_role_settings = {"extractor_fast": {"timeout": 77.0, "concurrency": 1, "chunk_size": 1200, "max_tokens": 2100}}
+
+        def get_model_role_settings(self, role):
+            return dict(self.model_role_settings.get(role, {}))
+
+    storage = FakeStorage({
+        "model_health_event_stable": {
+            "source": "chapter_index_attempt",
+            "role": "extractor_fast",
+            "model": "stable-model",
+            "status": "success",
+            "session_id": "session-a",
+            "parent_id": "novel-a",
+            "created_at": "2026-06-01T10:00:00",
+        },
+    })
+    service = FakeRoutedAIService({"flaky-model": "bad", "stable-model": "ok"}, real_client=False)
+    observed = {}
+
+    async def fake_extract_and_merge(self, chapters):
+        observed["model"] = self.ai_service.config.model
+        return ChapterIndexMergeResult(
+            diagnostics=ImportAnalysisDiagnostics(candidate_counts={"chapters_total": len(chapters)})
+        )
+
+    monkeypatch.setattr(
+        "novelforge.extractors.chapter_index_extractor.ChapterIndexExtractor.extract_and_merge",
+        fake_extract_and_merge,
+    )
+
+    extraction_service = ExtractionService(service, ServiceConfig(), storage)
+    result = await extraction_service.extract_chapter_index_assets(
+        [{"id": "c1", "title": "chapter", "content": "text"}],
+        session_id="session-a",
+        parent_id="novel-a",
+    )
+
+    assert observed["model"] == "stable-model"
+    assert result["model_route"]["selected_model"] == "stable-model"
+    assert result["model_route"]["original_candidates"] == ["flaky-model", "stable-model"]

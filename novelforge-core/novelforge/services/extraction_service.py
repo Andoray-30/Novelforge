@@ -38,10 +38,11 @@ logger = logging.getLogger(__name__)
 class ExtractionService:
     """High level extraction orchestration service."""
 
-    def __init__(self, ai_service: AIService, config: Config):
+    def __init__(self, ai_service: AIService, config: Config, storage_manager: Optional[Any] = None):
         self.ai_service = ai_service
         self.config = config
-        self.model_router = ModelRouter(ai_service, config)
+        self.storage_manager = storage_manager
+        self.model_router = ModelRouter(ai_service, config, storage=storage_manager)
 
         unified_config = ExtractionConfig(
             timeout=300.0,
@@ -136,6 +137,8 @@ class ExtractionService:
         diagnostics_recorder: Optional[Any] = None,
         model_role: str = "extractor_fast",
         repair_strategy: Optional[Dict[str, Any]] = None,
+        session_id: Optional[str] = None,
+        parent_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         role = model_role or "extractor_fast"
         runtime_settings = (
@@ -151,7 +154,7 @@ class ExtractionService:
         )
         model_route = None
         if getattr(self.config, "enable_model_router", True):
-            decision = await self.model_router.select_model(role)
+            decision = await self.model_router.select_model(role, session_id=session_id, parent_id=parent_id)
             role = decision.role or role
             model_route = decision.to_dict()
             model_route["runtime_settings"] = self._model_role_settings(role, runtime_settings)
@@ -402,5 +405,5 @@ class ExtractionService:
 _extraction_service: Optional[ExtractionService] = None
 
 
-def get_extraction_service(ai_service: AIService, config: Config) -> ExtractionService:
-    return ExtractionService(ai_service, config)
+def get_extraction_service(ai_service: AIService, config: Config, storage_manager: Optional[Any] = None) -> ExtractionService:
+    return ExtractionService(ai_service, config, storage_manager)

@@ -3,6 +3,7 @@ import pytest
 from novelforge.services.model_health import (
     MODEL_HEALTH_EVENT_PREFIX,
     get_model_health_report,
+    rank_model_candidates_by_health,
     record_model_health_from_chapter_index_run,
 )
 
@@ -137,3 +138,40 @@ async def test_model_health_report_filters_project_scope_and_role():
 
     assert report["event_count"] == 1
     assert report["items"][0]["model"] == "fast-model"
+
+
+def test_rank_model_candidates_prefers_recent_success_over_recent_failures():
+    events = [
+        {
+            "source": "chapter_index_attempt",
+            "role": "extractor_fast",
+            "model": "flaky-model",
+            "status": "failed",
+            "error_type": "gateway_timeout",
+            "latency_ms": 5000,
+        },
+        {
+            "source": "chapter_index_attempt",
+            "role": "extractor_fast",
+            "model": "stable-model",
+            "status": "success",
+            "latency_ms": 28000,
+        },
+        {
+            "source": "model_route_probe",
+            "role": "extractor_fast",
+            "model": "stable-model",
+            "status": "passed",
+            "latency_ms": 26000,
+        },
+    ]
+
+    ordered, rankings = rank_model_candidates_by_health(["flaky-model", "stable-model"], events)
+
+    assert ordered == ["stable-model", "flaky-model"]
+    stable = next(item for item in rankings if item["model"] == "stable-model")
+    flaky = next(item for item in rankings if item["model"] == "flaky-model")
+    assert stable["score"] > flaky["score"]
+    assert stable["successful_attempts"] == 1
+    assert stable["average_latency_ms"] == 27000
+    assert flaky["error_counts"] == {"gateway_timeout": 1}

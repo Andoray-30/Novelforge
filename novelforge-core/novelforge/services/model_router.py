@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from .ai_service import AIService
+from .model_health import list_model_health_events, rank_model_candidates_by_health
 from ..core.config import Config
 
 
@@ -71,15 +72,23 @@ class ModelRouteDecision:
     reason: str
     candidates: List[str]
     probe_results: List[ModelProbeResult] = field(default_factory=list)
+    original_candidates: List[str] = field(default_factory=list)
+    health_rankings: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        payload = {
             "role": self.role,
             "selected_model": self.selected_model,
             "reason": self.reason,
             "candidates": self.candidates,
             "probe_results": [result.to_dict() for result in self.probe_results],
         }
+        if self.original_candidates and self.original_candidates != self.candidates:
+            payload["original_candidates"] = self.original_candidates
+        if self.health_rankings:
+            payload["health_rankings"] = self.health_rankings
+            payload["candidate_order_source"] = "health_history"
+        return payload
 
 
 class ModelRouter:
@@ -107,10 +116,12 @@ class ModelRouter:
         ai_service: AIService,
         config: Config,
         *,
+        storage: Any = None,
         clock: Callable[[], float] = time.time,
     ):
         self.ai_service = ai_service
         self.config = config
+        self.storage = storage
         self.clock = clock
         self.cooldowns: Dict[str, float] = {}
         self.last_decisions: Dict[str, ModelRouteDecision] = {}
@@ -122,8 +133,23 @@ class ModelRouter:
             candidates = [getattr(self.config, "model", "")]
         return self._dedupe(candidates)
 
-    async def select_model(self, role: str, *, probe: bool = True) -> ModelRouteDecision:
+    async def select_model(
+        self,
+        role: str,
+        *,
+        probe: bool = True,
+        session_id: Optional[str] = None,
+        parent_id: Optional[str] = None,
+    ) -> ModelRouteDecision:
         candidates = self.candidates_for_role(role)
+        original_candidates = list(candidates)
+        health_rankings: List[Dict[str, Any]] = []
+        candidates, health_rankings = await self._rank_candidates_by_health(
+            role,
+            candidates,
+            session_id=session_id,
+            parent_id=parent_id,
+        )
         available_candidates = [model for model in candidates if not self._is_cooling_down(model)]
         if not available_candidates:
             decision = ModelRouteDecision(
@@ -131,6 +157,8 @@ class ModelRouter:
                 selected_model=candidates[0] if candidates else getattr(self.config, "model", ""),
                 reason="all_candidates_in_cooldown",
                 candidates=candidates,
+                original_candidates=original_candidates,
+                health_rankings=health_rankings,
             )
             self.last_decisions[role] = decision
             return decision
@@ -142,6 +170,8 @@ class ModelRouter:
                 selected_model=available_candidates[0],
                 reason="probe_skipped",
                 candidates=candidates,
+                original_candidates=original_candidates,
+                health_rankings=health_rankings,
             )
             self.last_decisions[role] = decision
             return decision
@@ -157,6 +187,8 @@ class ModelRouter:
                     reason="probe_passed",
                     candidates=candidates,
                     probe_results=probe_results,
+                    original_candidates=original_candidates,
+                    health_rankings=health_rankings,
                 )
                 self.last_decisions[role] = decision
                 return decision
@@ -169,9 +201,33 @@ class ModelRouter:
             reason="no_probe_passed_using_best_score",
             candidates=candidates,
             probe_results=probe_results,
+            original_candidates=original_candidates,
+            health_rankings=health_rankings,
         )
         self.last_decisions[role] = decision
         return decision
+
+    async def _rank_candidates_by_health(
+        self,
+        role: str,
+        candidates: List[str],
+        *,
+        session_id: Optional[str] = None,
+        parent_id: Optional[str] = None,
+    ) -> tuple[List[str], List[Dict[str, Any]]]:
+        if not self.storage or not session_id or not getattr(self.config, "enable_model_health_routing", True):
+            return candidates, []
+        try:
+            events = await list_model_health_events(
+                self.storage,
+                session_id=session_id,
+                parent_id=parent_id,
+                role=role,
+                limit=int(getattr(self.config, "model_health_routing_limit", 200) or 200),
+            )
+            return rank_model_candidates_by_health(candidates, events)
+        except Exception:
+            return candidates, []
 
     async def probe_model(self, role: str, model: str) -> ModelProbeResult:
         started = self.clock()

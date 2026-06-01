@@ -272,7 +272,7 @@ class AITaskScheduler:
     async def _process_extraction_task(self, task: Task) -> Dict[str, Any]:
         """处理提取任务"""
         from .extraction_service import get_extraction_service
-        extraction_service = get_extraction_service(self.ai_service, self.config)
+        extraction_service = get_extraction_service(self.ai_service, self.config, self.storage)
         
         text = task.parameters.get("text", "")
         if not text:
@@ -308,7 +308,7 @@ class AITaskScheduler:
     async def _process_timeline_task(self, task: Task) -> Dict[str, Any]:
         """处理时间线生成任务"""
         from .extraction_service import get_extraction_service
-        extraction_service = get_extraction_service(self.ai_service, self.config)
+        extraction_service = get_extraction_service(self.ai_service, self.config, self.storage)
         
         text = task.parameters.get("text", "")
         if not text:
@@ -320,7 +320,7 @@ class AITaskScheduler:
     async def _process_relationship_task(self, task: Task) -> Dict[str, Any]:
         """处理关系提取任务"""
         from .extraction_service import get_extraction_service
-        extraction_service = get_extraction_service(self.ai_service, self.config)
+        extraction_service = get_extraction_service(self.ai_service, self.config, self.storage)
         
         text = task.parameters.get("text", "")
         if not text:
@@ -767,6 +767,10 @@ class AITaskScheduler:
                     kwargs["model_role"] = model_role
                 if accepts_kwargs or "repair_strategy" in parameters:
                     kwargs["repair_strategy"] = batch_repair_strategy
+                if accepts_kwargs or "session_id" in parameters:
+                    kwargs["session_id"] = task.parameters.get("session_id")
+                if accepts_kwargs or "parent_id" in parameters:
+                    kwargs["parent_id"] = task.parameters.get("parent_id") or task.parameters.get("novel_id")
             except (TypeError, ValueError):
                 kwargs = {"diagnostics_recorder": diagnostics_recorder}
 
@@ -1035,7 +1039,7 @@ class AITaskScheduler:
         task.progress = 0.45
         task.message = "正在执行章节级索引重跑..."
         await self._save_task(task)
-        extraction_service = get_extraction_service(self.ai_service, self.config)
+        extraction_service = get_extraction_service(self.ai_service, self.config, self.storage)
         analysis = await self._extract_chapter_index_assets_with_persisted_diagnostics(
             extraction_service,
             chapters,
@@ -2415,7 +2419,7 @@ class AITaskScheduler:
                 )
                 logger.info(f"任务使用自定义AI配置: model={model}, base_url={base_url}")
                 
-        extraction_service = get_extraction_service(runtime_ai_service, self.config)
+        extraction_service = get_extraction_service(runtime_ai_service, self.config, self.storage)
 
         try:
             task.message = "AI 分析中：提取角色信息..."

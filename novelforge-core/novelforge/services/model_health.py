@@ -285,6 +285,90 @@ def summarize_model_health_events(events: Iterable[Dict[str, Any]]) -> List[Dict
     return results
 
 
+def rank_model_candidates_by_health(candidates: List[str], events: Iterable[Dict[str, Any]]) -> tuple[List[str], List[Dict[str, Any]]]:
+    """Rank model candidates from recent persisted health events.
+
+    Successful attempts and passing probes increase priority. Hard failures
+    decrease priority, but high latency alone is only a mild penalty so slow
+    but reliable models remain usable.
+    """
+
+    original_candidates = [_clean_string(candidate) for candidate in candidates]
+    original_candidates = [candidate for candidate in original_candidates if candidate]
+    if not original_candidates:
+        return [], []
+
+    candidate_set = set(original_candidates)
+    summaries = {
+        item["model"]: item
+        for item in summarize_model_health_events(
+            event for event in events
+            if _clean_string(event.get("model")) in candidate_set
+        )
+        if isinstance(item.get("model"), str)
+    }
+    if not summaries:
+        return original_candidates, []
+
+    rankings: List[Dict[str, Any]] = []
+    for index, model in enumerate(original_candidates):
+        summary = summaries.get(model)
+        if not summary:
+            rankings.append({
+                "model": model,
+                "score": 0,
+                "reason": "no_recent_health",
+                "original_index": index,
+            })
+            continue
+
+        successful_attempts = int(summary.get("successful_attempts") or 0)
+        failed_attempts = int(summary.get("failed_attempts") or 0)
+        probe_passed = int(summary.get("probe_passed") or 0)
+        probe_failed = int(summary.get("probe_failed") or 0)
+        selected_count = int(summary.get("selected_count") or 0)
+        average_latency_ms = _clean_int(summary.get("average_latency_ms"))
+        error_counts = summary.get("error_counts") if isinstance(summary.get("error_counts"), dict) else {}
+        hard_error_penalty = 0
+        for error_type, count in error_counts.items():
+            if error_type in {"auth_failed", "provider_unavailable", "gateway_timeout", "rate_limited"}:
+                try:
+                    hard_error_penalty += int(count)
+                except (TypeError, ValueError):
+                    pass
+
+        latency_penalty = 0
+        if average_latency_ms is not None and average_latency_ms > 20000:
+            latency_penalty = min(8, average_latency_ms // 10000)
+
+        score = (
+            successful_attempts * 24
+            + probe_passed * 12
+            + selected_count * 2
+            - failed_attempts * 18
+            - probe_failed * 10
+            - hard_error_penalty * 8
+            - latency_penalty
+        )
+        reason = "positive_history" if score > 0 else "negative_history" if score < 0 else "neutral_history"
+        rankings.append({
+            "model": model,
+            "score": score,
+            "reason": reason,
+            "original_index": index,
+            "selected_count": selected_count,
+            "successful_attempts": successful_attempts,
+            "failed_attempts": failed_attempts,
+            "probe_passed": probe_passed,
+            "probe_failed": probe_failed,
+            "average_latency_ms": average_latency_ms,
+            "error_counts": error_counts,
+        })
+
+    rankings.sort(key=lambda item: (-int(item.get("score") or 0), int(item.get("original_index") or 0)))
+    return [item["model"] for item in rankings], rankings
+
+
 async def get_model_health_report(
     storage: Any,
     *,
