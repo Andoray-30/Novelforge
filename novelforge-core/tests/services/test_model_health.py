@@ -4,6 +4,7 @@ from novelforge.services.model_health import (
     MODEL_HEALTH_EVENT_PREFIX,
     get_model_health_report,
     rank_model_candidates_by_health,
+    record_model_health_event,
     record_model_health_from_chapter_index_run,
 )
 
@@ -175,3 +176,33 @@ def test_rank_model_candidates_prefers_recent_success_over_recent_failures():
     assert stable["successful_attempts"] == 1
     assert stable["average_latency_ms"] == 27000
     assert flaky["error_counts"] == {"gateway_timeout": 1}
+
+
+@pytest.mark.asyncio
+async def test_model_health_records_writer_chat_attempt_without_prompt_text():
+    storage = MemoryStorage()
+
+    event = await record_model_health_event(
+        storage,
+        source="writer_chat_attempt",
+        role="writer_pro",
+        model="stable-writer",
+        status="success",
+        session_id="session-a",
+        parent_id="novel-a",
+        task_id="conversation-a",
+        task_type="chat",
+        latency_ms=32000,
+        event_key="conversation-a:message-a:success",
+    )
+    report = await get_model_health_report(storage, session_id="session-a", parent_id="novel-a", role="writer_pro")
+
+    assert event is not None
+    assert event["source"] == "writer_chat_attempt"
+    assert "prompt" not in event
+    assert "response" not in event
+    assert report["event_count"] == 1
+    item = report["items"][0]
+    assert item["model"] == "stable-writer"
+    assert item["successful_attempts"] == 1
+    assert item["average_latency_ms"] == 32000

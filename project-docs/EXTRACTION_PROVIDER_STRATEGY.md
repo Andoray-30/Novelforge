@@ -247,6 +247,30 @@ AI 负责理解性：性格、关系、冲突、情绪、事件意义、世界�
 
 如果这些问题不能被系统自动回答，NovelForge 就还没有真正达到内部测试可用。
 
+## 2026-06-01 进展：写作侧模型路由 v1
+
+本轮已完成“写作侧接入模型路由”的第一版落地：
+
+- 聊天接口会根据 `openai_config.ai_mode` 把用户模式映射到模型角色：
+  - `fast` -> `writer_fast`
+  - `pro` -> `writer_pro`
+- 写作模型会通过 `ModelRouter` 选择当前角色下的候选模型。
+- 路由会读取最近模型健康历史；如果同一项目下某个 writer 模型最近成功率更好，会优先排序。
+- 非流式聊天和流式聊天都会把 `model_route` 写入 `agent_trace`。
+- 写作模型调用成功/失败会写入 `model_health_event_*`，字段只包含模型、角色、状态、延迟、错误类型、session/project 范围，不保存 prompt、正文或回复内容。
+- 写作调用会读取角色运行参数：
+  - `NOVELFORGE_WRITER_FAST_TIMEOUT`
+  - `NOVELFORGE_WRITER_FAST_MAX_TOKENS`
+  - `NOVELFORGE_WRITER_PRO_TIMEOUT`
+  - `NOVELFORGE_WRITER_PRO_MAX_TOKENS`
+
+当前边界：
+
+- 这是写作入口的模型路由和健康记录，不是完整多模型写作流水线。
+- 当前仍是一轮写作选择一个 writer 模型；尚未实现“先快速生成候选，再由 Pro 模型改写/审稿”的多阶段写作。
+- 前端 trace 已能拿到 `model_route`，但仍需要后续把 writer 路由摘要做成更清晰的用户可见信息。
+- writer 健康事件已进入统一模型健康汇总，后续 Extract/Settings 页面还需要按角色更明确地区分 extractor 与 writer。
+
 ## 安全记录
 
 本文档不记录任何真实 API Key、session secret、管理员密码或样本文本正文。网关地址、Key、模型池应只存在于本地 `.env` 或部署环境变量中，不写入仓库。

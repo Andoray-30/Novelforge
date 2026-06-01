@@ -36,6 +36,7 @@ def _event_id(event: Dict[str, Any]) -> str:
     stable_payload = {
         key: event.get(key)
         for key in (
+            "event_key",
             "source",
             "run_key",
             "batch_key",
@@ -67,6 +68,7 @@ def _build_event(base: Dict[str, Any], **values: Any) -> Optional[Dict[str, Any]
         "latency_ms": _clean_int(values.get("latency_ms")),
         "error_type": _clean_string(values.get("error_type"), max_length=80),
         "reason": _clean_string(values.get("reason"), max_length=120),
+        "event_key": _clean_string(values.get("event_key"), max_length=160),
         "score": _clean_int(values.get("score")),
         "task_id": _clean_string(base.get("task_id")),
         "task_type": _clean_string(base.get("task_type")),
@@ -188,6 +190,48 @@ async def record_model_health_from_chapter_index_run(storage: Any, run_key: str,
     return events
 
 
+async def record_model_health_event(
+    storage: Any,
+    *,
+    source: str,
+    role: str,
+    model: str,
+    status: str,
+    session_id: Optional[str] = None,
+    parent_id: Optional[str] = None,
+    task_id: Optional[str] = None,
+    task_type: Optional[str] = None,
+    latency_ms: Optional[int] = None,
+    error_type: Optional[str] = None,
+    reason: Optional[str] = None,
+    event_key: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Persist one model-health event without storing prompt or response text."""
+
+    if storage is None:
+        return None
+    event = _build_event(
+        {
+            "session_id": session_id,
+            "parent_id": parent_id,
+            "task_id": task_id,
+            "task_type": task_type,
+        },
+        source=source,
+        role=role,
+        model=model,
+        status=status,
+        latency_ms=latency_ms,
+        error_type=error_type,
+        reason=reason,
+        event_key=event_key,
+    )
+    if event is None:
+        return None
+    await storage.save(f"{MODEL_HEALTH_EVENT_PREFIX}{event['id']}", event)
+    return event
+
+
 async def list_model_health_events(
     storage: Any,
     *,
@@ -255,7 +299,7 @@ def summarize_model_health_events(events: Iterable[Dict[str, Any]]) -> List[Dict
                 summary["probe_passed"] += 1
             else:
                 summary["probe_failed"] += 1
-        elif source == "chapter_index_attempt":
+        elif source in {"chapter_index_attempt", "writer_chat_attempt"}:
             summary["attempt_count"] += 1
             if status == "success":
                 summary["successful_attempts"] += 1

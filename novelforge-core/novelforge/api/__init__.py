@@ -63,7 +63,8 @@ from ..services.extraction_service import get_extraction_service, ExtractionServ
 # FIXME: Resolve the TaskPriority name clash with api.types.
 from ..services.ai_scheduler import get_ai_scheduler, AITaskScheduler, TaskPriority as SchedulerTaskPriority
 from ..services.ai_service import AIService
-from ..services.model_health import get_model_health_report
+from ..services.model_health import get_model_health_report, record_model_health_event
+from ..services.model_router import ModelRouter
 
 from ..core.config import Config
 from .ai_planning_service import get_ai_planning_service, AIPlanningService
@@ -674,6 +675,133 @@ def _resolve_runtime_ai_service(openai_config: Optional[dict] = None) -> AIServi
         ai_mode=ai_mode,
         strict_model=strict_model,
     )
+
+
+def _clean_context_string(context: Optional[Dict[str, Any]], *keys: str) -> Optional[str]:
+    if not isinstance(context, dict):
+        return None
+    for key in keys:
+        value = context.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _chat_project_scope(context: Optional[Dict[str, Any]]) -> Tuple[Optional[str], Optional[str]]:
+    session_id = _clean_context_string(context, "session_id", "sessionId")
+    parent_id = _clean_context_string(
+        context,
+        "selected_novel_id",
+        "selectedNovelId",
+        "parent_id",
+        "parentId",
+        "novel_id",
+        "novelId",
+    )
+    return session_id, parent_id
+
+
+def _writer_role_from_openai_config(openai_config: Optional[dict]) -> str:
+    ai_mode = None
+    if isinstance(openai_config, dict):
+        raw_mode = openai_config.get("ai_mode")
+        if isinstance(raw_mode, str):
+            ai_mode = raw_mode.strip().lower()
+    if ai_mode not in {"fast", "pro"}:
+        ai_mode = getattr(config, "default_ai_mode", "fast") or "fast"
+    return "writer_pro" if ai_mode == "pro" else "writer_fast"
+
+
+def _writer_generation_settings(model_route: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    role = model_route.get("role") if isinstance(model_route, dict) else None
+    settings = config.get_model_role_settings(role if isinstance(role, str) else None)
+    return {
+        "max_tokens": int(settings.get("max_tokens") or 8000),
+        "timeout": float(settings.get("timeout") or 120.0),
+    }
+
+
+def _attach_model_route_to_agent_trace(trace: Dict[str, Any], model_route: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if isinstance(trace, dict) and isinstance(model_route, dict):
+        trace["model_role"] = model_route.get("role")
+        trace["model_route"] = model_route
+    return trace
+
+
+async def _resolve_runtime_writer_ai_service(
+    openai_config: Optional[dict],
+    context: Optional[Dict[str, Any]],
+) -> Tuple[AIService, Optional[Dict[str, Any]]]:
+    runtime_ai_service = _resolve_runtime_ai_service(openai_config)
+    role = _writer_role_from_openai_config(openai_config)
+    session_id, parent_id = _chat_project_scope(context)
+
+    try:
+        router = ModelRouter(runtime_ai_service, config, storage=storage_manager)
+        decision = await router.select_model(
+            role,
+            session_id=session_id,
+            parent_id=parent_id,
+        )
+        model_route = decision.to_dict()
+        model_route["runtime_settings"] = config.get_model_role_settings(role)
+        if session_id:
+            model_route["session_id"] = session_id
+        if parent_id:
+            model_route["parent_id"] = parent_id
+
+        selected_model = model_route.get("selected_model")
+        with_overrides = getattr(runtime_ai_service, "with_overrides", None)
+        if isinstance(selected_model, str) and selected_model.strip() and callable(with_overrides):
+            runtime_ai_service = with_overrides(model=selected_model, strict_model=True)
+        return runtime_ai_service, model_route
+    except Exception as exc:
+        current_config = getattr(runtime_ai_service, "config", None)
+        fallback_model = getattr(current_config, "model", None)
+        return runtime_ai_service, {
+            "role": role,
+            "selected_model": fallback_model,
+            "reason": "route_failed",
+            "error": str(exc)[:240],
+            "candidates": [],
+            "runtime_settings": config.get_model_role_settings(role),
+        }
+
+
+async def _record_writer_chat_health(
+    *,
+    model_route: Optional[Dict[str, Any]],
+    status_value: str,
+    latency_ms: int,
+    conversation_id: Optional[str],
+    context: Optional[Dict[str, Any]],
+    error_type: Optional[str] = None,
+    event_key: Optional[str] = None,
+) -> None:
+    if not isinstance(model_route, dict):
+        return
+    role = model_route.get("role")
+    model = model_route.get("selected_model")
+    if not isinstance(role, str) or not isinstance(model, str) or not model.strip():
+        return
+    session_id, parent_id = _chat_project_scope(context)
+    try:
+        await record_model_health_event(
+            storage_manager,
+            source="writer_chat_attempt",
+            role=role,
+            model=model,
+            status=status_value,
+            session_id=session_id,
+            parent_id=parent_id,
+            task_id=conversation_id,
+            task_type="chat",
+            latency_ms=max(0, int(latency_ms)),
+            error_type=error_type,
+            event_key=event_key,
+        )
+    except Exception:
+        logger.exception("Failed to record writer model health event")
 
 
 def _build_chat_system_prompt(context: Optional[Dict[str, Any]] = None) -> str:
@@ -1451,8 +1579,10 @@ async def send_message(request: ChatRequest):
        # Call AI service.
        system_prompt = _build_chat_system_prompt(request.context)
 
-       runtime_ai_service = _resolve_runtime_ai_service(
-           _openai_config_to_dict(request.openai_config)
+       openai_config = _openai_config_to_dict(request.openai_config)
+       runtime_ai_service, model_route = await _resolve_runtime_writer_ai_service(
+           openai_config,
+           request.context,
        )
        agent_preparation = await _get_writing_agent_runtime().prepare(
            user_message=request.message,
@@ -1461,11 +1591,29 @@ async def send_message(request: ChatRequest):
            base_system_prompt=system_prompt,
            ai_service=runtime_ai_service,
        )
+       _attach_model_route_to_agent_trace(agent_preparation.trace, model_route)
        
-       ai_response = await runtime_ai_service.chat(
-           prompt=request.message,
-           system_prompt=agent_preparation.system_prompt
-       )
+       writer_settings = _writer_generation_settings(model_route)
+       model_call_started = time.perf_counter()
+       try:
+           ai_response = await runtime_ai_service.chat(
+               prompt=request.message,
+               system_prompt=agent_preparation.system_prompt,
+               max_tokens=writer_settings["max_tokens"],
+               timeout=writer_settings["timeout"],
+           )
+       except Exception as exc:
+           latency_ms = int((time.perf_counter() - model_call_started) * 1000)
+           await _record_writer_chat_health(
+               model_route=model_route,
+               status_value="failed",
+               latency_ms=latency_ms,
+               conversation_id=conversation_id,
+               context=request.context,
+               error_type=ModelRouter.classify_error(exc),
+               event_key=f"{conversation_id}:failed:{int(time.time() * 1000)}",
+           )
+           raise
        
        # Save AI response.
        ai_message = Message(
@@ -1474,6 +1622,14 @@ async def send_message(request: ChatRequest):
            metadata={"agent_trace": agent_preparation.trace},
        )
        conversation.messages.append(ai_message)
+       await _record_writer_chat_health(
+           model_route=model_route,
+           status_value="success",
+           latency_ms=int((time.perf_counter() - model_call_started) * 1000),
+           conversation_id=conversation_id,
+           context=request.context,
+           event_key=f"{conversation_id}:{ai_message.id}:success",
+       )
        
        # Save updated conversation.
        conversation.updated_at = datetime.now()
@@ -1537,7 +1693,7 @@ async def get_conversation(conversation_id: str):
 @app.post("/api/chat/send-message-stream")
 async def send_chat_message_stream(request: ChatRequest):
     conversation_id = request.conversation_id or str(uuid.uuid4())
-    runtime_ai_service = _resolve_runtime_ai_service(_openai_config_to_dict(request.openai_config))
+    openai_config = _openai_config_to_dict(request.openai_config)
     conversation = await storage_manager.load(f"conversation_{conversation_id}", storage_type=CHAT_STORAGE_TYPE)
 
     if not conversation:
@@ -1557,8 +1713,13 @@ async def send_chat_message_stream(request: ChatRequest):
     async def event_generator():
         assistant_content = ""
         assistant_thinking = ""
+        model_route: Optional[Dict[str, Any]] = None
         try:
             yield f"data: {json.dumps({'type': 'status', 'stage': 'preparing_context', 'message': 'preparing_agent_context'}, ensure_ascii=False)}\n\n"
+            runtime_ai_service, model_route = await _resolve_runtime_writer_ai_service(
+                openai_config,
+                request.context,
+            )
             preparation_task = asyncio.create_task(
                 _get_writing_agent_runtime().prepare(
                     user_message=request.message,
@@ -1575,20 +1736,37 @@ async def send_chat_message_stream(request: ChatRequest):
                 except asyncio.TimeoutError:
                     yield f"data: {json.dumps({'type': 'status', 'stage': 'preparing_context', 'message': 'waiting_for_agent_context'}, ensure_ascii=False)}\n\n"
 
+            _attach_model_route_to_agent_trace(agent_preparation.trace, model_route)
             yield f"data: {json.dumps({'type': 'agent_trace', 'trace': agent_preparation.trace}, ensure_ascii=False)}\n\n"
-            async for event in runtime_ai_service.chat_stream(
-                prompt=request.message,
-                system_prompt=agent_preparation.system_prompt,
-            ):
-                if event["type"] == "thinking_delta":
-                    assistant_thinking += event["delta"]
-                elif event["type"] == "content_delta":
-                    assistant_content += event["delta"]
-                elif event["type"] == "message_complete":
-                    assistant_content = event.get("content", assistant_content)
-                    assistant_thinking = event.get("thinking", assistant_thinking)
+            writer_settings = _writer_generation_settings(model_route)
+            model_call_started = time.perf_counter()
+            try:
+                async for event in runtime_ai_service.chat_stream(
+                    prompt=request.message,
+                    system_prompt=agent_preparation.system_prompt,
+                    max_tokens=writer_settings["max_tokens"],
+                    timeout=writer_settings["timeout"],
+                ):
+                    if event["type"] == "thinking_delta":
+                        assistant_thinking += event["delta"]
+                    elif event["type"] == "content_delta":
+                        assistant_content += event["delta"]
+                    elif event["type"] == "message_complete":
+                        assistant_content = event.get("content", assistant_content)
+                        assistant_thinking = event.get("thinking", assistant_thinking)
 
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            except Exception as exc:
+                await _record_writer_chat_health(
+                    model_route=model_route,
+                    status_value="failed",
+                    latency_ms=int((time.perf_counter() - model_call_started) * 1000),
+                    conversation_id=conversation_id,
+                    context=request.context,
+                    error_type=ModelRouter.classify_error(exc),
+                    event_key=f"{conversation_id}:stream_failed:{int(time.time() * 1000)}",
+                )
+                raise
 
             assistant_message = Message(
                 role="assistant",
@@ -1596,6 +1774,14 @@ async def send_chat_message_stream(request: ChatRequest):
                 metadata={"agent_trace": agent_preparation.trace},
             )
             conversation.messages.append(assistant_message)
+            await _record_writer_chat_health(
+                model_route=model_route,
+                status_value="success",
+                latency_ms=int((time.perf_counter() - model_call_started) * 1000),
+                conversation_id=conversation_id,
+                context=request.context,
+                event_key=f"{conversation_id}:{assistant_message.id}:stream_success",
+            )
             conversation.updated_at = datetime.now()
             await storage_manager.save(
                 f"conversation_{conversation_id}",

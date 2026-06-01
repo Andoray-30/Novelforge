@@ -11,6 +11,32 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-06-01 写作侧模型路由与健康记录 v1
+### 本轮完成
+- 聊天写作链路接入 `ModelRouter`：
+  - `fast` 模式映射到 `writer_fast`。
+  - `pro` 模式映射到 `writer_pro`。
+- 非流式 `/api/chat/send-message` 和流式 `/api/chat/send-message-stream` 都会：
+  - 根据当前 session / selected novel 读取最近模型健康历史。
+  - 把写作模型路由结果写入 `agent_trace.model_route`。
+  - 把 `agent_trace.model_role` 标记为 `writer_fast` 或 `writer_pro`。
+  - 按 writer 角色读取 `timeout / max_tokens` 运行参数。
+- 新增通用 `record_model_health_event(...)`，支持写作调用记录模型健康事件。
+- 写作模型调用成功/失败会写入 `writer_chat_attempt` 事件，仅保存模型、角色、状态、延迟、错误类型和项目范围，不保存 prompt、小说正文或模型回复。
+- 模型健康汇总已把 `writer_chat_attempt` 纳入成功/失败 attempt 统计，后续可以和 extractor 健康报告统一展示。
+- 补回 `data/evaluate_import_smoke_quality.py`，让质量基准测试在干净工作区中可收集、可运行。
+
+### 验证
+- `pytest novelforge-core/tests/api/test_chat_agent_trace_api.py novelforge-core/tests/services/test_model_health.py novelforge-core/tests/services/test_model_router.py -q -p no:cacheprovider`：16 passed。
+- `pytest novelforge-core/tests/api/test_chat_agent_trace_api.py novelforge-core/tests/api/test_writing_agent_runtime.py novelforge-core/tests/api/test_auth.py novelforge-core/tests/services/test_model_health.py novelforge-core/tests/services/test_model_router.py -q -p no:cacheprovider`：48 passed。
+- `pytest novelforge-core/tests -q -p no:cacheprovider`：135 passed。
+- `python -m compileall novelforge-core/novelforge/api/__init__.py novelforge-core/novelforge/services/model_health.py`：passed。
+
+### 后续注意
+- 当前是一轮写作选择一个 writer 模型，尚未实现多阶段写作流水线。
+- 前端还需要把 writer route 摘要以低干扰方式展示给管理员或高级诊断视图。
+- 下一步应继续硬化 fallback 资产边界，避免规则摘录结果被当成 AI 理解资产。
+
 ## 2026-06-01 模型网关与提取策略暂停复盘
 ### 本轮完成
 - 暂停继续堆功能，围绕用户指出的核心问题整理模型网关、模型快慢差异、fallback 边界和 AI 引入价值。
