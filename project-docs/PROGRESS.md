@@ -11,6 +11,19 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-06-02 模型网关与 AI 提取价值暂停复盘补充
+
+- 暂停继续堆新功能，围绕“模型慢不等于不可用、快不等于适合提取、fallback 不能代表 AI 理解”补齐工程判断。
+- 更新 `project-docs/MODEL_GATEWAY_EXTRACTION_REVIEW_2026-06-02.md`：
+  - 明确 NovelForge 的 AI 价值不是搬运原文，而是把正文转成可写作项目记忆：角色动机、关系张力、事件意义、世界观规则和创作选择。
+  - 明确规则层、模型编排层、质量闭环层的职责边界。
+  - 明确慢模型应进入 `extractor_deep / writer_pro / judge` 等深度阶段，而不是按延迟简单淘汰。
+  - 明确实时测速需要记录 probe 层级、最近成功率、失败类型、延迟分桶和选择原因，而不是只测 hello。
+  - 明确 fallback 只能是 `chapter_text / diagnostic_seed / needs_ai_repair`，不能让状态升级为 `completed`，也不能隐式作为高可信写作记忆。
+  - 新增隐藏问题清单与当前暂停线：在模型阶段解释、fallback 可见、`extractor_deep` 补强入口、写作 trace 资产说明补齐前，不建议继续大规模扩 UI 或实验功能。
+- 本轮只更新分析文档，不提交真实 API Key、网关地址、管理员密码、session secret 或小说正文。
+- 当前下一步仍应优先推进：`extractor_deep` 补强预览入口、模型阶段可解释化、低置信资产对 agent 的显式边界。
+
 ## 2026-06-02 导入多阶段模型策略诊断 v1
 
 - 继续推进模型网关复盘后的 P0：不再把所有质量压力压在首轮 extractor 上，导入结果开始明确记录 `extractor_fast -> extractor_repair -> extractor_deep -> judge` 的阶段状态。
