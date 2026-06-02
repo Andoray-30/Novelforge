@@ -478,6 +478,8 @@ def test_novel_import_uses_chapter_index_analysis_and_returns_diagnostics(monkey
     assert result["analysis_diagnostics"]["failed_chapters"][0]["chapter_id"] == "chapter-x"
     assert result["candidate_counts"]["chapter_character_candidates"] == 2
     assert result["relationship_unresolved_endpoints"] == ["陌生人"]
+    assert result["model_stage_plan"]["next_recommended_stage"] == "extractor_repair"
+    assert result["analysis_diagnostics"]["model_stage_plan"]["next_recommended_stage"] == "extractor_repair"
 
 
 def test_novel_import_marks_low_information_character_assets_for_repair(monkeypatch, tmp_path):
@@ -652,6 +654,31 @@ def test_chapter_index_analysis_rejects_all_diagnostic_seed_characters():
     assert result["candidate_counts"]["diagnostic_seed_characters"] == 9
     assert result["candidate_counts"]["needs_ai_repair_characters"] == 9
     assert any("diagnostic seeds" in issue for issue in result["quality_issues"])
+    assert result["candidate_counts"]["model_stage_deep_recommended"] is True
+    assert result["model_stage_plan"]["next_recommended_stage"] == "extractor_deep"
+    stages = {stage["model_role"]: stage for stage in result["model_stage_plan"]["stages"]}
+    assert stages["extractor_repair"]["status"] == "skipped"
+    assert stages["extractor_deep"]["status"] == "recommended"
+
+
+def test_import_model_stage_plan_repairs_empty_foundation_before_deep():
+    scheduler = build_scheduler(storage_manager=MemoryStorageManager())
+
+    plan = scheduler._build_import_model_stage_plan(
+        diagnostics={},
+        candidate_counts={},
+        failed_chapters=[],
+        quality_issues=["角色提取为空"],
+        errors=[],
+        analysis_status="failed",
+        model_route=None,
+    )
+
+    stages = {stage["model_role"]: stage for stage in plan["stages"]}
+    assert plan["next_recommended_stage"] == "extractor_repair"
+    assert stages["extractor_repair"]["status"] == "recommended"
+    assert stages["extractor_repair"]["evidence"]["foundational_retry_needed"] is True
+    assert stages["extractor_deep"]["status"] == "blocked"
 
 
 def test_import_chapter_index_analysis_persists_attempt_run_state():
@@ -1260,6 +1287,18 @@ def test_import_deep_analysis_prefers_chapter_index_assets_when_chapters_availab
     assert result["stage_results"]["chapter_index"] == "completed"
     assert result["analysis_status"] == "completed"
     assert result["candidate_counts"]["chapter_character_candidates"] == 9
+    assert result["model_stage_plan"]["next_recommended_stage"] is None
+    stages = {stage["model_role"]: stage for stage in result["model_stage_plan"]["stages"]}
+    assert stages["extractor_fast"]["status"] == "completed"
+    assert stages["extractor_repair"]["status"] == "skipped"
+    assert stages["extractor_deep"]["status"] == "skipped"
+    assert stages["judge"]["status"] == "completed"
+    assert result["analysis_diagnostics"]["model_stage_plan"]["pipeline"] == [
+        "extractor_fast",
+        "extractor_repair",
+        "extractor_deep",
+        "judge",
+    ]
 
 
 def test_import_deep_analysis_marks_empty_chapter_index_result_failed():
@@ -1310,6 +1349,10 @@ def test_import_deep_analysis_marks_empty_chapter_index_result_failed():
     assert result["analysis_status"] == "failed"
     assert result["failed_chapters"][0]["error"] == "ConnectError"
     assert any("failed_chapters: 2" == error for error in result["errors"])
+    assert result["model_stage_plan"]["next_recommended_stage"] == "extractor_repair"
+    stages = {stage["model_role"]: stage for stage in result["model_stage_plan"]["stages"]}
+    assert stages["extractor_repair"]["status"] == "recommended"
+    assert stages["extractor_deep"]["status"] == "blocked"
 
 
 def test_import_deep_analysis_marks_relationship_coverage_low_quality():

@@ -1679,6 +1679,145 @@ class AITaskScheduler:
 
         return extracted
 
+    @staticmethod
+    def _build_model_stage_entry(
+        *,
+        name: str,
+        role: str,
+        status: str,
+        purpose: str,
+        trigger: Optional[str] = None,
+        evidence: Optional[Dict[str, Any]] = None,
+        route: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        entry: Dict[str, Any] = {
+            "name": name,
+            "model_role": role,
+            "status": status,
+            "purpose": purpose,
+        }
+        if trigger:
+            entry["trigger"] = trigger
+        if evidence:
+            entry["evidence"] = evidence
+        if route:
+            entry["model_route"] = route
+        return entry
+
+    def _build_import_model_stage_plan(
+        self,
+        *,
+        diagnostics: Dict[str, Any],
+        candidate_counts: Dict[str, Any],
+        failed_chapters: List[Dict[str, Any]],
+        quality_issues: List[str],
+        errors: List[str],
+        analysis_status: str,
+        model_route: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        def count_value(key: str) -> int:
+            try:
+                return int(candidate_counts.get(key) or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        failed_chapter_count = len(failed_chapters or [])
+        needs_retry_count = count_value("chapter_index_needs_retry")
+        low_quality = analysis_status in {"low_quality", "partial", "failed"} or bool(quality_issues or errors)
+        has_structured_signal = any([
+            count_value("chapter_character_candidates") > 0,
+            count_value("chapter_interaction_candidates") > 0,
+            count_value("chapter_event_candidates") > 0,
+            count_value("chapter_world_fact_candidates") > 0,
+        ])
+
+        foundational_retry_needed = analysis_status == "failed" and not has_structured_signal
+        repair_needed = failed_chapter_count > 0 or needs_retry_count > 0 or bool(errors) or foundational_retry_needed
+        deep_needed = low_quality and not repair_needed
+        deep_blocked = low_quality and repair_needed
+        next_stage = "extractor_repair" if repair_needed else "extractor_deep" if deep_needed else None
+
+        stages = [
+            self._build_model_stage_entry(
+                name="fast_index",
+                role="extractor_fast",
+                status="completed",
+                purpose="章节级广覆盖候选召回，优先保证角色、互动、事件和世界观事实不漏章。",
+                evidence={
+                    "candidate_counts": {
+                        key: candidate_counts.get(key)
+                        for key in [
+                            "chapter_character_candidates",
+                            "chapter_interaction_candidates",
+                            "chapter_event_candidates",
+                            "chapter_world_fact_candidates",
+                            "chapters_indexed",
+                            "chapters_total",
+                        ]
+                        if key in candidate_counts
+                    }
+                },
+                route=model_route if isinstance(model_route, dict) and model_route.get("role") == "extractor_fast" else None,
+            ),
+            self._build_model_stage_entry(
+                name="repair_failed_chapters",
+                role="extractor_repair",
+                status="recommended" if repair_needed else "skipped",
+                purpose="只重跑失败章节或结构化失败结果，按错误类型切换模型、缩短 chunk 或降低并发。",
+                trigger=(
+                    "首轮没有可补强的结构化候选，需要先重跑基础索引"
+                    if foundational_retry_needed
+                    else "存在失败章节、需重试章节或导入阶段错误"
+                    if repair_needed
+                    else "首轮章节索引没有失败章"
+                ),
+                evidence={
+                    "failed_chapters": failed_chapter_count,
+                    "needs_retry": needs_retry_count,
+                    "errors": len(errors or []),
+                    "foundational_retry_needed": foundational_retry_needed,
+                    "repair_strategy": diagnostics.get("repair_strategy"),
+                },
+            ),
+            self._build_model_stage_entry(
+                name="deep_asset_enrichment",
+                role="extractor_deep",
+                status="blocked" if deep_blocked else "recommended" if deep_needed else "skipped",
+                purpose="对核心角色、薄弱关系和关键世界观做低并发深度补强，不负责全书首轮召回。",
+                trigger=(
+                    "质量门槛未通过，但需先修复失败章节"
+                    if deep_blocked
+                    else "质量门槛未通过且首轮结构化结果可用于补强"
+                    if deep_needed
+                    else "当前质量门槛未要求深度补强"
+                ),
+                evidence={
+                    "analysis_status": analysis_status,
+                    "quality_issue_count": len(quality_issues or []),
+                    "has_structured_signal": has_structured_signal,
+                },
+            ),
+            self._build_model_stage_entry(
+                name="quality_judge",
+                role="judge",
+                status="completed",
+                purpose="基于质量门槛给出 completed / low_quality / partial / failed；当前为规则 judge，后续可切换为模型 judge。",
+                trigger="导入分析完成后固定执行",
+                evidence={
+                    "analysis_status": analysis_status,
+                    "quality_issues": quality_issues[:12],
+                    "error_count": len(errors or []),
+                },
+            ),
+        ]
+
+        return {
+            "version": "2026-06-02-v1",
+            "pipeline": ["extractor_fast", "extractor_repair", "extractor_deep", "judge"],
+            "next_recommended_stage": next_stage,
+            "stages": stages,
+        }
+
     async def _run_import_chapter_index_analysis(
         self,
         extraction_service: Any,
@@ -1812,6 +1951,24 @@ class AITaskScheduler:
             extracted["analysis_status"] = "low_quality"
         else:
             extracted["analysis_status"] = "completed"
+
+        model_stage_plan = self._build_import_model_stage_plan(
+            diagnostics=diagnostics,
+            candidate_counts=extracted["candidate_counts"],
+            failed_chapters=extracted["failed_chapters"],
+            quality_issues=extracted["quality_issues"],
+            errors=extracted["errors"],
+            analysis_status=extracted["analysis_status"],
+            model_route=extracted.get("model_route"),
+        )
+        diagnostics["model_stage_plan"] = model_stage_plan
+        extracted["model_stage_plan"] = model_stage_plan
+        extracted["candidate_counts"]["model_stage_repair_recommended"] = (
+            model_stage_plan.get("next_recommended_stage") == "extractor_repair"
+        )
+        extracted["candidate_counts"]["model_stage_deep_recommended"] = (
+            model_stage_plan.get("next_recommended_stage") == "extractor_deep"
+        )
 
         if extracted["quality_issues"]:
             extracted["analysis_warning"] = "；".join(extracted["quality_issues"]) + "。已保留成功提取的结构化结果。"
@@ -2449,6 +2606,7 @@ class AITaskScheduler:
         failed_chapters: List[Dict[str, Any]] = []
         relationship_unresolved_endpoints: List[str] = []
         timeline_mismatch_events: List[Dict[str, Any]] = []
+        model_stage_plan: Dict[str, Any] = {}
         source_fingerprint = None
         if isinstance(result.content, str):
             source_fingerprint = hashlib.sha256(result.content.encode("utf-8")).hexdigest()
@@ -2567,6 +2725,7 @@ class AITaskScheduler:
             failed_chapters = extracted.get("failed_chapters", [])
             relationship_unresolved_endpoints = extracted.get("relationship_unresolved_endpoints", [])
             timeline_mismatch_events = extracted.get("timeline_mismatch_events", [])
+            model_stage_plan = extracted.get("model_stage_plan") or analysis_diagnostics.get("model_stage_plan") or {}
 
             task.message = "AI 分析完成，正在保存结果..."
             await self._save_task(task)
@@ -2589,6 +2748,16 @@ class AITaskScheduler:
             failed_chapters = []
             relationship_unresolved_endpoints = []
             timeline_mismatch_events = []
+            model_stage_plan = self._build_import_model_stage_plan(
+                diagnostics=analysis_diagnostics,
+                candidate_counts=candidate_counts,
+                failed_chapters=failed_chapters,
+                quality_issues=analysis_quality_issues,
+                errors=extracted["errors"],
+                analysis_status=analysis_status,
+                model_route=None,
+            )
+            analysis_diagnostics["model_stage_plan"] = model_stage_plan
             task.message = f"AI 分析失败: {str(e)[:50]}"
             await self._save_task(task)
         
@@ -2829,6 +2998,7 @@ class AITaskScheduler:
             "failed_chapters": failed_chapters,
             "relationship_unresolved_endpoints": relationship_unresolved_endpoints,
             "timeline_mismatch_events": timeline_mismatch_events,
+            "model_stage_plan": model_stage_plan,
         }
     
     async def submit_task(self, task_type: str, parameters: Dict[str, Any], 

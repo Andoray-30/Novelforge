@@ -11,6 +11,31 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-06-02 导入多阶段模型策略诊断 v1
+
+- 继续推进模型网关复盘后的 P0：不再把所有质量压力压在首轮 extractor 上，导入结果开始明确记录 `extractor_fast -> extractor_repair -> extractor_deep -> judge` 的阶段状态。
+- `ai_scheduler.py` 新增 `model_stage_plan`：
+  - `pipeline`：固定展示四阶段角色链路。
+  - `stages`：每个阶段记录 `model_role / status / purpose / trigger / evidence`。
+  - `next_recommended_stage`：根据失败章、需重试章、质量问题和结构化候选情况给出下一步建议。
+- 当前策略：
+  - `extractor_fast`：章节级广覆盖候选召回，当前主链路已执行。
+  - `extractor_repair`：存在 failed chapters、needs retry、导入错误，或首轮没有任何可补强结构化候选时推荐。
+  - `extractor_deep`：质量门槛未通过、但首轮已有可补强候选且没有失败章阻塞时推荐。
+  - `judge`：当前先记录为规则质量门槛已执行，后续可切到模型 judge。
+- 导入任务最终 result 现在透出：
+  - `model_stage_plan`
+  - `analysis_diagnostics.model_stage_plan`
+  - `candidate_counts.model_stage_repair_recommended`
+  - `candidate_counts.model_stage_deep_recommended`
+- 验证：
+  - `pytest novelforge-core/tests/services/test_ai_scheduler_import.py -q -p no:cacheprovider`：35 passed。
+  - `pytest test_model_health.py test_model_router.py test_ai_scheduler_import.py -q -p no:cacheprovider`：49 passed。
+  - `compileall novelforge-core/novelforge/services/ai_scheduler.py`：通过。
+- 当前边界：
+  - 本轮只落地多阶段诊断和触发决策，没有真正调用 `extractor_deep` 或模型 `judge`。
+  - 下一步应把 `extractor_deep` 接成可确认的补强任务，先处理低信息角色、薄弱关系和世界观规则，不重跑全书。
+
 ## 2026-06-02 模型 probe prompt 去样本特化 v1
 
 - 继续处理模型网关复盘文档 P0：模型测速不能被乱码或单本样本信息污染。
