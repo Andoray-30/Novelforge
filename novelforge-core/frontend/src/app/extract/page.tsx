@@ -1463,6 +1463,8 @@ export default function ExtractPage() {
                               <p className="mt-1 text-[var(--nf-text-muted)]">
                                 {ranking.reasonLabel || '未记录原因'} · 成功 {ranking.successfulAttempts} · 失败 {ranking.failedAttempts}
                                 {ranking.averageLatencyMs !== null ? ` · 平均 ${ranking.averageLatencyMs}ms` : ''}
+                                {ranking.latencyToleranceMs !== null ? ` · 容忍 ${ranking.latencyToleranceMs}ms` : ''}
+                                {ranking.latencyPenalty !== null && ranking.latencyPenalty > 0 ? ` · 延迟惩罚 ${ranking.latencyPenalty}` : ''}
                               </p>
                               {ranking.errorCounts.length > 0 ? (
                                 <p className="mt-1 text-[var(--nf-warning)]">

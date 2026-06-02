@@ -23,6 +23,8 @@ export type ModelHealthRankingSummary = {
   probePassed: number;
   probeFailed: number;
   averageLatencyMs: number | null;
+  latencyToleranceMs: number | null;
+  latencyPenalty: number | null;
   errorCounts: Array<{ type: string; label: string; count: number }>;
 };
 
@@ -138,6 +140,8 @@ function normalizeHealthRanking(value: unknown): ModelHealthRankingSummary | nul
     probePassed: asNumber(payload.probe_passed) ?? 0,
     probeFailed: asNumber(payload.probe_failed) ?? 0,
     averageLatencyMs: asNumber(payload.average_latency_ms),
+    latencyToleranceMs: asNumber(payload.latency_tolerance_ms),
+    latencyPenalty: asNumber(payload.latency_penalty),
     errorCounts: errorCountsToList(payload.error_counts),
   };
 }

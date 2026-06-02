@@ -86,11 +86,15 @@ function healthRankingLabel(route: Record<string, unknown> | undefined, selected
   const reason = typeof ranking.reason === 'string' ? getModelHealthRankingReasonLabel(ranking.reason) : null
   const success = numberFromRecord(ranking, 'successful_attempts') ?? 0
   const failed = numberFromRecord(ranking, 'failed_attempts') ?? 0
+  const tolerance = numberFromRecord(ranking, 'latency_tolerance_ms')
+  const penalty = numberFromRecord(ranking, 'latency_penalty')
   const parts = [
     score !== null ? `健康分 ${score}` : null,
     reason,
     `成功 ${success}`,
     `失败 ${failed}`,
+    tolerance !== null ? `延迟容忍 ${tolerance}ms` : null,
+    penalty !== null && penalty > 0 ? `延迟惩罚 ${penalty}` : null,
   ].filter((item): item is string => Boolean(item))
   return parts.length > 0 ? parts.join(' · ') : undefined
 }

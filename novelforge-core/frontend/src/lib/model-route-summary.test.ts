@@ -26,6 +26,8 @@ describe('model route summary', () => {
               probe_passed: 1,
               probe_failed: 0,
               average_latency_ms: 3200,
+              latency_tolerance_ms: 20000,
+              latency_penalty: 0,
               error_counts: {},
             },
           ],
@@ -62,6 +64,8 @@ describe('model route summary', () => {
       successfulAttempts: 1,
       probePassed: 1,
     });
+    expect(summary?.healthRankings[0].latencyToleranceMs).toBe(20000);
+    expect(summary?.healthRankings[0].latencyPenalty).toBe(0);
     expect(summary?.probeResults[0].errorType).toBe('empty_content');
     expect(summary?.probeResults[1].extractionRich).toBe(true);
   });

@@ -11,6 +11,26 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-06-02 模型路由延迟策略前端可解释 v1
+
+- 承接上一轮角色感知模型健康排序，把新增排序字段接入前端诊断层：
+  - `latency_tolerance_ms`
+  - `latency_penalty`
+- `model-route-summary` 标准化层现在保留延迟容忍和延迟惩罚字段，避免后端解释信息被前端丢弃。
+- Extract 页“模型路由诊断 / 历史健康排序”会显示：
+  - 平均延迟
+  - 当前任务角色的延迟容忍
+  - 是否存在延迟惩罚
+- TaskCenter 修复批次摘要会把延迟容忍写入 `healthRankingLabel`，用户查看修复任务时也能理解为什么慢模型仍可能被选中。
+- 验证：
+  - `npm test -- src/lib/model-route-summary.test.ts src/components/layout/TaskCenter.test.ts --run`：2 files / 12 tests passed。
+  - `npx tsc --noEmit --incremental false`：通过。
+  - `npm test -- --run`：31 files / 133 tests passed。
+  - `npm run build`：通过。
+- 当前边界：
+  - 本轮只做前端可解释化，不发起真实模型测速。
+  - 远端 GitHub 当前仍不可达，本地提交将继续排队等待 push。
+
 ## 2026-06-02 模型健康排序角色感知 v1
 
 - 继续落实模型网关复盘后的核心判断：慢模型不等于不可用，不同任务阶段应使用不同模型策略。

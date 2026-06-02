@@ -150,6 +150,8 @@ describe('TaskCenter summaries', () => {
                   reason: 'positive_history',
                   successful_attempts: 2,
                   failed_attempts: 0,
+                  latency_tolerance_ms: 90000,
+                  latency_penalty: 0,
                 },
               ],
             },
@@ -168,7 +170,7 @@ describe('TaskCenter summaries', () => {
       actionLabel: '缩短分段并延长超时',
       errorTypeLabel: '网关超时',
       modelLabel: 'slow-stable-model',
-      healthRankingLabel: '健康分 28 · 历史成功率较高 · 成功 2 · 失败 0',
+      healthRankingLabel: '健康分 28 · 历史成功率较高 · 成功 2 · 失败 0 · 延迟容忍 90000ms',
     })
     expect(details[1]).toMatchObject({
       chapterCount: 2,
