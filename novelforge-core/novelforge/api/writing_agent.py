@@ -681,6 +681,16 @@ def _is_enriched_relationship(item: ContentItem) -> bool:
     return _as_str(payload.get("repair_status")) == "confirmed"
 
 
+def _is_enriched_asset(item: ContentItem) -> bool:
+    payload = _payload(item)
+    flags = set(_quality_flags(item))
+    if flags.intersection({"asset_enriched", "character_enriched", "world_enriched", "relationship_enriched"}):
+        return True
+    if _as_str(payload.get("repair_status")).lower() == "confirmed":
+        return True
+    return _as_str(payload.get("source_type")).lower() == "user_confirmed_repair"
+
+
 def _truthy_flag(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -703,6 +713,7 @@ def _asset_quality_trace(item: ContentItem, diagnostics: Optional[Dict[str, Any]
     flags = _quality_flags(item)
     flag_set = set(flags)
     source_type = _as_str(payload.get("source_type")).lower()
+    enriched_asset = _is_enriched_asset(item)
     diagnostic_seed = (
         source_type in {"diagnostic_seed", "fallback", "rule_fallback"}
         or _truthy_flag(payload.get("diagnostic_seed"))
@@ -711,19 +722,23 @@ def _asset_quality_trace(item: ContentItem, diagnostics: Optional[Dict[str, Any]
         or "fallback_seed" in flag_set
     )
     needs_ai_repair = (
-        diagnostic_seed
-        or _truthy_flag(payload.get("needs_ai_repair"))
-        or bool(flag_set.intersection({
-            "needs_ai_repair",
-            "minimal_profile",
-            "missing_evidence",
-            "unresolved_endpoint",
-            "timeline_title_description_mismatch",
-        }))
+        False
+        if enriched_asset
+        else (
+            diagnostic_seed
+            or _truthy_flag(payload.get("needs_ai_repair"))
+            or bool(flag_set.intersection({
+                "needs_ai_repair",
+                "minimal_profile",
+                "missing_evidence",
+                "unresolved_endpoint",
+                "timeline_title_description_mismatch",
+            }))
+        )
     )
     readiness = _as_str((diagnostics or {}).get("relationship_creative_readiness"))
     score = int((diagnostics or {}).get("score") or 0) if isinstance((diagnostics or {}).get("score"), int) else None
-    low_confidence = needs_ai_repair or readiness == "thin" or (score is not None and score <= 2)
+    low_confidence = False if enriched_asset else needs_ai_repair or readiness == "thin" or (score is not None and score <= 2)
 
     warnings: List[str] = []
     if diagnostic_seed:
@@ -738,6 +753,8 @@ def _asset_quality_trace(item: ContentItem, diagnostics: Optional[Dict[str, Any]
         warnings.append("关系端点未闭合")
 
     result: Dict[str, Any] = {}
+    if enriched_asset:
+        result["asset_enriched"] = True
     if flags:
         result["quality_flags"] = flags
     if source_type:
@@ -1497,12 +1514,10 @@ class WritingAgentRuntime:
             return list(result.items)
 
         def sort_candidates(candidates: List[ContentItem]) -> List[ContentItem]:
-            if requested_types and ContentType.RELATIONSHIP not in requested_types:
-                return candidates
             return sorted(
                 candidates,
                 key=lambda candidate: (
-                    0 if _is_enriched_relationship(candidate) else 1,
+                    0 if _is_enriched_asset(candidate) else 1,
                     candidate.metadata.updated_at or "",
                 ),
             )
@@ -1517,6 +1532,7 @@ class WritingAgentRuntime:
             text = _content_text(item) or json.dumps(_payload(item), ensure_ascii=False)
             item_type = _type_name(item.metadata.type)
             enriched_relationship = _is_enriched_relationship(item)
+            enriched_asset = _is_enriched_asset(item)
             diagnostics = _creative_diagnostics(
                 item_type,
                 _diagnostic_source_text(item, text),
@@ -1537,6 +1553,7 @@ class WritingAgentRuntime:
                     "summary": _clip(text, MAX_ASSET_SUMMARY),
                     "creative_diagnostics": diagnostics,
                     "diagnostic_summary": diagnostics["summary"],
+                    **({"asset_enriched": True} if enriched_asset else {}),
                     **({"relationship_enriched": True} if enriched_relationship else {}),
                     **_asset_quality_trace(item, diagnostics),
                     **({"repair_suggestion": repair_suggestion} if repair_suggestion else {}),
@@ -1554,6 +1571,7 @@ class WritingAgentRuntime:
                 text = _content_text(item) or json.dumps(_payload(item), ensure_ascii=False)
                 item_type = _type_name(item.metadata.type)
                 enriched_relationship = _is_enriched_relationship(item)
+                enriched_asset = _is_enriched_asset(item)
                 diagnostics = _creative_diagnostics(
                     item_type,
                     _diagnostic_source_text(item, text),
@@ -1574,6 +1592,7 @@ class WritingAgentRuntime:
                         "summary": _clip(text, MAX_ASSET_SUMMARY),
                         "creative_diagnostics": diagnostics,
                         "diagnostic_summary": diagnostics["summary"],
+                        **({"asset_enriched": True} if enriched_asset else {}),
                         **({"relationship_enriched": True} if enriched_relationship else {}),
                         **_asset_quality_trace(item, diagnostics),
                         **({"repair_suggestion": repair_suggestion} if repair_suggestion else {}),
@@ -1612,6 +1631,7 @@ class WritingAgentRuntime:
             and diagnostics.get("relationship_creative_readiness") != "strong"
             else None
         )
+        enriched_asset = _is_enriched_asset(item)
         return ToolObservation(
             name="get_asset_detail",
             status="ok",
@@ -1624,6 +1644,7 @@ class WritingAgentRuntime:
                     "summary": _clip(text, max_chars),
                     "creative_diagnostics": diagnostics,
                     "diagnostic_summary": diagnostics["summary"],
+                    **({"asset_enriched": True} if enriched_asset else {}),
                     **({"relationship_enriched": True} if enriched_relationship else {}),
                     **_asset_quality_trace(item, diagnostics),
                     **({"repair_suggestion": repair_suggestion} if repair_suggestion else {}),
@@ -1885,6 +1906,7 @@ class WritingAgentRuntime:
                             "type": item.get("type"),
                             "title": item.get("title"),
                             "creative_diagnostics": item.get("creative_diagnostics"),
+                            "asset_enriched": item.get("asset_enriched"),
                             "relationship_enriched": item.get("relationship_enriched"),
                             "quality_flags": item.get("quality_flags"),
                             "source_type": item.get("source_type"),
@@ -1921,6 +1943,7 @@ class WritingAgentRuntime:
                 1 for item in used_assets
                 if item.get("low_confidence") or item.get("needs_ai_repair") or item.get("diagnostic_seed")
             ),
+            "enriched_assets": sum(1 for item in used_assets if item.get("asset_enriched")),
         }
         relationship_assets = [item for item in used_assets if item.get("type") == "relationship"]
         relationship_quality_report = _relationship_quality_report(relationship_assets)
@@ -1991,7 +2014,14 @@ class WritingAgentRuntime:
             "used_assets": [],
             "chapter_snippets": [],
             "retrieval_coverage": {
-                "counts": {"characters": 0, "relationships": 0, "world": 0, "chapter_snippets": 0, "low_confidence_assets": 0},
+                "counts": {
+                    "characters": 0,
+                    "relationships": 0,
+                    "world": 0,
+                    "chapter_snippets": 0,
+                    "low_confidence_assets": 0,
+                    "enriched_assets": 0,
+                },
                 "issues": [],
             },
             "creative_diagnostics": [],

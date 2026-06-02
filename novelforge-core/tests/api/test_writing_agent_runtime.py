@@ -295,6 +295,89 @@ def test_enriched_relationships_are_prioritized_and_marked_in_trace() -> None:
     assert trace["relationship_repair_suggestions"][0]["relationship_id"] == "rel-thin"
 
 
+def test_enriched_character_and_world_assets_are_prioritized_and_marked_in_trace() -> None:
+    manager, storage = build_manager()
+    run(
+        manager.create_content(
+            build_item(
+                "char-thin",
+                title="Alex",
+                content_type=ContentType.CHARACTER,
+                content="Alex is present but thin.",
+                extracted_data={"name": "Alex", "quality_flags": ["needs_ai_repair"], "needs_ai_repair": True},
+            )
+        )
+    )
+    run(
+        manager.create_content(
+            build_item(
+                "char-enriched",
+                title="Alex · AI 补强",
+                content_type=ContentType.CHARACTER,
+                content="Alex protects others because every saved life postpones an old guilt. He wants truth but fears becoming a weapon.",
+                extracted_data={
+                    "name": "Alex",
+                    "source_type": "user_confirmed_repair",
+                    "repair_status": "confirmed",
+                    "quality_flags": ["asset_enriched", "character_enriched"],
+                },
+            )
+        )
+    )
+    run(
+        manager.create_content(
+            build_item(
+                "world-thin",
+                title="Debt City",
+                content_type=ContentType.WORLD,
+                content="A city with debts.",
+            )
+        )
+    )
+    run(
+        manager.create_content(
+            build_item(
+                "world-enriched",
+                title="Debt City · AI 补强",
+                content_type=ContentType.WORLD,
+                content="Every public debt becomes a visible rule of the city; names unlock obligations and change what a character can choose.",
+                extracted_data={
+                    "title": "Debt City · AI 补强",
+                    "source_type": "user_confirmed_repair",
+                    "repair_status": "confirmed",
+                    "quality_flags": ["asset_enriched", "world_enriched"],
+                },
+            )
+        )
+    )
+    runtime = WritingAgentRuntime(manager, storage)
+    scope = AgentScope(session_id="session-a", selected_novel_id="novel-a")
+
+    character_observation = run(runtime.search_project_assets(scope, {"query": "", "types": ["character"], "limit": 2}))
+    world_observation = run(runtime.search_project_assets(scope, {"query": "", "types": ["world"], "limit": 2}))
+
+    assert character_observation.items[0]["id"] == "char-enriched"
+    assert character_observation.items[0]["asset_enriched"] is True
+    assert character_observation.items[0].get("low_confidence") is None
+    assert character_observation.items[1]["id"] == "char-thin"
+    assert character_observation.items[1]["low_confidence"] is True
+    assert world_observation.items[0]["id"] == "world-enriched"
+    assert world_observation.items[0]["asset_enriched"] is True
+
+    trace = runtime._build_trace(
+        {"plan_summary": "test"},
+        [character_observation, world_observation],
+        degraded=False,
+    )
+
+    assert trace["used_assets"][0]["id"] == "char-enriched"
+    assert trace["used_assets"][0]["asset_enriched"] is True
+    assert trace["used_assets"][2]["id"] == "world-enriched"
+    assert trace["used_assets"][2]["asset_enriched"] is True
+    assert trace["retrieval_coverage"]["counts"]["enriched_assets"] == 2
+    assert trace["retrieval_coverage"]["counts"]["low_confidence_assets"] == 2
+
+
 def test_trace_marks_repair_needed_assets_as_low_confidence_context() -> None:
     manager, storage = build_manager()
     run(

@@ -11,6 +11,7 @@ export type AgentTraceAsset = {
   id?: string;
   type?: string;
   title?: string;
+  asset_enriched?: boolean;
   relationship_enriched?: boolean;
   quality_flags: string[];
   source_type?: string;
@@ -52,6 +53,7 @@ export type AgentRetrievalCoverage = {
     world: number;
     chapter_snippets: number;
     low_confidence_assets: number;
+    enriched_assets?: number;
   };
   issues: string[];
 };
@@ -228,6 +230,7 @@ export function normalizeAgentTrace(value: unknown): AgentTrace | undefined {
         id: asString(item.id) || undefined,
         type: asString(item.type) || undefined,
         title: asString(item.title) || undefined,
+        asset_enriched: asBoolean(item.asset_enriched),
         relationship_enriched: asBoolean(item.relationship_enriched),
         quality_flags: asStringArray(item.quality_flags),
         source_type: asString(item.source_type) || undefined,
@@ -254,7 +257,8 @@ export function normalizeAgentTrace(value: unknown): AgentTrace | undefined {
       world: asNumber(value.retrieval_coverage.counts.world) ?? 0,
       chapter_snippets: asNumber(value.retrieval_coverage.counts.chapter_snippets) ?? 0,
       low_confidence_assets: asNumber(value.retrieval_coverage.counts.low_confidence_assets) ?? 0,
-    } : { characters: 0, relationships: 0, world: 0, chapter_snippets: 0, low_confidence_assets: 0 },
+      enriched_assets: asNumber(value.retrieval_coverage.counts.enriched_assets),
+    } : { characters: 0, relationships: 0, world: 0, chapter_snippets: 0, low_confidence_assets: 0, enriched_assets: 0 },
     issues: asStringArray(value.retrieval_coverage.issues),
   } : undefined;
 

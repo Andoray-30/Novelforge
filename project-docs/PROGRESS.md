@@ -11,6 +11,34 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-06-02 写作 Agent 优先使用补强资产 v1
+
+- 将已确认 / 已补强资产真正接入写作 Agent 检索排序：
+  - `repair_status=confirmed`、`source_type=user_confirmed_repair` 或带 `asset_enriched / character_enriched / world_enriched / relationship_enriched` 质量标记的资产，会在同类资产检索中优先返回。
+  - 优先级覆盖角色、世界观、关系等写作上下文资产，不再只停留在修复任务或内容库写入层。
+- 写作 trace 增加补强资产可解释性：
+  - `used_assets` 输出 `asset_enriched`。
+  - `retrieval_coverage.counts` 输出 `enriched_assets`。
+  - 前端“本轮写作依据”资产标签显示“已补强”。
+- 修复确认写回时清理已解决的低质量标记：
+  - deep preview 确认写回角色 / 世界观时，会过滤 `needs_ai_repair`、`diagnostic_seed`、`minimal_profile`、`missing_evidence`、`fallback_seed` 等已由补强解决的旧 flags。
+  - 避免“已补强资产”仍被 Agent 当成低置信资产。
+- 新增测试覆盖：
+  - 写作 Agent 优先读取补强角色和补强世界观资产。
+  - trace 正确标记补强资产数量。
+  - 前端 trace normalize 支持 `asset_enriched` 和 `enriched_assets`。
+- 验证：
+  - `pytest novelforge-core/tests/api/test_writing_agent_runtime.py -q -p no:cacheprovider`：27 passed。
+  - `pytest novelforge-core/tests/api/test_writing_agent_runtime.py novelforge-core/tests/api/test_chat_agent_trace_api.py novelforge-core/tests/services/test_ai_scheduler_import.py -q -p no:cacheprovider`：67 passed。
+  - `compileall novelforge-core/novelforge/api/writing_agent.py novelforge-core/novelforge/services/ai_scheduler.py`：通过。
+  - `npm test -- src/lib/agent-trace.test.ts --run`：1 file / 3 tests passed。
+  - `npx tsc --noEmit --incremental false`：通过。
+  - `npm test -- --run`：31 files / 133 tests passed。
+  - `npm run build`：通过。
+- 当前边界：
+  - 本轮解决“补强资产入库后 Agent 是否实际优先使用”的断点。
+  - 尚未重新跑真实外部模型序章闭环；下一步应验证补强关系 / 角色进入上下文后，生成文本是否更依赖人物关系和性格冲突，而不是只靠氛围。
+
 ## 2026-06-02 deep 补强确认写回 v1
 
 - 将 `deep_asset_enrichment` preview 接入现有 `import_repair_apply` 确认写回流程。

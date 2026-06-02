@@ -55,6 +55,7 @@ describe('agent trace normalization', () => {
           id: 'rel-enriched',
           type: 'relationship',
           title: 'A/B',
+          asset_enriched: true,
           relationship_enriched: true,
           quality_flags: ['relationship_enriched', 'needs_ai_repair'],
           needs_ai_repair: true,
@@ -63,7 +64,7 @@ describe('agent trace normalization', () => {
         },
       ],
       retrieval_coverage: {
-        counts: { characters: 2, relationships: 1, world: 1, chapter_snippets: 1, low_confidence_assets: 1 },
+        counts: { characters: 2, relationships: 1, world: 1, chapter_snippets: 1, low_confidence_assets: 1, enriched_assets: 1 },
         issues: ['relationship weak'],
       },
       relationship_quality_report: {
@@ -127,6 +128,7 @@ describe('agent trace normalization', () => {
 
     expect(trace?.used_assets[0]).toMatchObject({
       id: 'rel-enriched',
+      asset_enriched: true,
       relationship_enriched: true,
       needs_ai_repair: true,
       low_confidence: true,
@@ -135,6 +137,7 @@ describe('agent trace normalization', () => {
     });
     expect(trace?.retrieval_coverage?.counts.relationships).toBe(1);
     expect(trace?.retrieval_coverage?.counts.low_confidence_assets).toBe(1);
+    expect(trace?.retrieval_coverage?.counts.enriched_assets).toBe(1);
     expect(trace?.relationship_quality_report).toMatchObject({
       total_relationships: 1,
       low_information_relationships: 1,

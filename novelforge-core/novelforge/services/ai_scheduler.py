@@ -1402,6 +1402,15 @@ class AITaskScheduler:
         characters_written = 0
         world_written = 0
         written_assets: List[Dict[str, Any]] = []
+        resolved_repair_flags = {
+            "diagnostic_seed",
+            "fallback_seed",
+            "needs_ai_repair",
+            "minimal_profile",
+            "missing_evidence",
+            "unresolved_endpoint",
+            "timeline_title_description_mismatch",
+        }
 
         from ..content.models import ContentItem, ContentMetadata, ContentType
 
@@ -1541,7 +1550,12 @@ class AITaskScheduler:
                 if not char_name:
                     continue
                 character_quality_flags = (
-                    [str(item) for item in character.get("quality_flags", []) if isinstance(item, (str, int, float, bool))]
+                    [
+                        str(item)
+                        for item in character.get("quality_flags", [])
+                        if isinstance(item, (str, int, float, bool))
+                        and str(item).strip().lower() not in resolved_repair_flags
+                    ]
                     if isinstance(character.get("quality_flags"), list)
                     else []
                 )
@@ -1611,7 +1625,12 @@ class AITaskScheduler:
             for index, world in enumerate(raw_world_items):
                 world_title = str(world.get("title") or world.get("name") or f"世界观补强 {index + 1}").strip()
                 world_quality_flags = (
-                    [str(item) for item in world.get("quality_flags", []) if isinstance(item, (str, int, float, bool))]
+                    [
+                        str(item)
+                        for item in world.get("quality_flags", [])
+                        if isinstance(item, (str, int, float, bool))
+                        and str(item).strip().lower() not in resolved_repair_flags
+                    ]
                     if isinstance(world.get("quality_flags"), list)
                     else []
                 )

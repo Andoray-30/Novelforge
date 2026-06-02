@@ -222,6 +222,7 @@ function getTraceAssetQualityBadges(asset: AgentTrace['used_assets'][number]): s
     asset.diagnostic_seed ? '诊断种子' : '',
     asset.needs_ai_repair ? '需修复' : '',
     asset.low_confidence ? '低置信' : '',
+    asset.asset_enriched ? '已补强' : '',
     asset.relationship_enriched ? '增强关系' : '',
     ...asset.quality_warnings,
   ].filter((label, index, labels) => label.length > 0 && labels.indexOf(label) === index);
