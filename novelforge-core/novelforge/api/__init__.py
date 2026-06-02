@@ -2158,6 +2158,7 @@ async def get_extraction_model_health(
            parent_id=parent_id,
            role=role,
            limit=limit,
+           role_candidates=getattr(config, "model_pools", None),
        )
    except Exception as e:
        raise HTTPException(

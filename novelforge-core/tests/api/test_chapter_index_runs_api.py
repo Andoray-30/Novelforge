@@ -89,6 +89,7 @@ def test_chapter_index_run_query_is_scoped_and_summarized(monkeypatch):
     storage = FakeStorageManager()
     storage.data["chapter_index_run_task-a"] = _run_state()
     monkeypatch.setattr(api_module.config, "auth_required", False, raising=False)
+    monkeypatch.setattr(api_module.config, "model_pools", {"extractor_fast": ["fallback-model", "fast-model"]}, raising=False)
     monkeypatch.setattr(api_module, "storage_manager", storage, raising=False)
 
     client = TestClient(api_module.app)
@@ -195,6 +196,7 @@ def test_model_health_query_filters_and_summarizes_project_scope(monkeypatch):
         "created_at": "2026-05-30T12:02:00",
     }
     monkeypatch.setattr(api_module.config, "auth_required", False, raising=False)
+    monkeypatch.setattr(api_module.config, "model_pools", {"extractor_fast": ["fallback-model", "fast-model"]}, raising=False)
     monkeypatch.setattr(api_module, "storage_manager", storage, raising=False)
 
     client = TestClient(api_module.app)
@@ -210,3 +212,6 @@ def test_model_health_query_filters_and_summarizes_project_scope(monkeypatch):
     assert payload["items"][0]["selected_count"] == 1
     assert payload["items"][0]["successful_attempts"] == 1
     assert payload["items"][0]["average_latency_ms"] == 1800
+    recommendation = next(item for item in payload["role_recommendations"] if item["role"] == "extractor_fast")
+    assert recommendation["recommended_model"] == "fast-model"
+    assert recommendation["candidate_order"] == ["fast-model", "fallback-model"]

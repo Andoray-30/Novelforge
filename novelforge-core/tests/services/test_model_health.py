@@ -2,6 +2,7 @@ import pytest
 
 from novelforge.services.model_health import (
     MODEL_HEALTH_EVENT_PREFIX,
+    build_model_role_recommendations,
     get_model_health_report,
     rank_model_candidates_by_health,
     record_model_health_event,
@@ -233,6 +234,48 @@ def test_rank_model_candidates_uses_role_specific_latency_tolerance():
     assert deep_slow["latency_penalty"] == 0
 
 
+def test_model_role_recommendations_use_role_specific_rankings():
+    events = [
+        {
+            "source": "chapter_index_attempt",
+            "role": "extractor_fast",
+            "model": "slow-reliable-model",
+            "status": "success",
+            "latency_ms": 85000,
+        },
+        {
+            "source": "chapter_index_attempt",
+            "role": "extractor_fast",
+            "model": "responsive-model",
+            "status": "success",
+            "latency_ms": 25000,
+        },
+        {
+            "source": "chapter_index_attempt",
+            "role": "extractor_deep",
+            "model": "slow-reliable-model",
+            "status": "success",
+            "latency_ms": 85000,
+        },
+    ]
+
+    recommendations = build_model_role_recommendations(
+        events,
+        {
+            "extractor_fast": ["slow-reliable-model", "responsive-model"],
+            "extractor_deep": ["slow-reliable-model", "responsive-model"],
+        },
+    )
+
+    by_role = {item["role"]: item for item in recommendations}
+    assert by_role["extractor_fast"]["recommended_model"] == "responsive-model"
+    assert by_role["extractor_fast"]["latency_tolerance_ms"] == 20000
+    assert by_role["extractor_fast"]["has_recent_health"] is True
+    assert by_role["extractor_deep"]["recommended_model"] == "slow-reliable-model"
+    assert by_role["extractor_deep"]["latency_tolerance_ms"] == 90000
+    assert by_role["extractor_deep"]["rankings"][0]["latency_penalty"] == 0
+
+
 @pytest.mark.asyncio
 async def test_model_health_records_writer_chat_attempt_without_prompt_text():
     storage = MemoryStorage()
@@ -261,3 +304,61 @@ async def test_model_health_records_writer_chat_attempt_without_prompt_text():
     assert item["model"] == "stable-writer"
     assert item["successful_attempts"] == 1
     assert item["average_latency_ms"] == 32000
+
+
+@pytest.mark.asyncio
+async def test_model_health_report_includes_role_recommendations():
+    storage = MemoryStorage()
+    await record_model_health_event(
+        storage,
+        source="writer_chat_attempt",
+        role="writer_fast",
+        model="fast-writer",
+        status="success",
+        session_id="session-a",
+        parent_id="novel-a",
+        latency_ms=1200,
+    )
+
+    report = await get_model_health_report(
+        storage,
+        session_id="session-a",
+        parent_id="novel-a",
+        role_candidates={"writer_fast": ["fallback-writer", "fast-writer"]},
+    )
+
+    assert report["role_recommendations"] == [
+        {
+            "role": "writer_fast",
+            "recommended_model": "fast-writer",
+            "candidate_count": 2,
+            "candidate_order": ["fast-writer", "fallback-writer"],
+            "has_recent_health": True,
+            "reason": "positive_history",
+            "score": 24,
+            "latency_tolerance_ms": 20000,
+            "rankings": [
+                {
+                    "model": "fast-writer",
+                    "score": 24,
+                    "reason": "positive_history",
+                    "original_index": 1,
+                    "selected_count": 0,
+                    "successful_attempts": 1,
+                    "failed_attempts": 0,
+                    "probe_passed": 0,
+                    "probe_failed": 0,
+                    "average_latency_ms": 1200,
+                    "latency_tolerance_ms": 20000,
+                    "latency_penalty": 0,
+                    "error_counts": {},
+                },
+                {
+                    "model": "fallback-writer",
+                    "score": 0,
+                    "reason": "no_recent_health",
+                    "original_index": 0,
+                },
+            ],
+        }
+    ]

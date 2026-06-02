@@ -11,6 +11,35 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-06-02 模型健康角色推荐 v1
+
+- 将模型健康报告从“原始统计列表”升级为“按任务角色给出推荐模型”：
+  - 后端 `/api/extraction/model-health` 现在返回 `role_recommendations`。
+  - 每个推荐包含 `role`、`recommended_model`、`candidate_order`、`reason`、`score`、`latency_tolerance_ms`、`rankings`。
+  - 推荐逻辑复用 `rank_model_candidates_by_health(...)`，与运行时路由保持同一套评分规则。
+- 推荐仍然是诊断信息：
+  - 不主动 probe 外部 provider。
+  - 不存储 prompt、response、正文、API key 或 provider error body。
+  - 只基于当前项目/session 的模型健康事件和配置候选池生成。
+- Extract 页增加“模型角色推荐”卡片：
+  - 展示每个角色当前推荐模型。
+  - 标出是否基于历史健康。
+  - 展示延迟容忍、健康分和候选顺序。
+- 新增测试覆盖：
+  - 角色推荐会按 `extractor_fast / extractor_deep` 不同延迟策略给出不同结果。
+  - model-health API 返回项目范围内的角色推荐。
+  - 前端类型、模型路由摘要和 Extract build 保持通过。
+- 验证：
+  - `pytest novelforge-core/tests/services/test_model_health.py novelforge-core/tests/services/test_model_router.py novelforge-core/tests/api/test_chapter_index_runs_api.py -q -p no:cacheprovider`：21 passed。
+  - `compileall novelforge-core/novelforge/services/model_health.py novelforge-core/novelforge/api/__init__.py`：通过。
+  - `npx tsc --noEmit --incremental false`：通过。
+  - `npm test -- src/lib/model-route-summary.test.ts src/app/extract/model-health-summary.test.ts --run`：2 files / 7 tests passed。
+  - `npm test -- --run`：31 files / 133 tests passed。
+  - `npm run build`：通过。
+- 当前边界：
+  - 真实 provider 实时测速仍未在本轮执行。
+  - GitHub 仍因网络不可达无法 push，本地提交继续排队。
+
 ## 2026-06-02 模型路由延迟策略前端可解释 v1
 
 - 承接上一轮角色感知模型健康排序，把新增排序字段接入前端诊断层：

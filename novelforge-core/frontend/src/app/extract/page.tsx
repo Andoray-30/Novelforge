@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { chapterIndexRunService, contentService, modelHealthService, taskService, textProcessingService } from '@/lib/api';
 import { buildAssetQualityDiagnostics, type AssetQualityDiagnosticsResult } from '@/lib/asset-quality-diagnostics';
-import { getModelProbeStatusLabel, getModelRouteSummary, normalizeModelRoute } from '@/lib/model-route-summary';
+import { getModelHealthRankingReasonLabel, getModelProbeStatusLabel, getModelRouteSummary, normalizeModelRoute } from '@/lib/model-route-summary';
 import { buildPersistedModelHealthSummary, buildRecentModelHealthSummary } from './model-health-summary';
 import { getNovelImportStageLabel, parseNovelImportTaskResult } from '@/lib/task-events';
 import { useAppStore } from '@/lib/hooks/use-app-store';
@@ -1148,6 +1148,7 @@ export default function ExtractPage() {
   const persistedModelHealthSummary = useMemo(() => buildPersistedModelHealthSummary(modelHealthReport), [modelHealthReport]);
   const recentModelHealthSummary = useMemo(() => buildRecentModelHealthSummary(chapterIndexRuns), [chapterIndexRuns]);
   const modelHealthSummary = persistedModelHealthSummary.length > 0 ? persistedModelHealthSummary : recentModelHealthSummary;
+  const modelRoleRecommendations = modelHealthReport?.role_recommendations || [];
   const modelHealthSourceLabel = persistedModelHealthSummary.length > 0
     ? `基于后端 ${modelHealthReport?.event_count ?? 0} 条健康事件`
     : `基于最近 ${chapterIndexRuns.length} 次章节索引 run`;
@@ -1497,6 +1498,40 @@ export default function ExtractPage() {
                     ) : (
                       <p className="mt-3 text-xs leading-5 text-[var(--nf-text-subtle)]">本次没有执行模型探测，通常表示本地 mock、路由关闭或服务端复用了默认模型。</p>
                     )}
+                  </div>
+                </div>
+              ) : null}
+
+              {modelRoleRecommendations.length > 0 ? (
+                <div>
+                  <h3 className="text-sm font-bold text-[var(--nf-text)]">模型角色推荐</h3>
+                  <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                    {modelRoleRecommendations.slice(0, 6).map((item) => (
+                      <article key={item.role} className="rounded-2xl border border-[var(--nf-border)] bg-[var(--nf-surface)] p-4">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--nf-text-subtle)]">{item.role}</p>
+                            <p className="mt-1 break-all text-sm font-black text-[var(--nf-text)]">{item.recommended_model}</p>
+                          </div>
+                          <span className="inline-flex min-h-8 items-center rounded-full border border-[var(--nf-border)] px-3 text-xs font-bold text-[var(--nf-text-muted)]">
+                            {item.has_recent_health ? '基于历史健康' : '暂无历史，按候选顺序'}
+                          </span>
+                        </div>
+                        <p className="mt-3 text-xs leading-5 text-[var(--nf-text-muted)]">
+                          {getModelHealthRankingReasonLabel(item.reason) || item.reason || '暂无排序原因'}
+                          {typeof item.score === 'number' ? ` · 健康分 ${item.score}` : ''}
+                          {typeof item.latency_tolerance_ms === 'number' ? ` · 延迟容忍 ${item.latency_tolerance_ms}ms` : ''}
+                          {typeof item.candidate_count === 'number' ? ` · 候选 ${item.candidate_count}` : ''}
+                        </p>
+                        {Array.isArray(item.candidate_order) && item.candidate_order.length > 0 ? (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {item.candidate_order.slice(0, 4).map((model) => (
+                              <span key={model} className="nf-chip break-all">{model}</span>
+                            ))}
+                          </div>
+                        ) : null}
+                      </article>
+                    ))}
                   </div>
                 </div>
               ) : null}

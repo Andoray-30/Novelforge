@@ -451,6 +451,58 @@ def rank_model_candidates_by_health(
     return [item["model"] for item in rankings], rankings
 
 
+def build_model_role_recommendations(
+    events: Iterable[Dict[str, Any]],
+    role_candidates: Optional[Dict[str, List[str]]] = None,
+) -> List[Dict[str, Any]]:
+    """Build per-role routing recommendations from the same health data.
+
+    This is diagnostic-only. It does not probe providers, call model APIs, or
+    store prompts/responses. Runtime routing remains handled by ModelRouter.
+    """
+
+    event_list = list(events)
+    if not role_candidates:
+        role_candidates = {}
+        for event in event_list:
+            role = _clean_string(event.get("role"))
+            model = _clean_string(event.get("model"))
+            if role and model:
+                role_candidates.setdefault(role, [])
+                if model not in role_candidates[role]:
+                    role_candidates[role].append(model)
+
+    recommendations: List[Dict[str, Any]] = []
+    for role, raw_candidates in role_candidates.items():
+        clean_role = _clean_string(role)
+        candidates: List[str] = []
+        for candidate in raw_candidates or []:
+            normalized = _clean_string(candidate)
+            if normalized and normalized not in candidates:
+                candidates.append(normalized)
+        if not clean_role or not candidates:
+            continue
+
+        role_events = [event for event in event_list if _clean_string(event.get("role")) == clean_role]
+        ordered, rankings = rank_model_candidates_by_health(candidates, role_events, role=clean_role)
+        recommended_model = ordered[0] if ordered else candidates[0]
+        top_ranking = next((item for item in rankings if item.get("model") == recommended_model), None)
+        recommendations.append({
+            "role": clean_role,
+            "recommended_model": recommended_model,
+            "candidate_count": len(candidates),
+            "candidate_order": ordered or candidates,
+            "has_recent_health": bool(rankings),
+            "reason": (top_ranking or {}).get("reason") or "no_recent_health",
+            "score": (top_ranking or {}).get("score"),
+            "latency_tolerance_ms": _latency_tolerance_for_role(clean_role),
+            "rankings": rankings,
+        })
+
+    recommendations.sort(key=lambda item: str(item.get("role") or ""))
+    return recommendations
+
+
 async def get_model_health_report(
     storage: Any,
     *,
@@ -458,6 +510,7 @@ async def get_model_health_report(
     parent_id: Optional[str] = None,
     role: Optional[str] = None,
     limit: int = 200,
+    role_candidates: Optional[Dict[str, List[str]]] = None,
 ) -> Dict[str, Any]:
     events = await list_model_health_events(
         storage,
@@ -466,9 +519,21 @@ async def get_model_health_report(
         role=role,
         limit=limit,
     )
+    recommendation_candidates = role_candidates
+    if role and role_candidates:
+        normalized_role = _clean_string(role)
+        recommendation_candidates = {
+            key: value
+            for key, value in role_candidates.items()
+            if _clean_string(key) == normalized_role
+        }
     return {
         "generated_at": _now_iso(),
         "event_count": len(events),
         "items": summarize_model_health_events(events),
         "events": events,
+        "role_recommendations": build_model_role_recommendations(
+            events,
+            recommendation_candidates,
+        ),
     }

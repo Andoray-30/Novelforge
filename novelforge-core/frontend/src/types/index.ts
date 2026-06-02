@@ -526,6 +526,18 @@ export interface ModelHealthReportItem {
   last_seen_at?: string | null;
 }
 
+export interface ModelRoleRecommendation {
+  role: string;
+  recommended_model: string;
+  candidate_count?: number;
+  candidate_order?: string[];
+  has_recent_health?: boolean;
+  reason?: string | null;
+  score?: number | null;
+  latency_tolerance_ms?: number | null;
+  rankings?: Array<Record<string, unknown>>;
+}
+
 export interface ModelHealthEvent {
   id?: string;
   source?: string;
@@ -555,6 +567,7 @@ export interface ModelHealthReport {
   event_count: number;
   items: ModelHealthReportItem[];
   events?: ModelHealthEvent[];
+  role_recommendations?: ModelRoleRecommendation[];
 }
 
 export interface AITask {
