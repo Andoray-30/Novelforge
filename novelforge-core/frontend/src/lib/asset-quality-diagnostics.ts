@@ -73,6 +73,10 @@ function getQualityFlags(item: ContentItem, payload = getContentAssetPayload(ite
   ].map((flag) => flag.toLowerCase());
 }
 
+function isTruthyFlag(value: unknown): boolean {
+  return value === true || (typeof value === 'string' && ['true', '1', 'yes'].includes(value.trim().toLowerCase()));
+}
+
 function getCharacterNames(items: ContentItem[]): Set<string> {
   const names = new Set<string>();
   items
@@ -113,9 +117,22 @@ function isDiagnosticSeedAsset(item: ContentItem): boolean {
   return sourceType === 'diagnostic_seed'
     || sourceType === 'fallback'
     || sourceType === 'rule_fallback'
+    || isTruthyFlag(payload.diagnostic_seed)
     || flags.includes('diagnostic_seed')
-    || flags.includes('needs_ai_repair')
+    || flags.includes('relationship_endpoint_backfill')
     || flags.includes('fallback_seed');
+}
+
+function isNeedsAIRepairAsset(item: ContentItem): boolean {
+  const payload = getContentAssetPayload(item);
+  const flags = getQualityFlags(item, payload);
+  return isDiagnosticSeedAsset(item)
+    || isTruthyFlag(payload.needs_ai_repair)
+    || flags.includes('needs_ai_repair')
+    || flags.includes('minimal_profile')
+    || flags.includes('missing_evidence')
+    || flags.includes('timeline_title_description_mismatch')
+    || flags.includes('unresolved_endpoint');
 }
 
 function isLowInformationCharacter(item: ContentItem): boolean {
@@ -184,6 +201,20 @@ export function buildAssetQualityDiagnostics(items: ContentItem[]): AssetQuality
       };
     });
 
+  const needsAIRepairAssets = items
+    .filter(isNeedsAIRepairAsset)
+    .map((item) => {
+      const payload = getContentAssetPayload(item);
+      return {
+        id: item.metadata.id,
+        title: getTitle(item),
+        type: item.metadata.type,
+        source_type: asString(payload.source_type),
+        quality_flags: getQualityFlags(item, payload),
+        reason: isDiagnosticSeedAsset(item) ? 'diagnostic_seed' : 'needs_ai_repair',
+      };
+    });
+
   const decorativeChapters = chapters
     .filter(isDecorativeChapter)
     .map((item) => ({ id: item.metadata.id, title: getTitle(item), reason: '疑似插图、封面或符号分隔章节' }));
@@ -232,6 +263,13 @@ export function buildAssetQualityDiagnostics(items: ContentItem[]): AssetQuality
     timeline_mismatch_events: timelineMismatchEvents,
     weak_world_facts: weakWorldFacts,
     diagnostic_seed_assets: diagnosticSeedAssets,
+    needs_ai_repair_assets: needsAIRepairAssets,
+    diagnostic_seed_characters: diagnosticSeedAssets
+      .filter((item) => item.type === 'character')
+      .map((item) => ({ id: item.id, name: item.title, quality_flags: item.quality_flags })),
+    needs_ai_repair_characters: needsAIRepairAssets
+      .filter((item) => item.type === 'character')
+      .map((item) => ({ id: item.id, name: item.title, quality_flags: item.quality_flags, reason: item.reason })),
   };
 
   if (diagnosticSeedAssets.length > 0) {
@@ -250,6 +288,9 @@ export function buildAssetQualityDiagnostics(items: ContentItem[]): AssetQuality
     recovered_world_assets: worlds.length,
     suspected_mojibake_assets: suspectedMojibakeAssets.length,
     diagnostic_seed_assets: diagnosticSeedAssets.length,
+    needs_ai_repair_assets: needsAIRepairAssets.length,
+    diagnostic_seed_characters: diagnosticSeedAssets.filter((item) => item.type === 'character').length,
+    needs_ai_repair_characters: needsAIRepairAssets.filter((item) => item.type === 'character').length,
     decorative_chapters: decorativeChapters.length,
     low_information_characters: lowConfidenceCharacters.length,
     unresolved_relationship_edges: unresolvedRelationshipEdges.length,
@@ -260,7 +301,8 @@ export function buildAssetQualityDiagnostics(items: ContentItem[]): AssetQuality
 
   const issues: string[] = [];
   if (suspectedMojibakeAssets.length) issues.push(`发现 ${suspectedMojibakeAssets.length} 个疑似乱码资产标题`);
-  if (diagnosticSeedAssets.length) issues.push(`发现 ${diagnosticSeedAssets.length} 个规则 fallback 或诊断种子资产，需要 AI 修复`);
+  if (diagnosticSeedAssets.length) issues.push(`发现 ${diagnosticSeedAssets.length} 个规则 fallback 或诊断种子资产，不能视为完整 AI 理解结果`);
+  if (needsAIRepairAssets.length) issues.push(`发现 ${needsAIRepairAssets.length} 个资产需要 AI 修复或人工确认`);
   if (decorativeChapters.length) issues.push(`发现 ${decorativeChapters.length} 个疑似装饰章节`);
   if (lowConfidenceCharacters.length) issues.push(`发现 ${lowConfidenceCharacters.length} 个低信息角色`);
   if (unresolvedRelationshipEdges.length) issues.push(`发现 ${unresolvedRelationshipEdges.length} 条关系端点未闭合`);

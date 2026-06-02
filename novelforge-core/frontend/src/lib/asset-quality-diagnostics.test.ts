@@ -55,6 +55,7 @@ describe('asset quality diagnostics', () => {
     expect(result.analysis_status).toBe('low_quality');
     expect(result.analysis_diagnostics.suspected_mojibake_assets?.length).toBe(1);
     expect(result.analysis_diagnostics.diagnostic_seed_assets?.length).toBe(1);
+    expect(result.analysis_diagnostics.needs_ai_repair_assets?.length).toBe(1);
     expect(result.analysis_diagnostics.fallback_quality_boundary?.ready_state_allowed).toBe(false);
     expect(result.analysis_diagnostics.decorative_chapters?.length).toBe(1);
     expect(result.analysis_diagnostics.low_confidence_characters?.length).toBe(1);
@@ -64,6 +65,8 @@ describe('asset quality diagnostics', () => {
     expect(result.analysis_diagnostics.weak_world_facts?.length).toBe(1);
     expect(result.candidate_counts.recovered_assets_total).toBe(7);
     expect(result.candidate_counts.diagnostic_seed_assets).toBe(1);
-    expect(result.analysis_quality_issues).toContain('发现 1 个规则 fallback 或诊断种子资产，需要 AI 修复');
+    expect(result.candidate_counts.needs_ai_repair_assets).toBe(1);
+    expect(result.analysis_quality_issues).toContain('发现 1 个规则 fallback 或诊断种子资产，不能视为完整 AI 理解结果');
+    expect(result.analysis_quality_issues).toContain('发现 1 个资产需要 AI 修复或人工确认');
   });
 });

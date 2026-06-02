@@ -125,6 +125,10 @@ const CANDIDATE_COUNT_LABELS: Record<string, string> = {
   recovered_timeline_events: '恢复时间线',
   recovered_world_assets: '恢复世界观',
   suspected_mojibake_assets: '疑似乱码资产',
+  diagnostic_seed_assets: '诊断种子资产',
+  needs_ai_repair_assets: '需 AI 修复资产',
+  diagnostic_seed_characters: '诊断种子角色',
+  needs_ai_repair_characters: '需 AI 修复角色',
   decorative_chapters: '装饰章节',
   low_information_characters: '低信息角色',
   unresolved_relationship_edges: '未闭合关系',
@@ -243,6 +247,10 @@ function normalizeRepairItems(items?: Array<string | Record<string, unknown>>): 
   return Array.isArray(items) ? items.filter(Boolean) : [];
 }
 
+function mergeRepairItems(...groups: Array<Array<string | Record<string, unknown>> | undefined>): Array<string | Record<string, unknown>> {
+  return groups.flatMap((items) => normalizeRepairItems(items));
+}
+
 function getRetryableChapterIndexStatus(result: NovelImportTaskResult | null): Array<Record<string, unknown>> {
   const statusItems = result?.chapter_index_status || result?.analysis_diagnostics?.chapter_index_status;
   if (!Array.isArray(statusItems)) return [];
@@ -350,6 +358,22 @@ function buildQualityRepairGroups(result: NovelImportTaskResult | null): Quality
       severity: 'high',
       recommendedTask: 'chapter_index_rerun',
       items: normalizeRepairItems(diagnostics?.suspected_mojibake_assets),
+    },
+    {
+      key: 'diagnostic_seed_assets',
+      title: '诊断种子资产',
+      description: '这些资产来自规则 fallback、端点回补或低置信种子，只能作为修复线索，不能当作完整 AI 理解结果。',
+      severity: 'high',
+      recommendedTask: 'chapter_index_rerun',
+      items: mergeRepairItems(diagnostics?.diagnostic_seed_assets, diagnostics?.diagnostic_seed_characters),
+    },
+    {
+      key: 'needs_ai_repair_assets',
+      title: '需 AI 修复资产',
+      description: '这些资产已被标记为需要 AI 修复或人工确认，写作时应降低优先级。',
+      severity: 'high',
+      recommendedTask: 'chapter_index_rerun',
+      items: mergeRepairItems(diagnostics?.needs_ai_repair_assets, diagnostics?.needs_ai_repair_characters),
     },
     {
       key: 'relationship_unresolved',
@@ -465,6 +489,8 @@ function buildDiagnosticAreas(result: NovelImportTaskResult | null, summary: Sav
   const resolvedRelationshipEndpoints = countDiagnosticItems(result?.relationship_endpoint_resolution || diagnostics?.relationship_endpoint_resolution);
   const timelineMismatch = countDiagnosticItems(result?.timeline_mismatch_events || diagnostics?.timeline_mismatch_events);
   const lowConfidenceCharacters = countDiagnosticItems(diagnostics?.low_confidence_characters);
+  const diagnosticSeedAssets = countDiagnosticItems(diagnostics?.diagnostic_seed_assets) + countDiagnosticItems(diagnostics?.diagnostic_seed_characters);
+  const needsAIRepairAssets = countDiagnosticItems(diagnostics?.needs_ai_repair_assets) + countDiagnosticItems(diagnostics?.needs_ai_repair_characters);
   const weakWorldFacts = countDiagnosticItems(diagnostics?.weak_world_facts);
 
   const chapterCount = result?.chapters_count ?? result?.candidate_counts?.chapters_total ?? result?.candidate_counts?.recovered_chapters ?? 0;
@@ -496,10 +522,16 @@ function buildDiagnosticAreas(result: NovelImportTaskResult | null, summary: Sav
     {
       key: 'characters',
       title: '角色',
-      status: lowConfidenceCharacters > 0 || characterCount < 3 ? 'warning' : characterCount > 0 ? 'ready' : 'empty',
+      status: needsAIRepairAssets > 0 || diagnosticSeedAssets > 0 ? 'danger' : lowConfidenceCharacters > 0 || characterCount < 3 ? 'warning' : characterCount > 0 ? 'ready' : 'empty',
       stat: characterCount > 0 ? `${characterCount} 个角色` : '暂无角色',
-      detail: lowConfidenceCharacters > 0 ? `${lowConfidenceCharacters} 个角色置信度偏低` : '角色可作为后续写作上下文。',
-      actions: lowConfidenceCharacters > 0 ? ['补充低置信角色证据', '回到角色页复核人物性格'] : ['查看角色档案'],
+      detail: needsAIRepairAssets > 0
+        ? `${needsAIRepairAssets} 个资产需要 AI 修复`
+        : diagnosticSeedAssets > 0
+          ? `${diagnosticSeedAssets} 个诊断种子资产不能直接用于写作`
+          : lowConfidenceCharacters > 0 ? `${lowConfidenceCharacters} 个角色置信度偏低` : '角色可作为后续写作上下文。',
+      actions: needsAIRepairAssets > 0 || diagnosticSeedAssets > 0
+        ? ['先修复诊断种子资产', '回到角色页复核人物性格']
+        : lowConfidenceCharacters > 0 ? ['补充低置信角色证据', '回到角色页复核人物性格'] : ['查看角色档案'],
     },
     {
       key: 'relationships',

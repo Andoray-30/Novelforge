@@ -6041,6 +6041,31 @@
   - 这是候选排序 v1，还没有实现真正的多模型并行竞速或按任务阶段动态切换模型。
   - 下一步建议把 route 的 `health_rankings` 展示到 Extract 页/TaskCenter，并开始引入“fast/pro/repair 角色池策略”而不是只对 extractor 路径生效。
 
+## 2026-06-02 质量标记前端可见化 v1
+
+- 按模型网关复盘文档的 P0 收敛项推进：不继续堆新功能，先把 fallback / 低置信资产边界变成用户可见。
+- Extract 页质量诊断补充：
+  - `diagnostic_seed_assets / diagnostic_seed_characters`
+  - `needs_ai_repair_assets / needs_ai_repair_characters`
+  - 候选统计新增“诊断种子资产 / 需 AI 修复资产 / 诊断种子角色 / 需 AI 修复角色”标签。
+  - 质量区域会把诊断种子和需 AI 修复资产作为高风险项，而不是只当作普通低置信角色。
+- 角色页补充质量 badge：
+  - 诊断种子
+  - 需 AI 修复
+  - 最小档案
+  - 关系回补
+  - “需补强”筛选会把这些 flags 纳入判断。
+- 项目质量 summary 收紧：
+  - `diagnostic_seed / fallback / needs_ai_repair / minimal_profile` 不再被计为可写角色或可用关系。
+  - 即使这类资产有较长描述或表面张力，也必须先修复确认后才能成为写作 ready 的依据。
+- 验证：
+  - `npm.cmd test -- src/lib/asset-quality-diagnostics.test.ts src/lib/project-quality-summary.test.ts --run`：2 files / 9 tests passed。
+  - `npx.cmd tsc --noEmit --incremental false`：通过。
+  - `npm.cmd test -- --run`：31 files / 129 tests passed。
+- 当前边界：
+  - 本轮只做前端判断与可见化，不重跑真实长篇 smoke。
+  - 下一步应继续修复模型探测/用户可见文案中的剩余乱码，并让 agent trace 明确标出是否使用了低置信资产。
+
 ## 2026-06-02 模型网关与 AI 提取价值再复盘
 
 - 暂停继续堆功能，围绕“慢模型不是不可用、fallback 不能冒充 AI、模型选择不能固定押注单个名称”完成一轮文档化复盘。

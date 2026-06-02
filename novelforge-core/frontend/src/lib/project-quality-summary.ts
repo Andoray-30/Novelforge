@@ -174,9 +174,19 @@ function countRelationshipSignals(payload: Record<string, unknown>): {
   tension: boolean;
   enriched: boolean;
   lowInformation: boolean;
+  needsRepair: boolean;
   missingSignals: string[];
 } {
-  const qualityFlags = asStringArray(payload.quality_flags);
+  const qualityFlags = asStringArray(payload.quality_flags).map((flag) => flag.toLowerCase());
+  const sourceType = asString(payload.source_type).toLowerCase();
+  const needsRepair = payload.needs_ai_repair === true
+    || payload.diagnostic_seed === true
+    || ['diagnostic_seed', 'fallback', 'rule_fallback'].includes(sourceType)
+    || qualityFlags.includes('needs_ai_repair')
+    || qualityFlags.includes('diagnostic_seed')
+    || qualityFlags.includes('minimal_profile')
+    || qualityFlags.includes('missing_evidence')
+    || qualityFlags.includes('unresolved_endpoint');
   const missingSignals = unique([
     ...asStringArray(payload.remaining_missing_signals),
     ...asStringArray(payload.missing_signals),
@@ -202,8 +212,19 @@ function countRelationshipSignals(payload: Record<string, unknown>): {
     asString(payload.core),
     asString(payload.current_state),
   ].filter(Boolean).join(' ');
-  const lowInformation = !enriched && !tension && description.length < 80;
-  return { tension, enriched, lowInformation, missingSignals };
+  const lowInformation = needsRepair || (!enriched && !tension && description.length < 80);
+  return { tension, enriched, lowInformation, needsRepair, missingSignals };
+}
+
+function assetNeedsRepair(payload: Record<string, unknown>): boolean {
+  const qualityFlags = asStringArray(payload.quality_flags).map((flag) => flag.toLowerCase());
+  const sourceType = asString(payload.source_type).toLowerCase();
+  return payload.needs_ai_repair === true
+    || payload.diagnostic_seed === true
+    || ['diagnostic_seed', 'fallback', 'rule_fallback'].includes(sourceType)
+    || qualityFlags.includes('needs_ai_repair')
+    || qualityFlags.includes('diagnostic_seed')
+    || qualityFlags.includes('minimal_profile');
 }
 
 export function buildProjectQualitySummary(assets: {
@@ -258,7 +279,9 @@ export function buildProjectQualitySummary(assets: {
       asString(payload.summary),
       item.content,
     ].filter(Boolean).join(' ');
-    if (signals >= 2 || (signals >= 1 && description.length >= 80)) {
+    if (assetNeedsRepair(payload)) {
+      acc.lowInformation += 1;
+    } else if (signals >= 2 || (signals >= 1 && description.length >= 80)) {
       acc.writable += 1;
     } else {
       acc.lowInformation += 1;
@@ -278,7 +301,7 @@ export function buildProjectQualitySummary(assets: {
     if (signals.tension) acc.tension += 1;
     if (signals.enriched) acc.enriched += 1;
     if (signals.lowInformation) acc.lowInformation += 1;
-    if (signals.tension || signals.enriched) acc.usable += 1;
+    if ((signals.tension || signals.enriched) && !signals.needsRepair) acc.usable += 1;
     signals.missingSignals.forEach((signal) => {
       missingSignalCounts.set(signal, (missingSignalCounts.get(signal) ?? 0) + 1);
     });

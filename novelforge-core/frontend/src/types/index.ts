@@ -449,6 +449,9 @@ export interface ImportAnalysisDiagnostics {
   suspected_mojibake_assets?: Array<Record<string, unknown>>;
   weak_world_facts?: Array<Record<string, unknown>>;
   diagnostic_seed_assets?: Array<Record<string, unknown>>;
+  needs_ai_repair_assets?: Array<Record<string, unknown>>;
+  diagnostic_seed_characters?: Array<string | Record<string, unknown>>;
+  needs_ai_repair_characters?: Array<string | Record<string, unknown>>;
   fallback_quality_boundary?: Record<string, unknown>;
   recovered_from_assets?: boolean;
   repair_strategy?: Record<string, unknown>;

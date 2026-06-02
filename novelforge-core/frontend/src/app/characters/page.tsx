@@ -179,6 +179,40 @@ function getCharacterConfidence(item: ContentItem): number | null {
   return asNumber(payload.confidence) ?? asNumber(extractionQuality.confidence);
 }
 
+function getQualityFlags(item: ContentItem): string[] {
+  const payload = getContentAssetPayload(item);
+  return [
+    ...asStringArray(payload.quality_flags),
+    ...asStringArray(item.metadata.tags),
+  ].map((flag) => flag.trim().toLowerCase());
+}
+
+function isTruthyFlag(value: unknown): boolean {
+  return value === true || (typeof value === 'string' && ['true', '1', 'yes'].includes(value.trim().toLowerCase()));
+}
+
+function isDiagnosticSeedCharacter(item: ContentItem): boolean {
+  const payload = getContentAssetPayload(item);
+  const sourceType = asString(payload.source_type).toLowerCase();
+  const flags = getQualityFlags(item);
+  return sourceType === 'diagnostic_seed'
+    || sourceType === 'fallback'
+    || sourceType === 'rule_fallback'
+    || isTruthyFlag(payload.diagnostic_seed)
+    || flags.includes('diagnostic_seed')
+    || flags.includes('relationship_endpoint_backfill')
+    || flags.includes('fallback_seed');
+}
+
+function characterNeedsAIRepair(item: ContentItem): boolean {
+  const payload = getContentAssetPayload(item);
+  const flags = getQualityFlags(item);
+  return isDiagnosticSeedCharacter(item)
+    || isTruthyFlag(payload.needs_ai_repair)
+    || flags.includes('needs_ai_repair')
+    || flags.includes('minimal_profile');
+}
+
 function getCharacterSummary(character: Character, item: ContentItem): string {
   return (
     character.description ||
@@ -203,7 +237,17 @@ function getSignalList(character: Character): Array<{ label: string; value: stri
 
 function isLowInfoCharacter(character: Character, item: ContentItem): boolean {
   const confidence = getCharacterConfidence(item);
-  return getSignalList(character).length < 2 || (confidence !== null && confidence < 0.55);
+  return characterNeedsAIRepair(item) || getSignalList(character).length < 2 || (confidence !== null && confidence < 0.55);
+}
+
+function getCharacterQualityBadges(item: ContentItem): string[] {
+  const flags = getQualityFlags(item);
+  return [
+    isDiagnosticSeedCharacter(item) ? '诊断种子' : '',
+    characterNeedsAIRepair(item) ? '需 AI 修复' : '',
+    flags.includes('minimal_profile') ? '最小档案' : '',
+    flags.includes('relationship_endpoint_backfill') ? '关系回补' : '',
+  ].filter((label, index, labels) => label.length > 0 && labels.indexOf(label) === index);
 }
 
 function formatConfidence(confidence: number | null): string {
@@ -548,6 +592,7 @@ export default function CharactersPage() {
                   const confidence = item ? getCharacterConfidence(item) : null;
                   const signals = getSignalList(character);
                   const lowInfo = item ? isLowInfoCharacter(character, item) : false;
+                  const qualityBadges = item ? getCharacterQualityBadges(item) : [];
                   return (
                     <article key={character.id} className="nf-panel nf-panel-pad">
                       <div className="flex items-start justify-between gap-3">
@@ -572,6 +617,11 @@ export default function CharactersPage() {
                         <span className="nf-chip">置信度 {formatConfidence(confidence)}</span>
                         {character.aliases?.[0] ? <span className="nf-chip">别名 {character.aliases[0]}</span> : null}
                         {character.importance ? <span className="nf-chip">{character.importance}</span> : null}
+                        {qualityBadges.map((badge) => (
+                          <span key={`${character.id}-${badge}`} className="nf-chip border-[color-mix(in_srgb,var(--nf-warning)_32%,transparent)] text-[var(--nf-warning)]">
+                            {badge}
+                          </span>
+                        ))}
                       </div>
                       <div className="mt-4 space-y-2">
                         {signals.length > 0 ? signals.map((signal) => (

@@ -168,4 +168,32 @@ describe('project quality summary', () => {
     expect(result.relationship.needs_repair).toBe(0);
     expect(result.relationship.top_missing_signals).toEqual(['arc ×1']);
   });
+
+  it('does not treat diagnostic seed or repair-needed assets as writing ready', () => {
+    const result = summary({
+      chapters: [item('chapter', 'chapter-1', '第一章', { source_type: 'imported', chapter_role: '正文' })],
+      characters: [item('character', 'seed-char', '种子角色', {
+        source_type: 'diagnostic_seed',
+        needs_ai_repair: true,
+        quality_flags: ['diagnostic_seed', 'needs_ai_repair'],
+        description: '这个角色有较长描述，并且表面上包含足够信息，但仍来自诊断种子，必须先修复确认后才能作为写作记忆。',
+        desires: ['找到答案'],
+        fears: ['失去自我'],
+      })],
+      relationships: [item('relationship', 'seed-rel', '种子关系', {
+        source: 'A',
+        target: 'B',
+        quality_flags: ['needs_ai_repair', 'missing_evidence'],
+        emotional_tension: '双方互相需要，但没有可靠证据支撑。',
+      })],
+      worlds: [item('world', 'world-1', '规则', { rules: ['代价明确'] })],
+    });
+
+    expect(result.writing_ready).toBe(false);
+    expect(result.overall_status).toBe('insufficient');
+    expect(result.character.writable).toBe(0);
+    expect(result.character.low_information).toBe(1);
+    expect(result.relationship.usable).toBe(0);
+    expect(result.relationship.needs_repair).toBe(1);
+  });
 });
