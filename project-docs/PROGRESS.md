@@ -11,6 +11,24 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-06-02 模型 probe prompt 去样本特化 v1
+
+- 继续处理模型网关复盘文档 P0：模型测速不能被乱码或单本样本信息污染。
+- `ModelRouter.EXTRACTOR_PROBE_PROMPT` 保持中文 JSON 结构探测，但把原先带样本小说影子的短文本替换为通用合成文本：
+  - `林墨 / 周岚 / 追兵 / 雨夜`
+  - 只用于检查模型能否返回章节角色、互动、事件、世界观事实结构。
+- 补测试锁定：
+  - probe prompt 必须是可读中文。
+  - 不允许出现常见 mojibake 片段。
+  - 不允许出现当前真实样本相关专名。
+- 验证：
+  - `pytest novelforge-core/tests/services/test_model_router.py -q -p no:cacheprovider`：10 passed。
+  - `pytest test_model_health.py test_model_router.py test_ai_scheduler_import.py -q -p no:cacheprovider`：48 passed。
+  - `compileall novelforge-core/novelforge/services/model_router.py`：通过。
+- 当前边界：
+  - 本轮只修正模型探测输入和测试护栏，不改变模型候选排序、健康记录或真实调用策略。
+  - 下一步仍应推进 `extractor_fast -> extractor_repair -> extractor_deep -> judge` 的多阶段策略，而不是继续把所有质量压力压在首轮 extractor 上。
+
 ## 2026-06-02 用户可见乱码清理与 API 错误净化 v1
 
 - 继续按模型网关复盘文档的 P0 收敛推进：先清理会污染用户判断的乱码和不可读错误，而不是继续扩新功能。

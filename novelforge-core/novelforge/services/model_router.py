@@ -100,7 +100,7 @@ class ModelRouter:
     """
 
     EXTRACTOR_PROBE_PROMPT = """只输出 JSON object，不要 markdown。
-文本：辉夜在雨夜醒来，遇见八千代，又被帝明追击。她必须在回忆与现实之间选择。
+文本：林墨在雨夜醒来，遇见周岚，又被追兵逼近。他必须在保护同伴与揭开真相之间选择。
 字段：
 {
   "chapter_characters": [{"name": "角色名", "evidence": ["原文证据"], "confidence": "high"}],

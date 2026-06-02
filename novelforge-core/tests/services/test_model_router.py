@@ -61,7 +61,7 @@ class FakeStorage:
 async def test_model_router_selects_first_extractor_model_with_rich_json():
     responses = {
         "empty-model": "",
-        "rich-model": '{"chapter_characters":[{"name":"辉夜","evidence":["辉夜醒来"]}],"chapter_interactions":[],"chapter_events":[],"chapter_world_facts":[]}',
+        "rich-model": '{"chapter_characters":[{"name":"林墨","evidence":["林墨在雨夜醒来"]}],"chapter_interactions":[],"chapter_events":[],"chapter_world_facts":[]}',
     }
     router = ModelRouter(FakeRoutedAIService(responses), FakeConfig())
 
@@ -71,6 +71,15 @@ async def test_model_router_selects_first_extractor_model_with_rich_json():
     assert decision.reason == "probe_passed"
     assert [result.model for result in decision.probe_results] == ["empty-model", "rich-model"]
     assert router._is_cooling_down("empty-model")
+
+
+def test_model_probe_prompts_are_readable_and_sample_neutral():
+    prompts = [ModelRouter.EXTRACTOR_PROBE_PROMPT, ModelRouter.CHAT_PROBE_PROMPT]
+    suspicious_fragments = ["閿", "锟", "鐢", "Ã", "Â", "杈", "閲", "超时空辉夜姬", "辉夜", "八千代", "帝明"]
+
+    for prompt in prompts:
+        assert all(fragment not in prompt for fragment in suspicious_fragments)
+        assert "原文证据" in prompt or "可读短句" in prompt
 
 
 @pytest.mark.asyncio
