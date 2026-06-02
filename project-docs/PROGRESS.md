@@ -11,6 +11,31 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-06-02 用户可见乱码清理与 API 错误净化 v1
+
+- 继续按模型网关复盘文档的 P0 收敛推进：先清理会污染用户判断的乱码和不可读错误，而不是继续扩新功能。
+- 清理 `novelforge/content/models.py` 中残留的 Pydantic docstring / `Field(description=...)` mojibake：
+  - 内容元数据
+  - 创建/更新请求
+  - 搜索请求/结果
+  - 导出请求
+- 这些描述会进入 OpenAPI schema 或接口辅助信息，属于接口可见文本；本轮只恢复可读中文，不改字段名、枚举值或 API 契约。
+- 前端 API client 增加 `sanitizeAPIErrorDetail(...)`：
+  - 对 `HTTP 404 閿欒`、高比例 mojibake、连续问号等不可读错误做兜底。
+  - 404 显示为“请求的内容不存在或已被删除”。
+  - 401 / 403 / 429 / 5xx 也提供状态相关的可读兜底文案。
+  - JSON 请求、表单上传、blob 下载、流式聊天失败路径复用同一净化逻辑。
+- 验证：
+  - `npm.cmd test -- src/lib/api/client.test.ts --run`：1 file / 3 tests passed。
+  - `npx.cmd tsc --noEmit --incremental false`：通过。
+  - `pytest test_manager_search.py test_content_database_storage.py test_content_asset_normalization.py test_auth.py -q -p no:cacheprovider`：19 passed。
+  - `npm.cmd test -- --run`：31 files / 131 tests passed。
+  - `npm.cmd run build`：通过。
+  - `compileall novelforge-core/novelforge/content/models.py`：通过。
+- 当前边界：
+  - 本轮没有重跑真实长篇 smoke。
+  - 剩余 mojibake 搜索命中均为乱码检测规则或测试样例；后续如果浏览器中仍出现乱码，应按具体页面/接口继续追踪源头数据。
+
 ## 2026-06-01 fallback 资产边界硬化 v1
 ### 本轮完成
 - 导入保存角色、关系、时间线资产时新增质量边界字段：

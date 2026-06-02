@@ -1,4 +1,4 @@
-import { APIClient } from './client';
+import { APIClient, sanitizeAPIErrorDetail } from './client';
 import type {
   AITask,
   Character,
@@ -69,7 +69,7 @@ async function postForm<T>(path: string, formData: FormData): Promise<T> {
     if (response.status === 401 && typeof window !== 'undefined' && window.location.pathname !== '/login') {
       window.location.assign('/login');
     }
-    throw new Error(`HTTP ${response.status}: ${detail}`);
+    throw new Error(`HTTP ${response.status}: ${sanitizeAPIErrorDetail(detail, response.status, response.statusText)}`);
   }
   return response.json();
 }
@@ -85,7 +85,7 @@ async function postBlob(path: string, data: unknown): Promise<Blob> {
     if (response.status === 401 && typeof window !== 'undefined' && window.location.pathname !== '/login') {
       window.location.assign('/login');
     }
-    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    throw new Error(`HTTP ${response.status}: ${sanitizeAPIErrorDetail(response.statusText, response.status, response.statusText)}`);
   }
   return response.blob();
 }
@@ -259,7 +259,18 @@ export const chatService = {
       if (response.status === 401 && typeof window !== 'undefined' && window.location.pathname !== '/login') {
         window.location.assign('/login');
       }
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      let detail = response.ok ? '响应流为空' : response.statusText;
+      try {
+        const payload = await response.clone().json();
+        if (typeof payload?.detail === 'string' && payload.detail.trim()) {
+          detail = payload.detail;
+        } else if (typeof payload?.error === 'string' && payload.error.trim()) {
+          detail = payload.error;
+        }
+      } catch {
+        // Keep status text or the empty-stream fallback.
+      }
+      throw new Error(`HTTP ${response.status}: ${sanitizeAPIErrorDetail(detail, response.status, response.statusText)}`);
     }
 
     const reader = response.body.getReader();
