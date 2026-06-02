@@ -6041,6 +6041,18 @@
   - 这是候选排序 v1，还没有实现真正的多模型并行竞速或按任务阶段动态切换模型。
   - 下一步建议把 route 的 `health_rankings` 展示到 Extract 页/TaskCenter，并开始引入“fast/pro/repair 角色池策略”而不是只对 extractor 路径生效。
 
+## 2026-06-02 模型网关与 AI 提取价值再复盘
+
+- 暂停继续堆功能，围绕“慢模型不是不可用、fallback 不能冒充 AI、模型选择不能固定押注单个名称”完成一轮文档化复盘。
+- 新增 `project-docs/MODEL_GATEWAY_EXTRACTION_REVIEW_2026-06-02.md`：
+  - 明确 AI 在 NovelForge 中的核心价值应是语义理解、关系张力、事件意义、世界观规则和写作增益，而不是从原文摘录资产。
+  - 区分规则系统、AI 模型和 quality gate 的职责边界。
+  - 梳理当前已落地能力：角色池、模型 probe、健康事件、历史排序、章节级 index、局部 repair、fallback 标记。
+  - 明确当前未解决缺口：还没有完整多阶段模型流水线，fallback 标记还需要更强 UI/agent 可见性，writer 侧还没有 fast 草稿 + pro 审稿组合策略。
+  - 给出下一轮收敛方向：先修复乱码和质量标记可见性，再推进 `extractor_fast -> extractor_repair -> extractor_deep -> judge` 多阶段链路。
+- 安全边界：
+  - 文档未写入 API Key、session secret、管理员密码、网关地址或小说正文。
+
 ## 2026-06-01 前端展示模型健康排序依据 v1
 
 - 继续补齐模型编排可解释性。
