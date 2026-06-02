@@ -15,7 +15,9 @@ describe('task refresh scope', () => {
 
   it('keeps preview-only repair tasks from forcing asset library reloads', () => {
     expect(shouldRefreshCharacterLibrary('relationship_backfill')).toBe(false);
+    expect(shouldRefreshCharacterLibrary('deep_asset_enrichment')).toBe(false);
     expect(shouldRefreshWorldLibrary('timeline_rebuild')).toBe(false);
+    expect(shouldRefreshWorldLibrary('deep_asset_enrichment')).toBe(false);
   });
 
   it('keeps existing import and extraction refresh behavior', () => {

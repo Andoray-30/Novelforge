@@ -47,6 +47,29 @@ describe('TaskCenter summaries', () => {
     expect(summary).toContain('按错误类型拆成 2 批修复。')
   })
 
+  it('summarizes deep asset enrichment as preview-only repair', () => {
+    const summary = getTaskSummary({
+      type: 'deep_asset_enrichment',
+      status: 'COMPLETED',
+      result: {
+        repair_type: 'deep_assets',
+        characters_count: 3,
+        relationships_count: 2,
+        timeline_count: 1,
+        world_count: 1,
+        repair_diff: {
+          relationships: { new: 1, duplicates: 1 },
+          timeline: { new: 1, duplicates: 0 },
+        },
+      },
+    })
+
+    expect(summary).toContain('深度补强预览完成。')
+    expect(summary).toContain('角色 3 个，关系 2 条，时间线 1 条，世界观 1 项。')
+    expect(summary).toContain('可写回关系新增 1 / 跳过 1')
+    expect(summary).toContain('角色和世界观仍需确认式写回入口。')
+  })
+
   it('builds chapter index recovery details from repair previews', () => {
     const details = getChapterIndexRecoveryDetails({
       chapter_indices: [

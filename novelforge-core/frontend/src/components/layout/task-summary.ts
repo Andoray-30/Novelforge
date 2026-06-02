@@ -4,7 +4,7 @@ import {
 } from '@/lib/task-events'
 import { getModelHealthRankingReasonLabel } from '@/lib/model-route-summary'
 
-export const REPAIR_PREVIEW_TASK_TYPES = new Set(['chapter_index_rerun', 'relationship_backfill', 'timeline_rebuild'])
+export const REPAIR_PREVIEW_TASK_TYPES = new Set(['chapter_index_rerun', 'relationship_backfill', 'timeline_rebuild', 'deep_asset_enrichment'])
 
 export interface ChapterIndexRecoveryDetails {
   reused: string[]
@@ -268,6 +268,9 @@ export function getTaskSummary(task: {
 }) {
   if (REPAIR_PREVIEW_TASK_TYPES.has(task.type || '')) {
     const result = asRecord(task.result) ?? {}
+    const repairType = typeof result.repair_type === 'string' ? result.repair_type : ''
+    const characters = typeof result.characters_count === 'number' ? result.characters_count : 0
+    const world = typeof result.world_count === 'number' ? result.world_count : 0
     const relationships = typeof result.relationships_count === 'number' ? result.relationships_count : 0
     const timeline = typeof result.timeline_count === 'number' ? result.timeline_count : 0
     const diff = asRecord(result.repair_diff)
@@ -288,6 +291,21 @@ export function getTaskSummary(task: {
     const batchSummary = batchCount !== null && batchCount > 1 ? `按错误类型拆成 ${batchCount} 批修复。` : null
 
     if (normalizeTaskStatus(task.status) === 'COMPLETED') {
+      if (repairType === 'deep_assets' || (task.type || '') === 'deep_asset_enrichment') {
+        return [
+          '深度补强预览完成。',
+          `角色 ${characters} 个，关系 ${relationships} 条，时间线 ${timeline} 条，世界观 ${world} 项。`,
+          recoverySummary,
+          batchSummary,
+          relationshipNew !== null || relationshipDuplicates !== null
+            ? `可写回关系新增 ${relationshipNew ?? relationships} / 跳过 ${relationshipDuplicates ?? 0}`
+            : null,
+          timelineNew !== null || timelineDuplicates !== null
+            ? `可写回时间线新增 ${timelineNew ?? timeline} / 跳过 ${timelineDuplicates ?? 0}`
+            : null,
+          '角色和世界观仍需确认式写回入口。',
+        ].filter(Boolean).join(' ')
+      }
       if (
         relationshipNew !== null ||
         relationshipDuplicates !== null ||

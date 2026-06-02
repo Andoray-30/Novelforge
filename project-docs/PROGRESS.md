@@ -11,6 +11,33 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-06-02 Extract 深度补强入口 v1
+
+- 将上一轮后端 `deep_asset_enrichment` preview 任务接入 Extract 页面。
+- `RepairTaskType` 新增 `deep_asset_enrichment`，质量修复区新增“深度补强”按钮。
+- 可修复问题分组调整：
+  - 失败章节、乱码资产仍走 `chapter_index_rerun`。
+  - 未映射关系端点仍走 `relationship_backfill`。
+  - 时间线错配仍走 `timeline_rebuild`。
+  - `needs_ai_repair`、`diagnostic_seed`、低置信角色、弱证据关系、弱世界观事实默认走 `deep_asset_enrichment`。
+  - 当 `candidate_counts.model_stage_deep_recommended=true` 且没有其他 deep 分组时，自动显示“建议深度补强”。
+- 提交 deep 补强任务时会带上：
+  - `analysis_diagnostics`
+  - `analysis_quality_issues`
+  - 当前修复分组的 `deep_enrichment_targets`
+- 任务中心把 `deep_asset_enrichment` 识别为 preview-only 修复任务：
+  - 摘要展示角色、关系、时间线、世界观 preview 数量。
+  - 明确提示角色和世界观仍需确认式写回入口。
+  - preview 任务不会触发角色库或世界库自动刷新，避免把未写回结果误当成已入库资产。
+- 验证：
+  - `npm test -- src/components/layout/TaskCenter.test.ts src/lib/task-refresh-scope.test.ts --run`：2 files / 12 tests passed。
+  - `npx tsc --noEmit --incremental false`：通过。
+  - `npm test -- --run`：31 files / 132 tests passed。
+  - `npm run build`：通过。
+- 当前边界：
+  - deep preview 可以从前端发起，但角色/世界观确认写回仍未实现。
+  - 真实外部模型 deep 补强 smoke 尚未执行；下一步应在可控项目上验证输出是否真正改善角色性格、关系张力和世界观规则。
+
 ## 2026-06-02 extractor_deep 补强预览入口 v1
 
 - 按模型编排复盘的下一步，接入 `deep_asset_enrichment` 后端任务。

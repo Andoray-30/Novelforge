@@ -42,7 +42,7 @@ const ACCEPTED_EXTENSIONS = ['.txt', '.md', '.text', '.epub', '.pdf', '.docx'];
 const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024;
 
 type ExtractStatus = 'idle' | 'uploading' | 'extracting' | 'success' | 'error';
-type RepairTaskType = 'chapter_index_rerun' | 'relationship_backfill' | 'timeline_rebuild';
+type RepairTaskType = 'chapter_index_rerun' | 'relationship_backfill' | 'timeline_rebuild' | 'deep_asset_enrichment';
 type RepairSeverity = 'high' | 'medium' | 'low';
 type ImportStepKey = 'input' | 'progress' | 'diagnostics' | 'next';
 type DiagnosticStatus = 'ready' | 'warning' | 'danger' | 'empty';
@@ -238,6 +238,8 @@ function repairTaskLabel(taskType: RepairTaskType): string {
       return '回补关系';
     case 'timeline_rebuild':
       return '重建时间线';
+    case 'deep_asset_enrichment':
+      return '深度补强';
     default:
       return '提交修复';
   }
@@ -292,6 +294,20 @@ function buildChapterIndexRerunPayload(
     payload.chapter_ids = Array.from(new Set(chapterIds));
   }
   return payload;
+}
+
+function buildDeepAssetEnrichmentPayload(
+  result: NovelImportTaskResult | null,
+  group?: QualityRepairGroup
+): Record<string, unknown> {
+  const diagnostics = result?.analysis_diagnostics ?? {};
+  const groupItems = group?.items ?? [];
+  return {
+    analysis_diagnostics: diagnostics,
+    analysis_quality_issues: result?.analysis_quality_issues ?? [],
+    quality_issues: result?.analysis_quality_issues ?? [],
+    deep_enrichment_targets: group ? { [group.key]: groupItems } : undefined,
+  };
 }
 
 function mergeDiagnostics(
@@ -364,7 +380,7 @@ function buildQualityRepairGroups(result: NovelImportTaskResult | null): Quality
       title: '诊断种子资产',
       description: '这些资产来自规则 fallback、端点回补或低置信种子，只能作为修复线索，不能当作完整 AI 理解结果。',
       severity: 'high',
-      recommendedTask: 'chapter_index_rerun',
+      recommendedTask: 'deep_asset_enrichment',
       items: mergeRepairItems(diagnostics?.diagnostic_seed_assets, diagnostics?.diagnostic_seed_characters),
     },
     {
@@ -372,7 +388,7 @@ function buildQualityRepairGroups(result: NovelImportTaskResult | null): Quality
       title: '需 AI 修复资产',
       description: '这些资产已被标记为需要 AI 修复或人工确认，写作时应降低优先级。',
       severity: 'high',
-      recommendedTask: 'chapter_index_rerun',
+      recommendedTask: 'deep_asset_enrichment',
       items: mergeRepairItems(diagnostics?.needs_ai_repair_assets, diagnostics?.needs_ai_repair_characters),
     },
     {
@@ -396,7 +412,7 @@ function buildQualityRepairGroups(result: NovelImportTaskResult | null): Quality
       title: '弱证据关系',
       description: '关系存在但证据或张力不足，适合回补证据、阶段变化和关系动机。',
       severity: 'medium',
-      recommendedTask: 'relationship_backfill',
+      recommendedTask: 'deep_asset_enrichment',
       items: normalizeRepairItems(diagnostics?.weak_relationships),
     },
     {
@@ -404,7 +420,7 @@ function buildQualityRepairGroups(result: NovelImportTaskResult | null): Quality
       title: '世界观分类不足',
       description: '世界观资产缺少地点、组织、规则、历史或特殊概念分类，世界树和写作检索会变钝。',
       severity: 'medium',
-      recommendedTask: 'chapter_index_rerun',
+      recommendedTask: 'deep_asset_enrichment',
       items: normalizeRepairItems(diagnostics?.weak_world_facts),
     },
     {
@@ -420,7 +436,7 @@ function buildQualityRepairGroups(result: NovelImportTaskResult | null): Quality
       title: '低置信角色',
       description: '角色有证据但档案不足，会影响 AI 写作时的人物稳定性。',
       severity: 'medium',
-      recommendedTask: 'chapter_index_rerun',
+      recommendedTask: 'deep_asset_enrichment',
       items: normalizeRepairItems(diagnostics?.low_confidence_characters),
     },
     {
@@ -449,7 +465,20 @@ function buildQualityRepairGroups(result: NovelImportTaskResult | null): Quality
     },
   ];
 
-  return groups.filter((group) => group.items.length > 0);
+  const filteredGroups = groups.filter((group) => group.items.length > 0);
+  const candidateCounts = result.candidate_counts ?? diagnostics?.candidate_counts ?? {};
+  const deepRecommended = (candidateCounts as Record<string, unknown>).model_stage_deep_recommended === true;
+  if (deepRecommended && !filteredGroups.some((group) => group.recommendedTask === 'deep_asset_enrichment')) {
+    filteredGroups.push({
+      key: 'model_stage_deep_recommended',
+      title: '建议深度补强',
+      description: '首轮章节索引已有可补强候选，但质量门槛未通过。建议用深度模型补角色动机、关系张力和世界观规则。',
+      severity: 'medium',
+      recommendedTask: 'deep_asset_enrichment',
+      items: result.analysis_quality_issues?.length ? result.analysis_quality_issues : ['质量门槛建议进入 extractor_deep 补强阶段'],
+    });
+  }
+  return filteredGroups;
 }
 
 function resolveCurrentStep(status: ExtractStatus, analysisResult: NovelImportTaskResult | null, savedSummary: SavedSummary | null): ImportStepKey {
@@ -1081,6 +1110,9 @@ export default function ExtractPage() {
         ...(taskType === 'chapter_index_rerun' && !selectedRepairChapterId && !rerunPayload
           ? buildChapterIndexRerunPayload(analysisResult, group)
           : {}),
+        ...(taskType === 'deep_asset_enrichment'
+          ? buildDeepAssetEnrichmentPayload(analysisResult, group)
+          : {}),
         source: rerunPayload ? 'extract_chapter_index_run_history' : 'extract_quality_panel',
       });
       if (!response.success || !response.task_id) throw new Error(response.message || '重跑任务提交失败');
@@ -1709,11 +1741,12 @@ export default function ExtractPage() {
                 </label>
               ) : null}
             </div>
-            <div className="mt-4 grid gap-2 sm:grid-cols-3">
+            <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
               {[
                 { type: 'chapter_index_rerun' as const, label: '重跑章节索引' },
                 { type: 'relationship_backfill' as const, label: '回补关系' },
                 { type: 'timeline_rebuild' as const, label: '重建时间线' },
+                { type: 'deep_asset_enrichment' as const, label: '深度补强' },
               ].map((item) => (
                 <button key={item.type} type="button" className="nf-button" disabled={repairSubmitting !== null} onClick={() => void submitRepairTask(item.type)}>
                   <RefreshCw className={['h-4 w-4', repairSubmitting === item.type ? 'animate-spin' : ''].join(' ')} />
@@ -1742,7 +1775,7 @@ export default function ExtractPage() {
               { label: '项目质量总览', icon: LayoutDashboard, action: () => router.push('/analytics') },
               { label: '打开 editor', icon: BookOpen, action: () => router.push('/editor') },
               { label: '让 AI 写序章', icon: FileText, action: () => router.push('/?quickAction=prologue') },
-              { label: '修复角色/关系', icon: Wrench, action: () => void submitRepairTask('relationship_backfill') },
+              { label: '深度补强资产', icon: Wrench, action: () => void submitRepairTask('deep_asset_enrichment') },
             ].map((item) => {
               const Icon = item.icon;
               return (
