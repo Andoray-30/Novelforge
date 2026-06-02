@@ -213,6 +213,20 @@ function topMissingSignals(missingSignals?: Record<string, number>): string {
   return entries.length > 0 ? entries.map(([key, count]) => `${key} x ${count}`).join('，') : '暂无';
 }
 
+function isLowConfidenceTraceAsset(asset: AgentTrace['used_assets'][number]): boolean {
+  return Boolean(asset.low_confidence || asset.needs_ai_repair || asset.diagnostic_seed);
+}
+
+function getTraceAssetQualityBadges(asset: AgentTrace['used_assets'][number]): string[] {
+  return [
+    asset.diagnostic_seed ? '诊断种子' : '',
+    asset.needs_ai_repair ? '需修复' : '',
+    asset.low_confidence ? '低置信' : '',
+    asset.relationship_enriched ? '增强关系' : '',
+    ...asset.quality_warnings,
+  ].filter((label, index, labels) => label.length > 0 && labels.indexOf(label) === index);
+}
+
 function RepairSuggestionCard({
   suggestion,
   index,
@@ -329,6 +343,9 @@ function AgentTracePanel({
   const characterCount = trace.retrieval_coverage?.counts.characters ?? 0;
   const worldCount = trace.retrieval_coverage?.counts.world ?? 0;
   const usedEnrichedRelationships = trace.used_assets.some((asset) => asset.relationship_enriched);
+  const lowConfidenceAssetCount = trace.retrieval_coverage?.counts.low_confidence_assets
+    ?? trace.used_assets.filter(isLowConfidenceTraceAsset).length;
+  const retrievalIssues = trace.retrieval_coverage?.issues ?? [];
   const [isOpen, setIsOpen] = useState(false);
 
   return (
@@ -339,6 +356,7 @@ function AgentTracePanel({
           <div className="nf-panel-subtitle">
             角色 {characterCount} · 关系 {relationshipCount} · 世界观 {worldCount} · 章节片段 {chapterSnippetCount}
             {usedEnrichedRelationships ? ' · 使用增强关系' : ''}
+            {lowConfidenceAssetCount > 0 ? ` · 低置信资产 ${lowConfidenceAssetCount}` : ''}
             {trace.degraded ? ' · fallback' : ''}
           </div>
         </div>
@@ -354,6 +372,16 @@ function AgentTracePanel({
             {trace.fallback_reason ? <span> · 降级原因：{trace.fallback_reason}</span> : null}
           </div>
         </TraceSection>
+
+        {retrievalIssues.length > 0 ? (
+          <TraceSection title="上下文风险">
+            <div className="nf-card-grid">
+              {retrievalIssues.map((issue, index) => (
+                <div className="nf-alert" key={`retrieval-issue-${index}`}>{issue}</div>
+              ))}
+            </div>
+          </TraceSection>
+        ) : null}
 
         {trace.tool_calls.length > 0 ? (
           <TraceSection title="工具调用">
@@ -378,6 +406,9 @@ function AgentTracePanel({
                 <span className="nf-chip" key={`${asset.id ?? asset.title}-${index}`}>
                   {asset.title || asset.id}
                   {asset.type ? <span className="nf-muted"> · {asset.type}</span> : null}
+                  {getTraceAssetQualityBadges(asset).map((badge) => (
+                    <span className="nf-muted" key={`${asset.id ?? asset.title}-${badge}`}> · {badge}</span>
+                  ))}
                 </span>
               ))}
             </div>

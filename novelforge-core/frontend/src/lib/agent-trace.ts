@@ -12,6 +12,12 @@ export type AgentTraceAsset = {
   type?: string;
   title?: string;
   relationship_enriched?: boolean;
+  quality_flags: string[];
+  source_type?: string;
+  diagnostic_seed?: boolean;
+  needs_ai_repair?: boolean;
+  low_confidence?: boolean;
+  quality_warnings: string[];
 };
 
 export type AgentTraceSnippet = {
@@ -45,6 +51,7 @@ export type AgentRetrievalCoverage = {
     relationships: number;
     world: number;
     chapter_snippets: number;
+    low_confidence_assets: number;
   };
   issues: string[];
 };
@@ -222,6 +229,12 @@ export function normalizeAgentTrace(value: unknown): AgentTrace | undefined {
         type: asString(item.type) || undefined,
         title: asString(item.title) || undefined,
         relationship_enriched: asBoolean(item.relationship_enriched),
+        quality_flags: asStringArray(item.quality_flags),
+        source_type: asString(item.source_type) || undefined,
+        diagnostic_seed: asBoolean(item.diagnostic_seed),
+        needs_ai_repair: asBoolean(item.needs_ai_repair),
+        low_confidence: asBoolean(item.low_confidence),
+        quality_warnings: asStringArray(item.quality_warnings),
       })).filter((item) => item.id || item.title)
     : [];
 
@@ -240,7 +253,8 @@ export function normalizeAgentTrace(value: unknown): AgentTrace | undefined {
       relationships: asNumber(value.retrieval_coverage.counts.relationships) ?? 0,
       world: asNumber(value.retrieval_coverage.counts.world) ?? 0,
       chapter_snippets: asNumber(value.retrieval_coverage.counts.chapter_snippets) ?? 0,
-    } : { characters: 0, relationships: 0, world: 0, chapter_snippets: 0 },
+      low_confidence_assets: asNumber(value.retrieval_coverage.counts.low_confidence_assets) ?? 0,
+    } : { characters: 0, relationships: 0, world: 0, chapter_snippets: 0, low_confidence_assets: 0 },
     issues: asStringArray(value.retrieval_coverage.issues),
   } : undefined;
 

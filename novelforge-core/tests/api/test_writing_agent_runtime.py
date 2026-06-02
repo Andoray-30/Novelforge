@@ -295,6 +295,46 @@ def test_enriched_relationships_are_prioritized_and_marked_in_trace() -> None:
     assert trace["relationship_repair_suggestions"][0]["relationship_id"] == "rel-thin"
 
 
+def test_trace_marks_repair_needed_assets_as_low_confidence_context() -> None:
+    manager, storage = build_manager()
+    run(
+        manager.create_content(
+            build_item(
+                "char-seed",
+                title="种子角色",
+                content_type=ContentType.CHARACTER,
+                content="她有一个表面完整的描述，但来源只是规则诊断种子，还不能直接作为稳定写作记忆。",
+                extracted_data={
+                    "source_type": "diagnostic_seed",
+                    "diagnostic_seed": True,
+                    "needs_ai_repair": True,
+                    "quality_flags": ["diagnostic_seed", "needs_ai_repair", "minimal_profile"],
+                    "description": "她有一个表面完整的描述，但来源只是规则诊断种子，还不能直接作为稳定写作记忆。",
+                    "desires": ["找到答案"],
+                    "fears": ["失去自我"],
+                },
+            )
+        )
+    )
+    runtime = WritingAgentRuntime(manager, storage)
+    scope = AgentScope(session_id="session-a", selected_novel_id="novel-a")
+
+    observation = run(runtime.search_project_assets(scope, {"query": "", "types": ["character"], "limit": 1}))
+
+    assert observation.items[0]["id"] == "char-seed"
+    assert observation.items[0]["diagnostic_seed"] is True
+    assert observation.items[0]["needs_ai_repair"] is True
+    assert observation.items[0]["low_confidence"] is True
+    assert "诊断种子" in observation.items[0]["quality_warnings"]
+
+    trace = runtime._build_trace({"plan_summary": "test"}, [observation], degraded=False)
+
+    assert trace["used_assets"][0]["id"] == "char-seed"
+    assert trace["used_assets"][0]["needs_ai_repair"] is True
+    assert trace["retrieval_coverage"]["counts"]["low_confidence_assets"] == 1
+    assert any("低置信" in issue for issue in trace["retrieval_coverage"]["issues"])
+
+
 def test_relationship_repair_queue_ranks_core_thin_relationships() -> None:
     manager, storage = build_manager()
     relationships = [

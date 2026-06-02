@@ -681,6 +681,78 @@ def _is_enriched_relationship(item: ContentItem) -> bool:
     return _as_str(payload.get("repair_status")) == "confirmed"
 
 
+def _truthy_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes", "y"}
+    return False
+
+
+def _quality_flags(item: ContentItem) -> List[str]:
+    payload = _payload(item)
+    flags: List[str] = []
+    for value in [payload.get("quality_flags"), item.metadata.tags]:
+        if isinstance(value, list):
+            flags.extend(_as_str(flag).lower() for flag in value if _as_str(flag))
+    return list(dict.fromkeys(flags))
+
+
+def _asset_quality_trace(item: ContentItem, diagnostics: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    payload = _payload(item)
+    flags = _quality_flags(item)
+    flag_set = set(flags)
+    source_type = _as_str(payload.get("source_type")).lower()
+    diagnostic_seed = (
+        source_type in {"diagnostic_seed", "fallback", "rule_fallback"}
+        or _truthy_flag(payload.get("diagnostic_seed"))
+        or "diagnostic_seed" in flag_set
+        or "relationship_endpoint_backfill" in flag_set
+        or "fallback_seed" in flag_set
+    )
+    needs_ai_repair = (
+        diagnostic_seed
+        or _truthy_flag(payload.get("needs_ai_repair"))
+        or bool(flag_set.intersection({
+            "needs_ai_repair",
+            "minimal_profile",
+            "missing_evidence",
+            "unresolved_endpoint",
+            "timeline_title_description_mismatch",
+        }))
+    )
+    readiness = _as_str((diagnostics or {}).get("relationship_creative_readiness"))
+    score = int((diagnostics or {}).get("score") or 0) if isinstance((diagnostics or {}).get("score"), int) else None
+    low_confidence = needs_ai_repair or readiness == "thin" or (score is not None and score <= 2)
+
+    warnings: List[str] = []
+    if diagnostic_seed:
+        warnings.append("诊断种子")
+    if needs_ai_repair:
+        warnings.append("需要 AI 修复")
+    if readiness == "thin":
+        warnings.append("创作信号薄弱")
+    if "missing_evidence" in flag_set:
+        warnings.append("缺少证据")
+    if "unresolved_endpoint" in flag_set:
+        warnings.append("关系端点未闭合")
+
+    result: Dict[str, Any] = {}
+    if flags:
+        result["quality_flags"] = flags
+    if source_type:
+        result["source_type"] = source_type
+    if diagnostic_seed:
+        result["diagnostic_seed"] = True
+    if needs_ai_repair:
+        result["needs_ai_repair"] = True
+    if low_confidence:
+        result["low_confidence"] = True
+    if warnings:
+        result["quality_warnings"] = warnings
+    return result
+
+
 def _extract_snippet(content: str, query: str, mode: str, limit: int = MAX_SNIPPET_CHARS) -> str:
     text = content.strip()
     if not text:
@@ -1386,6 +1458,7 @@ class WritingAgentRuntime:
                     "relationship_enriched": enriched,
                     "queue_score": score,
                     "queue_reasons": reasons,
+                    **_asset_quality_trace(item, diagnostics),
                     "repair_suggestion": suggestion,
                 }
             )
@@ -1465,6 +1538,7 @@ class WritingAgentRuntime:
                     "creative_diagnostics": diagnostics,
                     "diagnostic_summary": diagnostics["summary"],
                     **({"relationship_enriched": True} if enriched_relationship else {}),
+                    **_asset_quality_trace(item, diagnostics),
                     **({"repair_suggestion": repair_suggestion} if repair_suggestion else {}),
                 }
             )
@@ -1501,6 +1575,7 @@ class WritingAgentRuntime:
                         "creative_diagnostics": diagnostics,
                         "diagnostic_summary": diagnostics["summary"],
                         **({"relationship_enriched": True} if enriched_relationship else {}),
+                        **_asset_quality_trace(item, diagnostics),
                         **({"repair_suggestion": repair_suggestion} if repair_suggestion else {}),
                     }
                 )
@@ -1550,6 +1625,7 @@ class WritingAgentRuntime:
                     "creative_diagnostics": diagnostics,
                     "diagnostic_summary": diagnostics["summary"],
                     **({"relationship_enriched": True} if enriched_relationship else {}),
+                    **_asset_quality_trace(item, diagnostics),
                     **({"repair_suggestion": repair_suggestion} if repair_suggestion else {}),
                 }
             ],
@@ -1773,6 +1849,12 @@ class WritingAgentRuntime:
                                 "type": "relationship",
                                 "title": item.get("title"),
                                 "creative_diagnostics": item.get("creative_diagnostics"),
+                                "quality_flags": item.get("quality_flags"),
+                                "source_type": item.get("source_type"),
+                                "diagnostic_seed": item.get("diagnostic_seed"),
+                                "needs_ai_repair": item.get("needs_ai_repair"),
+                                "low_confidence": item.get("low_confidence"),
+                                "quality_warnings": item.get("quality_warnings"),
                             }
                         )
                     if item.get("creative_diagnostics"):
@@ -1804,6 +1886,12 @@ class WritingAgentRuntime:
                             "title": item.get("title"),
                             "creative_diagnostics": item.get("creative_diagnostics"),
                             "relationship_enriched": item.get("relationship_enriched"),
+                            "quality_flags": item.get("quality_flags"),
+                            "source_type": item.get("source_type"),
+                            "diagnostic_seed": item.get("diagnostic_seed"),
+                            "needs_ai_repair": item.get("needs_ai_repair"),
+                            "low_confidence": item.get("low_confidence"),
+                            "quality_warnings": item.get("quality_warnings"),
                             "repair_suggestion": item.get("repair_suggestion"),
                         }
                     )
@@ -1829,6 +1917,10 @@ class WritingAgentRuntime:
             "relationships": sum(1 for item in used_assets if item.get("type") == "relationship"),
             "world": sum(1 for item in used_assets if item.get("type") == "world"),
             "chapter_snippets": len(chapter_snippets),
+            "low_confidence_assets": sum(
+                1 for item in used_assets
+                if item.get("low_confidence") or item.get("needs_ai_repair") or item.get("diagnostic_seed")
+            ),
         }
         relationship_assets = [item for item in used_assets if item.get("type") == "relationship"]
         relationship_quality_report = _relationship_quality_report(relationship_assets)
@@ -1859,6 +1951,10 @@ class WritingAgentRuntime:
             retrieval_issues.append("未找到足够关系资产")
         elif relationship_quality_report["low_information_relationships"] > 0:
             retrieval_issues.append("关系资产薄弱：缺少依赖/亏欠/情绪张力/剧情功能等可写信号")
+        if coverage_counts["low_confidence_assets"] > 0:
+            retrieval_issues.append(
+                f"本轮使用了 {coverage_counts['low_confidence_assets']} 个低置信/需修复资产，生成内容应作为草稿复核"
+            )
         if coverage_counts["world"] == 0:
             retrieval_issues.append("未找到足够世界观资产")
         if coverage_counts["chapter_snippets"] == 0:
@@ -1895,7 +1991,7 @@ class WritingAgentRuntime:
             "used_assets": [],
             "chapter_snippets": [],
             "retrieval_coverage": {
-                "counts": {"characters": 0, "relationships": 0, "world": 0, "chapter_snippets": 0},
+                "counts": {"characters": 0, "relationships": 0, "world": 0, "chapter_snippets": 0, "low_confidence_assets": 0},
                 "issues": [],
             },
             "creative_diagnostics": [],

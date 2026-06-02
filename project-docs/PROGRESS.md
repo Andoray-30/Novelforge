@@ -6041,6 +6041,34 @@
   - 这是候选排序 v1，还没有实现真正的多模型并行竞速或按任务阶段动态切换模型。
   - 下一步建议把 route 的 `health_rankings` 展示到 Extract 页/TaskCenter，并开始引入“fast/pro/repair 角色池策略”而不是只对 extractor 路径生效。
 
+## 2026-06-02 Agent trace 低置信上下文可见化 v1
+
+- 延续模型网关复盘后的 P0 收敛：fallback / diagnostic seed / needs repair 资产不能只在导入页可见，写作 agent 本轮实际使用这些资产时也必须在 trace 里暴露风险。
+- 后端 `writing_agent.py` 补充资产质量 trace：
+  - `quality_flags`
+  - `source_type`
+  - `diagnostic_seed`
+  - `needs_ai_repair`
+  - `low_confidence`
+  - `quality_warnings`
+- `used_assets` 与 `relationship_repair_queue_assets` 现在会携带上述字段，`retrieval_coverage.counts` 新增 `low_confidence_assets`。
+- 当本轮写作上下文使用了低置信或需修复资产时，trace 会追加检索问题：
+  - “本轮使用了 N 个低置信/需修复资产，生成内容应作为草稿复核”
+- 前端 trace normalize 与 MessageBubble 同步：
+  - “本轮写作依据”摘要显示“低置信资产 N”。
+  - 展开后新增“上下文风险”区域。
+  - 使用资产 badge 显示“诊断种子 / 需修复 / 低置信 / 增强关系”和具体质量警告。
+- 验证：
+  - `npm.cmd test -- src/lib/agent-trace.test.ts --run`：1 file / 3 tests passed。
+  - `pytest novelforge-core/tests/api/test_writing_agent_runtime.py -q -p no:cacheprovider`：26 passed。
+  - `compileall novelforge-core/novelforge/api/writing_agent.py`：通过。
+  - `npx.cmd tsc --noEmit --incremental false`：通过。
+  - `npm.cmd test -- --run`：31 files / 129 tests passed。
+  - `npm.cmd run build`：通过。
+- 当前边界：
+  - 本轮没有重跑真实长篇 smoke。
+  - 仍需继续清理少量用户可见乱码，并在真实外部模型闭环中确认低置信 trace 是否足够指导用户复核。
+
 ## 2026-06-02 质量标记前端可见化 v1
 
 - 按模型网关复盘文档的 P0 收敛项推进：不继续堆新功能，先把 fallback / 低置信资产边界变成用户可见。
