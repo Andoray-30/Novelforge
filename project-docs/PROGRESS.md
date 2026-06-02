@@ -11,6 +11,32 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-06-02 模型健康排序角色感知 v1
+
+- 继续落实模型网关复盘后的核心判断：慢模型不等于不可用，不同任务阶段应使用不同模型策略。
+- `rank_model_candidates_by_health(...)` 新增角色感知延迟容忍：
+  - `extractor_fast / writer_fast`：仍偏向低延迟模型，适合首轮广覆盖和快速聊天。
+  - `extractor_deep / writer_pro`：提高延迟容忍，慢但成功的模型不会因为 60-90 秒级耗时被过度降权。
+  - `extractor_repair / judge`：采用中等延迟容忍，优先保证可用和稳定。
+- `ModelRouter` 在按历史健康排序时显式传入当前 `role`，避免所有阶段套用同一套速度权重。
+- 排名结果现在暴露：
+  - `latency_tolerance_ms`
+  - `latency_penalty`
+  便于后续前端或诊断报告解释“为什么当前选择这个模型”。
+- 同步清理公开示例和历史验收文档中的具体网关地址，统一改为 OpenAI-compatible gateway 占位写法；真实 endpoint 只应存在于本地 `.env` 或部署 secret。
+- 新增测试覆盖：
+  - 快速提取角色会优先选择响应更快的成功模型。
+  - 深度提取角色会保留慢但可靠模型的优先级。
+  - 原有模型健康、模型路由、导入调度和聊天 trace 测试保持通过。
+- 验证：
+  - `pytest novelforge-core/tests/services/test_model_health.py novelforge-core/tests/services/test_model_router.py -q -p no:cacheprovider`：15 passed。
+  - `pytest novelforge-core/tests/services/test_ai_scheduler_import.py novelforge-core/tests/api/test_chat_agent_trace_api.py -q -p no:cacheprovider`：40 passed。
+  - `pytest novelforge-core/tests/services/test_model_health.py novelforge-core/tests/services/test_model_router.py novelforge-core/tests/services/test_ai_scheduler_import.py novelforge-core/tests/api/test_chat_agent_trace_api.py -q -p no:cacheprovider`：55 passed。
+  - `compileall novelforge-core/novelforge/services/model_health.py novelforge-core/novelforge/services/model_router.py`：通过。
+- 当前边界：
+  - 本轮改的是历史健康排序权重，不主动发起真实 provider probe。
+  - 下一步仍应做真实外部模型闭环验证，检查 model_route / health_rankings 是否能在当前网关时段选到更合适的模型。
+
 ## 2026-06-02 写作 Agent 优先使用补强资产 v1
 
 - 将已确认 / 已补强资产真正接入写作 Agent 检索排序：
@@ -2543,7 +2569,7 @@
 
 ### 本轮修复
 - 外部 AI provider 地址已从旧端口地址切换到新 NewAPI Sync 入口：
-  - `OPENAI_BASE_URL=https://newapi.sync-api.xyz/v1`
+  - `OPENAI_BASE_URL=https://your-openai-compatible-gateway.example/v1`
 - 同步更新：
   - `novelforge-core/.env`
   - `novelforge-core/.env.example`
@@ -2551,7 +2577,7 @@
   - `novelforge-core/README.md`
 
 ### 本轮验证
-- `Config.load().base_url` 已确认读取为 `https://newapi.sync-api.xyz/v1`。
+- `Config.load().base_url` 已确认读取为 `https://your-openai-compatible-gateway.example/v1`。
 - `/v1/models` 连通性验证通过，返回 30 个模型，并包含当前模型 `gemini-3-flash-preview`。
 - 最小 `/v1/chat/completions` 验证通过，短 ping 返回 `OK`。
 
@@ -2562,7 +2588,7 @@
 ## 2026-05-22 完整真实导入 smoke 复跑结果
 
 ### 本轮 smoke 结果
-- 使用新 provider 地址 `https://newapi.sync-api.xyz/v1` 复跑 `data/run_sample_import_smoke_v2.py`。
+- 使用新 provider 地址 `https://your-openai-compatible-gateway.example/v1` 复跑 `data/run_sample_import_smoke_v2.py`。
 - 结果文件：`data/smoke_import_v2_20260522_220700.json`。
 - 基础统计：
   - `chapters_count=8`
@@ -2875,7 +2901,7 @@
 - Content asset smoke checks passed for `create -> get -> update -> search`.
 - The previous chat persistence blocker is fixed: `start-conversation` now creates a durable conversation record before `send-message`.
 - Current external blocker:
-  - Backend config is loading `OPENAI_BASE_URL=https://newapi.sync-api.xyz:37176/v1`
+  - Backend config is loading `OPENAI_BASE_URL=https://your-openai-compatible-gateway.example/v1`
   - Backend config is loading `OPENAI_MODEL=gemini-3-flash-preview`
   - `chat/send-message` and `openai/models` now fail with upstream `Connection error`
   - On the previous validation round, `generate/text` reached upstream and returned `403 denied access`, so the failure mode has moved from local code issues to provider connectivity / project permission issues
@@ -2907,7 +2933,7 @@
   - `500` 及其他 `5xx` 错误现在会触发候选模型回退，而不是直接中断
   - 对于 `qwen3.6-plus` 在当前自建网关返回 `500 auth_unavailable` 的情况，现在会自动回退到 `gemini-3-flash-preview`
 - 本地直接代码级验证已通过：
-  - 使用前端同款运行时配置 `base_url=https://newapi.sync-api.xyz:37176/v1`
+  - 使用前端同款运行时配置 `base_url=https://your-openai-compatible-gateway.example/v1`
   - 主模型 `qwen3.6-plus` 首次返回 `500`
   - 后端自动回退到 `gemini-3-flash-preview`
   - `AIService.chat()` 成功返回结果
@@ -3581,7 +3607,7 @@
 
 ## 2026-05-23 真实长篇 Smoke：章节级提取质量通过
 - 使用当前服务端 AI 配置复跑 `data/run_sample_import_smoke_v2.py`：
-  - `OPENAI_BASE_URL=https://newapi.sync-api.xyz/v1`
+  - `OPENAI_BASE_URL=https://your-openai-compatible-gateway.example/v1`
   - `OPENAI_MODEL=gemini-3-flash-preview`
   - 样本：`超时空辉夜姬.txt`，全文约 90k 字。
 - 输出文件：
@@ -3904,10 +3930,10 @@
   - `chapters_count=8`，章节保存成功。
   - `characters_count=0`、`relationships_count=0`、`timeline_count=0`。
   - `failed_chapters_count=8`，所有章节级 AI index 均因 `ConnectError` 失败。
-  - 当前网关配置读取为 `OPENAI_BASE_URL=https://newapi.sync-api.xyz/v1`、`OPENAI_MODEL=gemini-3-flash-preview`。
+  - 当前网关配置读取为 `OPENAI_BASE_URL=https://your-openai-compatible-gateway.example/v1`、`OPENAI_MODEL=gemini-3-flash-preview`。
 - 外部连接诊断：
-  - 本机 DNS 将 `newapi.sync-api.xyz` 解析到 `198.18.0.44`。
-  - 直连 `https://newapi.sync-api.xyz/v1/models` TLS 握手失败。
+  - 本机 DNS 将 `your-openai-compatible-gateway.example` 解析到 `198.18.0.44`。
+  - 直连 `https://your-openai-compatible-gateway.example/v1/models` TLS 握手失败。
   - 系统代理为 `127.0.0.1:7897`，通过代理可建立 CONNECT，但 HTTPS 握手仍被提前关闭。
   - 结论：当前阻塞点是外部 AI 网关/代理链路不可达，不是提取合并逻辑本身的数量问题。
 - 本轮修复：
@@ -3920,11 +3946,11 @@
   - 前端 Vitest：`43 passed`。
 - 当前判断：
   - 提取链路的失败可解释性更准确了：外部模型不可达时会明确暴露失败章节和失败状态。
-  - 要继续验证真实提取质量，需要先修复 `newapi.sync-api.xyz` 的 HTTPS/代理可达性，或提供一个当前机器可连通的 OpenAI-compatible 网关地址。
+  - 要继续验证真实提取质量，需要先修复 `your-openai-compatible-gateway.example` 的 HTTPS/代理可达性，或提供一个当前机器可连通的 OpenAI-compatible 网关地址。
 
 ## 2026-05-24 公开部署前收口第十三轮：真实长篇 smoke 首次通过质量基准
 - 背景：
-  - 用户确认 `https://newapi.sync-api.xyz` 在浏览器可打开后，重新测试 API 网关。
+  - 用户确认 `https://your-openai-compatible-gateway.example` 在浏览器可打开后，重新测试 API 网关。
   - `/v1/models` 已恢复可达并返回模型列表。
   - `gemini-3-flash-preview` 的 chat 请求返回 `500 internal server error`，不适合作默认模型。
   - 实测可用模型包括：`gemini-3.5-flash`、`gemini-3.1-pro-preview`、`gemini-2.5-flash`、`deepseek-ai/deepseek-v4-flash`、`deepseek-ai/deepseek-v4-pro`。
@@ -5632,7 +5658,7 @@
 ### 2026-05-29 Goal 19 真实闭环复跑通过核心链路
 
 - 配置变化：
-  - 本地 `.env` 已切换到新的 NewAPI-compatible base URL：`https://fast-newapi.sync-api.xyz:8848/v1`。
+  - 本地 `.env` 已切换到新的 NewAPI-compatible base URL：`https://your-openai-compatible-gateway.example/v1`。
   - 使用服务端模型配置 `gemini-3.5-flash` 跑真实模型调用；密钥只保存在本地 `.env`，未提交。
 - 本轮修复：
   - 修复 `/api/chat/send-message-stream`：流式接口会先返回状态帧，并在 agent 上下文准备 / 模型等待阶段发送心跳，避免真实模型调用时 Next 代理长时间空闲导致 `socket hang up`。

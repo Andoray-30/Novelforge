@@ -14,7 +14,7 @@ Date: 2026-05-29
 
 必填项：
 
-- `OPENAI_BASE_URL`: OpenAI-compatible endpoint，例如 `https://fast-newapi.sync-api.xyz:8848/v1`。
+- `OPENAI_BASE_URL`: OpenAI-compatible endpoint，例如 `https://your-openai-compatible-gateway.example/v1`。
 - `OPENAI_API_KEY`: 服务端 provider key，不能放到前端公开变量。
 - `OPENAI_MODEL`: 默认模型。
 - `NOVELFORGE_FAST_MODEL`: 对话框 Fast 模式映射模型。
@@ -116,7 +116,7 @@ Date: 2026-05-29
 
 Provider：
 
-- NewAPI-compatible endpoint 已切换到 `https://fast-newapi.sync-api.xyz:8848/v1`。
+- NewAPI-compatible endpoint 已切换到 `https://your-openai-compatible-gateway.example/v1`。
 - `/v1/models` 通过 Node 客户端返回 200。
 - 真实密钥只保存在本地环境，不写入文档或仓库。
 

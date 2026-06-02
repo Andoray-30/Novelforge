@@ -225,7 +225,7 @@ class ModelRouter:
                 role=role,
                 limit=int(getattr(self.config, "model_health_routing_limit", 200) or 200),
             )
-            return rank_model_candidates_by_health(candidates, events)
+            return rank_model_candidates_by_health(candidates, events, role=role)
         except Exception:
             return candidates, []
 

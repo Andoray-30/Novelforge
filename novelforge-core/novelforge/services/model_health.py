@@ -11,6 +11,16 @@ from typing import Any, Dict, Iterable, List, Optional
 MODEL_HEALTH_EVENT_PREFIX = "model_health_event_"
 
 
+ROLE_LATENCY_TOLERANCE_MS = {
+    "extractor_fast": 20_000,
+    "writer_fast": 20_000,
+    "extractor_repair": 45_000,
+    "judge": 45_000,
+    "extractor_deep": 90_000,
+    "writer_pro": 90_000,
+}
+
+
 def _now_iso() -> str:
     return datetime.now().isoformat()
 
@@ -329,12 +339,39 @@ def summarize_model_health_events(events: Iterable[Dict[str, Any]]) -> List[Dict
     return results
 
 
-def rank_model_candidates_by_health(candidates: List[str], events: Iterable[Dict[str, Any]]) -> tuple[List[str], List[Dict[str, Any]]]:
+def _latency_tolerance_for_role(role: Optional[str]) -> int:
+    normalized_role = _clean_string(role)
+    return ROLE_LATENCY_TOLERANCE_MS.get(normalized_role or "", 30_000)
+
+
+def _infer_role_from_summary(summary: Dict[str, Any]) -> Optional[str]:
+    roles = summary.get("roles")
+    if isinstance(roles, list) and len(roles) == 1:
+        return _clean_string(roles[0])
+    return None
+
+
+def _latency_penalty(average_latency_ms: Optional[int], *, role: Optional[str]) -> tuple[int, int]:
+    tolerance_ms = _latency_tolerance_for_role(role)
+    if average_latency_ms is None or average_latency_ms <= tolerance_ms:
+        return 0, tolerance_ms
+    overage = average_latency_ms - tolerance_ms
+    penalty = (overage + 9_999) // 10_000
+    return min(8, max(1, penalty)), tolerance_ms
+
+
+def rank_model_candidates_by_health(
+    candidates: List[str],
+    events: Iterable[Dict[str, Any]],
+    *,
+    role: Optional[str] = None,
+) -> tuple[List[str], List[Dict[str, Any]]]:
     """Rank model candidates from recent persisted health events.
 
     Successful attempts and passing probes increase priority. Hard failures
-    decrease priority, but high latency alone is only a mild penalty so slow
-    but reliable models remain usable.
+    decrease priority, but high latency is judged by role. Fast roles prefer
+    lower latency; deep/pro/judge roles tolerate slower successful models so
+    they remain usable for quality-sensitive stages.
     """
 
     original_candidates = [_clean_string(candidate) for candidate in candidates]
@@ -381,9 +418,8 @@ def rank_model_candidates_by_health(candidates: List[str], events: Iterable[Dict
                 except (TypeError, ValueError):
                     pass
 
-        latency_penalty = 0
-        if average_latency_ms is not None and average_latency_ms > 20000:
-            latency_penalty = min(8, average_latency_ms // 10000)
+        ranking_role = _clean_string(role) or _infer_role_from_summary(summary)
+        latency_penalty, latency_tolerance_ms = _latency_penalty(average_latency_ms, role=ranking_role)
 
         score = (
             successful_attempts * 24
@@ -406,6 +442,8 @@ def rank_model_candidates_by_health(candidates: List[str], events: Iterable[Dict
             "probe_passed": probe_passed,
             "probe_failed": probe_failed,
             "average_latency_ms": average_latency_ms,
+            "latency_tolerance_ms": latency_tolerance_ms,
+            "latency_penalty": latency_penalty,
             "error_counts": error_counts,
         })
 

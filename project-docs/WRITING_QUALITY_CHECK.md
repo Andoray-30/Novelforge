@@ -40,7 +40,7 @@ Passed:
 Failed or weak:
 
 - A longer 900-1300 word prologue request failed once with `HTTP 500: Internal Server Error`.
-- Backend log showed an upstream provider failure before a later successful call: `POST https://newapi.sync-api.xyz/v1/chat/completions "HTTP/1.1 500 Internal Server Error"`.
+- Backend log showed an upstream provider failure before a later successful call: `POST https://your-openai-compatible-gateway.example/v1/chat/completions "HTTP/1.1 500 Internal Server Error"`.
 - The successful short output was useful for pipeline validation but too short to judge full prologue quality.
 - Current extracted asset quality is still uneven: character cards are usable, but relationship/world topology and full creative emotional continuity still need a deeper quality pass.
 

@@ -178,6 +178,61 @@ def test_rank_model_candidates_prefers_recent_success_over_recent_failures():
     assert flaky["error_counts"] == {"gateway_timeout": 1}
 
 
+def test_rank_model_candidates_uses_role_specific_latency_tolerance():
+    fast_events = [
+        {
+            "source": "chapter_index_attempt",
+            "role": "extractor_fast",
+            "model": "slow-reliable-model",
+            "status": "success",
+            "latency_ms": 85000,
+        },
+        {
+            "source": "chapter_index_attempt",
+            "role": "extractor_fast",
+            "model": "responsive-model",
+            "status": "success",
+            "latency_ms": 25000,
+        },
+    ]
+    deep_events = [
+        {
+            "source": "chapter_index_attempt",
+            "role": "extractor_deep",
+            "model": "slow-reliable-model",
+            "status": "success",
+            "latency_ms": 85000,
+        },
+        {
+            "source": "chapter_index_attempt",
+            "role": "extractor_deep",
+            "model": "responsive-model",
+            "status": "success",
+            "latency_ms": 25000,
+        },
+    ]
+
+    fast_ordered, fast_rankings = rank_model_candidates_by_health(
+        ["slow-reliable-model", "responsive-model"],
+        fast_events,
+        role="extractor_fast",
+    )
+    deep_ordered, deep_rankings = rank_model_candidates_by_health(
+        ["slow-reliable-model", "responsive-model"],
+        deep_events,
+        role="extractor_deep",
+    )
+
+    assert fast_ordered == ["responsive-model", "slow-reliable-model"]
+    assert deep_ordered == ["slow-reliable-model", "responsive-model"]
+    fast_slow = next(item for item in fast_rankings if item["model"] == "slow-reliable-model")
+    deep_slow = next(item for item in deep_rankings if item["model"] == "slow-reliable-model")
+    assert fast_slow["latency_tolerance_ms"] == 20000
+    assert fast_slow["latency_penalty"] > 0
+    assert deep_slow["latency_tolerance_ms"] == 90000
+    assert deep_slow["latency_penalty"] == 0
+
+
 @pytest.mark.asyncio
 async def test_model_health_records_writer_chat_attempt_without_prompt_text():
     storage = MemoryStorage()

@@ -15,7 +15,7 @@ Verified chain:
 - Frontend: local Next.js service on `127.0.0.1:3010`.
 - Browser verification: Playwright fallback after the in-app browser runtime failed to start.
 - Provider: NewAPI-compatible server-side configuration.
-- Base URL: `https://fast-newapi.sync-api.xyz:8848/v1`.
+- Base URL: `https://your-openai-compatible-gateway.example/v1`.
 - Model path: Fast/Pro mapping from server `.env`.
 - Auth note: local `.env` still does not define persistent `NOVELFORGE_ADMIN_PASSWORD` / `NOVELFORGE_SESSION_SECRET`. Goal 20 adds startup and settings-page warnings for this.
 
@@ -86,7 +86,7 @@ Verified chain:
 - Frontend: local Next.js service on `127.0.0.1:3010`.
 - Browser verification: headless Chrome through CDP fallback.
 - Provider: NewAPI-compatible server-side configuration.
-- Base URL: `https://fast-newapi.sync-api.xyz:8848/v1`.
+- Base URL: `https://your-openai-compatible-gateway.example/v1`.
 - Model: `gemini-3.5-flash`.
 - Auth note: local `.env` still does not define `NOVELFORGE_ADMIN_PASSWORD`, so the smoke injected a process-only admin password to exercise the login UI. Public/internal deployment should set `NOVELFORGE_ADMIN_PASSWORD` and `NOVELFORGE_SESSION_SECRET` before release.
 

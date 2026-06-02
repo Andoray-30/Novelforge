@@ -57,7 +57,7 @@ copy .env.example .env
 ```env
 # AI 服务配置
 OPENAI_API_KEY=your-api-key
-OPENAI_BASE_URL=https://newapi.sync-api.xyz/v1
+OPENAI_BASE_URL=https://your-openai-compatible-gateway.example/v1
 NOVELFORGE_OPENAI_PROXY=
 OPENAI_MODEL=gemini-3.5-flash
 NOVELFORGE_FAST_MODEL=gemini-3.5-flash
