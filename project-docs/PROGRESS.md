@@ -11,6 +11,40 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-06-02 extractor_deep 补强预览入口 v1
+
+- 按模型编排复盘的下一步，接入 `deep_asset_enrichment` 后端任务。
+- `deep_asset_enrichment` 复用现有导入 repair preview 链路，但默认模型角色切到 `extractor_deep`：
+  - 不重跑全书首轮提取。
+  - 不自动写回内容库。
+  - 返回 `write_mode=preview`，供后续前端/用户确认。
+- preview 结果现在可以返回：
+  - `characters`
+  - `relationships`
+  - `timeline_events`
+  - `world_setting`
+  - `deep_enrichment_targets`
+  - `model_role=extractor_deep`
+- `deep_enrichment_targets` 会从任务参数和 `analysis_diagnostics` 汇总需补强目标：
+  - `needs_ai_repair_characters`
+  - `weak_relationships`
+  - `weak_world_facts`
+  - `diagnostic_seed_*`
+  - `low_confidence_characters`
+  - `quality_issues`
+- 新增测试覆盖：
+  - `deep_asset_enrichment` 会把 `model_role=extractor_deep` 传给章节 index extractor。
+  - 返回角色、关系、时间线、世界观 preview。
+  - 返回补强目标摘要。
+  - 不创建新的内容库资产。
+- 验证：
+  - `pytest novelforge-core/tests/services/test_ai_scheduler_import.py -q -p no:cacheprovider`：36 passed。
+  - `pytest test_model_health.py test_model_router.py test_ai_scheduler_import.py -q -p no:cacheprovider`：50 passed。
+  - `compileall novelforge-core/novelforge/services/ai_scheduler.py`：通过。
+- 当前边界：
+  - 本轮只实现后端 preview 任务，前端 Extract 页面尚未增加一键发起 deep 补强的按钮。
+  - `import_repair_apply` 仍只写回关系/时间线；角色和世界观深度补强写回需要下一轮实现确认式 apply，不能自动覆盖原资产。
+
 ## 2026-06-02 模型网关与 AI 提取价值暂停复盘补充
 
 - 暂停继续堆新功能，围绕“模型慢不等于不可用、快不等于适合提取、fallback 不能代表 AI 理解”补齐工程判断。

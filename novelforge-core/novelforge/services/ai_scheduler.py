@@ -234,6 +234,7 @@ class AITaskScheduler:
             "chapter_index_rerun": self._process_import_repair_task,
             "relationship_backfill": self._process_import_repair_task,
             "timeline_rebuild": self._process_import_repair_task,
+            "deep_asset_enrichment": self._process_import_repair_task,
             "import_repair_apply": self._process_import_repair_apply_task,
         }
         
@@ -427,6 +428,8 @@ class AITaskScheduler:
         requested_role = task.parameters.get("model_role") if isinstance(task.parameters, dict) else None
         if isinstance(requested_role, str) and requested_role in {"extractor_fast", "extractor_deep", "extractor_repair"}:
             return requested_role
+        if task.type == "deep_asset_enrichment":
+            return "extractor_deep"
         if task.type == "chapter_index_rerun":
             return "extractor_repair"
         return "extractor_fast"
@@ -1018,6 +1021,129 @@ class AITaskScheduler:
             },
         }
 
+    @staticmethod
+    def _dump_preview_dict(value: Any) -> Optional[Dict[str, Any]]:
+        if hasattr(value, "model_dump"):
+            value = value.model_dump()
+        if isinstance(value, dict):
+            return value
+        return None
+
+    @classmethod
+    def _dump_preview_list(cls, values: Any) -> List[Dict[str, Any]]:
+        if not isinstance(values, list):
+            return []
+        dumped: List[Dict[str, Any]] = []
+        for value in values:
+            item = cls._dump_preview_dict(value)
+            if isinstance(item, dict):
+                dumped.append(item)
+        return dumped
+
+    @staticmethod
+    def _summarize_deep_target_item(value: Any) -> Optional[Dict[str, Any]]:
+        allowed_keys = {
+            "id",
+            "asset_id",
+            "chapter_id",
+            "name",
+            "title",
+            "source",
+            "target",
+            "type",
+            "content_type",
+            "role_hint",
+            "reason",
+            "quality_flags",
+            "missing_signals",
+        }
+        if isinstance(value, str) and value.strip():
+            return {"name": value.strip()[:160]}
+        if not isinstance(value, dict):
+            return None
+
+        summary: Dict[str, Any] = {}
+        for key in allowed_keys:
+            raw_value = value.get(key)
+            if isinstance(raw_value, str) and raw_value.strip():
+                summary[key] = raw_value.strip()[:240]
+            elif isinstance(raw_value, (int, float, bool)):
+                summary[key] = raw_value
+            elif isinstance(raw_value, list):
+                cleaned = [
+                    str(item).strip()[:120]
+                    for item in raw_value[:8]
+                    if isinstance(item, (str, int, float, bool)) and str(item).strip()
+                ]
+                if cleaned:
+                    summary[key] = cleaned
+        return summary or None
+
+    @classmethod
+    def _summarize_deep_target_list(cls, value: Any) -> List[Dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        summarized: List[Dict[str, Any]] = []
+        for item in value[:50]:
+            target = cls._summarize_deep_target_item(item)
+            if isinstance(target, dict):
+                summarized.append(target)
+        return summarized
+
+    @classmethod
+    def _deep_enrichment_targets(cls, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        diagnostics = parameters.get("analysis_diagnostics")
+        if not isinstance(diagnostics, dict):
+            diagnostics = {}
+
+        explicit_targets = parameters.get("deep_enrichment_targets")
+        targets: Dict[str, List[Dict[str, Any]]] = {}
+        if isinstance(explicit_targets, dict):
+            for key, value in explicit_targets.items():
+                summarized = cls._summarize_deep_target_list(value)
+                if summarized:
+                    targets[str(key)] = summarized
+
+        target_keys = [
+            "needs_ai_repair_assets",
+            "needs_ai_repair_characters",
+            "diagnostic_seed_assets",
+            "diagnostic_seed_characters",
+            "low_confidence_characters",
+            "weak_relationships",
+            "weak_world_facts",
+        ]
+        for source in (parameters, diagnostics):
+            for key in target_keys:
+                if key in targets:
+                    continue
+                summarized = cls._summarize_deep_target_list(source.get(key))
+                if summarized:
+                    targets[key] = summarized
+
+        quality_issues = (
+            parameters.get("analysis_quality_issues")
+            or parameters.get("quality_issues")
+            or diagnostics.get("analysis_quality_issues")
+            or diagnostics.get("quality_issues")
+            or []
+        )
+        quality_issue_samples = [
+            str(item).strip()[:240]
+            for item in quality_issues[:12]
+            if isinstance(item, (str, int, float, bool)) and str(item).strip()
+        ] if isinstance(quality_issues, list) else []
+
+        counts = {key: len(value) for key, value in targets.items()}
+        if quality_issue_samples:
+            counts["quality_issues"] = len(quality_issue_samples)
+
+        return {
+            "counts": counts,
+            "targets": targets,
+            "quality_issues": quality_issue_samples,
+        }
+
     async def _process_import_repair_task(self, task: Task) -> Dict[str, Any]:
         """Preview a focused rerun for imported chapter assets without duplicating saved assets."""
         from .extraction_service import get_extraction_service
@@ -1026,6 +1152,7 @@ class AITaskScheduler:
             "chapter_index_rerun": "chapter_index",
             "relationship_backfill": "relationships",
             "timeline_rebuild": "timeline",
+            "deep_asset_enrichment": "deep_assets",
         }
         repair_type = task.parameters.get("repair_type") or repair_type_by_task.get(task.type, "chapter_index")
 
@@ -1052,26 +1179,22 @@ class AITaskScheduler:
             diagnostics = {}
         session_id = task.parameters.get("session_id")
         parent_id = task.parameters.get("parent_id") or task.parameters.get("novel_id")
-        relationships_preview = [
-            item.model_dump() if hasattr(item, "model_dump") else item
-            for item in (analysis.get("relationships") or [])
-        ]
-        relationships_preview = [item for item in relationships_preview if isinstance(item, dict)]
-        timeline_preview = [
-            item.model_dump() if hasattr(item, "model_dump") else item
-            for item in (analysis.get("timeline_events") or [])
-        ]
-        timeline_preview = [item for item in timeline_preview if isinstance(item, dict)]
+        characters_preview = self._dump_preview_list(analysis.get("characters") or [])
+        relationships_preview = self._dump_preview_list(analysis.get("relationships") or [])
+        timeline_preview = self._dump_preview_list(analysis.get("timeline_events") or [])
+        world_setting_preview = self._dump_preview_dict(analysis.get("world_setting"))
         repair_diff = await self._build_import_repair_diff(
             session_id=session_id if isinstance(session_id, str) else None,
             parent_id=parent_id if isinstance(parent_id, str) else None,
             relationships=relationships_preview,
             timeline_events=timeline_preview,
         )
+        model_role = self._chapter_index_model_role_for_task(task)
 
         result = {
             "repair_type": repair_type,
             "write_mode": "preview",
+            "model_role": model_role,
             "session_id": session_id if isinstance(session_id, str) else None,
             "parent_id": parent_id if isinstance(parent_id, str) else None,
             "chapters_count": len(chapters),
@@ -1102,6 +1225,12 @@ class AITaskScheduler:
             result["relationships"] = relationships_preview
         elif repair_type == "timeline":
             result["timeline_events"] = timeline_preview
+        elif repair_type == "deep_assets":
+            result["characters"] = characters_preview
+            result["relationships"] = relationships_preview
+            result["timeline_events"] = timeline_preview
+            result["world_setting"] = world_setting_preview
+            result["deep_enrichment_targets"] = self._deep_enrichment_targets(task.parameters)
         else:
             result["chapter_indices"] = analysis.get("chapter_indices") or []
 

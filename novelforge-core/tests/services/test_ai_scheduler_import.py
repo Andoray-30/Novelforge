@@ -1465,6 +1465,117 @@ def test_import_repair_task_loads_saved_chapters_and_returns_preview(monkeypatch
     assert result["relationships"][0]["source"] == "林墨"
 
 
+def test_deep_asset_enrichment_returns_preview_with_deep_model_role(monkeypatch):
+    import novelforge.services.extraction_service as extraction_module
+
+    class FakeExtractionService:
+        def __init__(self):
+            self.received_chapters = None
+            self.received_model_role = None
+
+        async def extract_chapter_index_assets(
+            self,
+            chapters,
+            diagnostics_recorder=None,
+            model_role=None,
+            repair_strategy=None,
+        ):
+            self.received_chapters = chapters
+            self.received_model_role = model_role
+            return {
+                "characters": [
+                    Character(
+                        name="Alex",
+                        role=CharacterRole.PROTAGONIST,
+                        description="A focused protagonist with clearer motive.",
+                        personality="guarded but loyal",
+                    )
+                ],
+                "relationships": [
+                    NetworkEdge(
+                        source="Alex",
+                        target="Mira",
+                        relationship_type=RelationshipType.FRIEND,
+                        description="They rely on each other under pressure.",
+                        evidence=["Alex waits for Mira before entering the sealed room."],
+                    )
+                ],
+                "timeline_events": [
+                    TimelineEvent(
+                        title="The sealed room opens",
+                        description="Alex and Mira uncover the rule that changes their choices.",
+                        characters=["Alex", "Mira"],
+                        evidence=["The sealed room opens only when both names are spoken."],
+                    )
+                ],
+                "world_setting": WorldSetting(
+                    history="The city records debts as public memory.",
+                    rules=["Names can unlock old obligations."],
+                ),
+                "analysis_diagnostics": {
+                    "candidate_counts": {"chapter_character_candidates": 2},
+                    "model_route": {"role": model_role, "model": "deep-model"},
+                    "failed_chapters": [],
+                },
+            }
+
+    service = FakeExtractionService()
+    monkeypatch.setattr(extraction_module, "get_extraction_service", lambda *args, **kwargs: service)
+
+    content_manager = RecordingContentManager()
+    asyncio.run(content_manager.create_content(ContentItem(
+        metadata=ContentMetadata(
+            id="chapter-deep-1",
+            title="Chapter 1",
+            type=ContentType.CHAPTER,
+            parent_id="novel-deep",
+            session_id="session-deep",
+        ),
+        content="Alex waits for Mira before entering the sealed room.",
+        extracted_data={"chapter_index": 1},
+    )))
+    scheduler = build_scheduler(content_manager=content_manager, storage_manager=MemoryStorageManager())
+    task = Task(
+        id="task-deep-enrichment",
+        type="deep_asset_enrichment",
+        status=TaskStatus.RUNNING,
+        priority=TaskPriority.MEDIUM,
+        parameters={
+            "session_id": "session-deep",
+            "parent_id": "novel-deep",
+            "analysis_diagnostics": {
+                "needs_ai_repair_characters": ["Alex"],
+                "weak_relationships": [{"source": "Alex", "target": "Mira", "missing_signals": ["debt"]}],
+                "weak_world_facts": [{"name": "The sealed room", "reason": "rule lacks consequence"}],
+            },
+            "quality_issues": ["core relationship lacks emotional tension"],
+        },
+        created_at=datetime.now(),
+    )
+
+    result = asyncio.run(scheduler._process_import_repair_task(task))
+
+    assert service.received_chapters[0]["id"] == "chapter-deep-1"
+    assert service.received_model_role == "extractor_deep"
+    assert result["repair_type"] == "deep_assets"
+    assert result["write_mode"] == "preview"
+    assert result["model_role"] == "extractor_deep"
+    assert result["characters_count"] == 1
+    assert result["relationships_count"] == 1
+    assert result["timeline_count"] == 1
+    assert result["world_count"] == 1
+    assert result["characters"][0]["name"] == "Alex"
+    assert result["world_setting"]["rules"] == ["Names can unlock old obligations."]
+    assert result["relationships"][0]["source"] == "Alex"
+    assert result["timeline_events"][0]["title"] == "The sealed room opens"
+    assert result["analysis_diagnostics"]["model_route"]["role"] == "extractor_deep"
+    assert result["deep_enrichment_targets"]["counts"]["needs_ai_repair_characters"] == 1
+    assert result["deep_enrichment_targets"]["counts"]["weak_relationships"] == 1
+    assert result["deep_enrichment_targets"]["counts"]["weak_world_facts"] == 1
+    assert result["deep_enrichment_targets"]["counts"]["quality_issues"] == 1
+    assert len([item for item in content_manager.items if item.metadata.type != ContentType.CHAPTER]) == 0
+
+
 def test_import_repair_task_filters_retryable_chapters_from_diagnostics(monkeypatch):
     import novelforge.services.extraction_service as extraction_module
 
