@@ -67,7 +67,30 @@ describe('TaskCenter summaries', () => {
     expect(summary).toContain('深度补强预览完成。')
     expect(summary).toContain('角色 3 个，关系 2 条，时间线 1 条，世界观 1 项。')
     expect(summary).toContain('可写回关系新增 1 / 跳过 1')
-    expect(summary).toContain('角色和世界观仍需确认式写回入口。')
+    expect(summary).toContain('确认后会保存为补强资产，不覆盖原始资产。')
+  })
+
+  it('builds writeback details for deep asset enrichment previews', () => {
+    const details = getRepairPreviewWritebackDetails({
+      repair_type: 'deep_assets',
+      characters_count: 2,
+      relationships_count: 1,
+      timeline_count: 0,
+      world_count: 1,
+      repair_diff: {
+        relationships: { new: 1, duplicates: 0 },
+        timeline: { new: 0, duplicates: 0 },
+      },
+    })
+
+    expect(details).toMatchObject({
+      characterNew: 2,
+      relationshipNew: 1,
+      timelineNew: 0,
+      worldNew: 1,
+      applyTypes: ['characters', 'world', 'relationships', 'timeline'],
+      hasWritableAssets: true,
+    })
   })
 
   it('builds chapter index recovery details from repair previews', () => {
@@ -167,10 +190,12 @@ describe('TaskCenter summaries', () => {
     })
 
     expect(details).toMatchObject({
+      characterNew: 0,
       relationshipNew: 3,
       relationshipDuplicates: 1,
       timelineNew: 2,
       timelineDuplicates: 0,
+      worldNew: 0,
       applyTypes: ['relationships', 'timeline'],
       hasWritableAssets: true,
     })
@@ -178,19 +203,25 @@ describe('TaskCenter summaries', () => {
 
   it('summarizes written assets after repair apply', () => {
     const result = {
+      characters_count: 1,
       relationships_count: 1,
       timeline_count: 1,
+      world_count: 1,
       written_assets: [
+        { id: 'char-1', type: 'character', title: '林墨' },
         { id: 'rel-1', type: 'relationship', title: '林墨 -> 周岚' },
         { id: 'time-1', type: 'timeline', title: '并肩前行' },
+        { id: 'world-1', type: 'world', title: '雨城规则' },
       ],
     }
 
     expect(getRepairApplyWrittenAssets(result)).toEqual([
+      { id: 'char-1', type: 'character', title: '林墨' },
       { id: 'rel-1', type: 'relationship', title: '林墨 -> 周岚' },
       { id: 'time-1', type: 'timeline', title: '并肩前行' },
+      { id: 'world-1', type: 'world', title: '雨城规则' },
     ])
-    expect(getTaskSummary({ type: 'import_repair_apply', status: 'COMPLETED', result })).toContain('新增修复资产 2 个')
+    expect(getTaskSummary({ type: 'import_repair_apply', status: 'COMPLETED', result })).toContain('新增修复资产 4 个')
   })
 
   it('routes written repair assets to their owning library page', () => {

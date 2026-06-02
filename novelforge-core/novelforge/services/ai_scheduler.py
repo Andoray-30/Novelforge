@@ -923,6 +923,20 @@ class AITaskScheduler:
             return None
         return f"{title}:{description[:80]}"
 
+    def _build_character_repair_key(self, character: Dict[str, Any], fallback_title: str = "") -> Optional[str]:
+        name = self._normalize_import_name(str(character.get("name") or character.get("title") or fallback_title or ""))
+        source_task_id = self._normalize_import_name(str(character.get("repair_source_task_id") or ""))
+        if not name:
+            return None
+        return f"{source_task_id or 'direct'}:character:{name}"
+
+    def _build_world_repair_key(self, world: Dict[str, Any], fallback_title: str = "") -> Optional[str]:
+        title = self._normalize_import_name(str(world.get("title") or world.get("name") or fallback_title or "world_setting"))
+        source_task_id = self._normalize_import_name(str(world.get("repair_source_task_id") or ""))
+        if not title:
+            return None
+        return f"{source_task_id or 'direct'}:world:{title}"
+
     async def _load_existing_repair_asset_keys(
         self,
         *,
@@ -936,6 +950,8 @@ class AITaskScheduler:
         from ..content.models import ContentSearchRequest, ContentType
 
         type_map = {
+            "character": ContentType.CHARACTER,
+            "world": ContentType.WORLD,
             "relationship": ContentType.RELATIONSHIP,
             "timeline": ContentType.TIMELINE,
         }
@@ -949,7 +965,11 @@ class AITaskScheduler:
         keys: set[str] = set()
         for item in list(getattr(result, "items", []) or []):
             payload = item.extracted_data if isinstance(item.extracted_data, dict) else {}
-            if asset_type == "relationship":
+            if asset_type == "character":
+                key = self._build_character_repair_key(payload, getattr(item.metadata, "title", ""))
+            elif asset_type == "world":
+                key = self._build_world_repair_key(payload, getattr(item.metadata, "title", ""))
+            elif asset_type == "relationship":
                 key = self._build_relationship_repair_key(payload)
             else:
                 key = self._build_timeline_repair_key(payload, getattr(item.metadata, "title", ""))
@@ -1366,6 +1386,8 @@ class AITaskScheduler:
                 apply_types = ["relationships"]
             elif repair_type == "timeline":
                 apply_types = ["timeline"]
+            elif repair_type == "deep_assets":
+                apply_types = ["characters", "world", "relationships", "timeline"]
             else:
                 apply_types = ["relationships", "timeline"]
 
@@ -1374,11 +1396,30 @@ class AITaskScheduler:
         await self._save_task(task)
 
         repair_run_id = task.parameters.get("repair_run_id") or f"repair_{uuid.uuid4().hex[:12]}"
+        preview_task_id = task.parameters.get("preview_task_id")
         relationships_written = 0
         timeline_written = 0
+        characters_written = 0
+        world_written = 0
         written_assets: List[Dict[str, Any]] = []
 
-        from ..content.models import ContentItem, ContentMetadata
+        from ..content.models import ContentItem, ContentMetadata, ContentType
+
+        existing_character_keys = set()
+        if "characters" in apply_types:
+            existing_character_keys = await self._load_existing_repair_asset_keys(
+                session_id=session_id,
+                parent_id=parent_id if isinstance(parent_id, str) else None,
+                asset_type="character",
+            )
+
+        existing_world_keys = set()
+        if "world" in apply_types:
+            existing_world_keys = await self._load_existing_repair_asset_keys(
+                session_id=session_id,
+                parent_id=parent_id if isinstance(parent_id, str) else None,
+                asset_type="world",
+            )
 
         existing_relationship_keys = set()
         if "relationships" in apply_types:
@@ -1425,7 +1466,7 @@ class AITaskScheduler:
                     extracted_data={
                         **relationship,
                         "repair_run_id": repair_run_id,
-                        "repair_source_task_id": task.parameters.get("preview_task_id"),
+                        "repair_source_task_id": preview_task_id,
                         "repair_index": index,
                     },
                     relations={"source": [rel_source], "target": [rel_target]},
@@ -1475,7 +1516,7 @@ class AITaskScheduler:
                     extracted_data={
                         **event,
                         "repair_run_id": repair_run_id,
-                        "repair_source_task_id": task.parameters.get("preview_task_id"),
+                        "repair_source_task_id": preview_task_id,
                         "repair_index": index,
                     },
                     relations={
@@ -1492,15 +1533,157 @@ class AITaskScheduler:
                 })
                 existing_timeline_keys.add(event_key)
 
+        if "characters" in apply_types:
+            for index, character in enumerate(preview.get("characters") or []):
+                if not isinstance(character, dict):
+                    continue
+                char_name = str(character.get("name") or character.get("title") or f"补强角色 {index + 1}").strip()
+                if not char_name:
+                    continue
+                character_quality_flags = (
+                    [str(item) for item in character.get("quality_flags", []) if isinstance(item, (str, int, float, bool))]
+                    if isinstance(character.get("quality_flags"), list)
+                    else []
+                )
+                character_payload = {
+                    **character,
+                    "name": char_name,
+                    "source_type": "user_confirmed_repair",
+                    "repair_status": "confirmed",
+                    "quality_flags": sorted(set([
+                        *character_quality_flags,
+                        "asset_enriched",
+                        "character_enriched",
+                    ])),
+                    "repair_run_id": repair_run_id,
+                    "repair_source_task_id": preview_task_id,
+                    "repair_index": index,
+                }
+                char_key = self._build_character_repair_key(character_payload, char_name)
+                if char_key in existing_character_keys:
+                    continue
+                char_id = f"char_{session_id}_{uuid.uuid4().hex[:8]}"
+                char_content = "\n".join([
+                    f"【角色】{char_name}",
+                    f"【定位】{character.get('role') or character.get('role_hint') or '未标注'}",
+                    f"【性格】{character.get('personality') or '未标注'}",
+                    f"【描述】{character.get('description') or character.get('summary') or '未描述'}",
+                ])
+                created_id = await self.content_manager.create_content(ContentItem(
+                    metadata=ContentMetadata(
+                        id=char_id,
+                        title=f"{char_name} · AI 补强",
+                        type=ContentType.CHARACTER,
+                        session_id=session_id,
+                        parent_id=parent_id if isinstance(parent_id, str) and parent_id.strip() else None,
+                        tags=[
+                            "repair-preview",
+                            "ai-repaired",
+                            "character-enrichment",
+                            f"project-{session_id}",
+                            f"repair-run-{repair_run_id}",
+                        ],
+                    ),
+                    content=char_content,
+                    extracted_data=character_payload,
+                    relations={"characters": [char_name]},
+                ))
+                characters_written += 1
+                written_assets.append({
+                    "id": created_id or char_id,
+                    "type": "character",
+                    "title": f"{char_name} · AI 补强",
+                    "repair_run_id": repair_run_id,
+                    "name": char_name,
+                })
+                if char_key:
+                    existing_character_keys.add(char_key)
+
+        if "world" in apply_types:
+            raw_world_items: List[Dict[str, Any]] = []
+            world_setting = preview.get("world_setting")
+            if isinstance(world_setting, dict):
+                raw_world_items.append(world_setting)
+            raw_world_list = preview.get("world_settings")
+            if isinstance(raw_world_list, list):
+                raw_world_items.extend([item for item in raw_world_list if isinstance(item, dict)])
+
+            for index, world in enumerate(raw_world_items):
+                world_title = str(world.get("title") or world.get("name") or f"世界观补强 {index + 1}").strip()
+                world_quality_flags = (
+                    [str(item) for item in world.get("quality_flags", []) if isinstance(item, (str, int, float, bool))]
+                    if isinstance(world.get("quality_flags"), list)
+                    else []
+                )
+                world_payload = {
+                    **world,
+                    "title": world_title,
+                    "source_type": "user_confirmed_repair",
+                    "repair_status": "confirmed",
+                    "quality_flags": sorted(set([
+                        *world_quality_flags,
+                        "asset_enriched",
+                        "world_enriched",
+                    ])),
+                    "repair_run_id": repair_run_id,
+                    "repair_source_task_id": preview_task_id,
+                    "repair_index": index,
+                }
+                world_key = self._build_world_repair_key(world_payload, world_title)
+                if world_key in existing_world_keys:
+                    continue
+                rules = world.get("rules") if isinstance(world.get("rules"), list) else []
+                themes = world.get("themes") if isinstance(world.get("themes"), list) else []
+                world_id = f"world_{session_id}_{uuid.uuid4().hex[:8]}"
+                world_content = "\n".join([
+                    f"【世界观】{world_title}",
+                    f"【历史】{world.get('history') or '未标注'}",
+                    f"【规则】{', '.join(str(item) for item in rules) if rules else '未标注'}",
+                    f"【主题】{', '.join(str(item) for item in themes) if themes else '未标注'}",
+                ])
+                created_id = await self.content_manager.create_content(ContentItem(
+                    metadata=ContentMetadata(
+                        id=world_id,
+                        title=world_title,
+                        type=ContentType.WORLD,
+                        session_id=session_id,
+                        parent_id=parent_id if isinstance(parent_id, str) and parent_id.strip() else None,
+                        tags=[
+                            "repair-preview",
+                            "ai-repaired",
+                            "world-enrichment",
+                            f"project-{session_id}",
+                            f"repair-run-{repair_run_id}",
+                        ],
+                    ),
+                    content=world_content,
+                    extracted_data=world_payload,
+                    relations={},
+                ))
+                world_written += 1
+                written_assets.append({
+                    "id": created_id or world_id,
+                    "type": "world",
+                    "title": world_title,
+                    "repair_run_id": repair_run_id,
+                })
+                if world_key:
+                    existing_world_keys.add(world_key)
+
         task.progress = 0.95
-        task.message = f"修复写回完成：关系 {relationships_written} 条，时间线 {timeline_written} 条。"
+        task.message = (
+            f"修复写回完成：角色 {characters_written} 个，关系 {relationships_written} 条，"
+            f"时间线 {timeline_written} 条，世界观 {world_written} 项。"
+        )
         await self._save_task(task)
         return {
             "session_id": session_id,
             "parent_id": parent_id if isinstance(parent_id, str) else None,
             "repair_run_id": repair_run_id,
+            "characters_count": characters_written,
             "relationships_count": relationships_written,
             "timeline_count": timeline_written,
+            "world_count": world_written,
             "created_content_ids": [asset["id"] for asset in written_assets],
             "written_assets": written_assets,
             "write_mode": "confirmed",

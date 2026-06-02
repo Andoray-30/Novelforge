@@ -11,6 +11,39 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-06-02 deep 补强确认写回 v1
+
+- 将 `deep_asset_enrichment` preview 接入现有 `import_repair_apply` 确认写回流程。
+- 后端 `import_repair_apply` 现在支持从 deep preview 写回：
+  - `characters`
+  - `world_setting / world_settings`
+  - 原有 `relationships`
+  - 原有 `timeline_events`
+- 角色和世界观写回保持安全边界：
+  - 必须由用户通过修复 preview 确认写回。
+  - 不覆盖原始角色/世界观资产。
+  - 保存为新的修复资产，带 `repair-preview / ai-repaired / character-enrichment` 或 `world-enrichment` tags。
+  - `extracted_data` 写入 `source_type=user_confirmed_repair`、`repair_status=confirmed`、`repair_source_task_id`、`repair_run_id`、`quality_flags`。
+  - 同一个 preview task 重复写回会跳过已写入的角色/世界观补强资产，避免重复污染内容库。
+- 任务中心更新：
+  - deep preview 的确认写回面板显示角色新增、世界观新增、关系新增、时间线新增。
+  - `import_repair_apply` 完成摘要显示角色/关系/时间线/世界观写入数量。
+- 新增测试覆盖：
+  - deep preview 确认写回角色和世界观资产。
+  - 同一个 deep preview 二次写回去重。
+  - 前端 writeback details 对 deep preview 的角色/世界观数量和可写回状态。
+- 验证：
+  - `pytest novelforge-core/tests/services/test_ai_scheduler_import.py -q -p no:cacheprovider`：37 passed。
+  - `pytest test_model_health.py test_model_router.py test_ai_scheduler_import.py -q -p no:cacheprovider`：51 passed。
+  - `compileall novelforge-core/novelforge/services/ai_scheduler.py`：通过。
+  - `npm test -- src/components/layout/TaskCenter.test.ts --run`：1 file / 9 tests passed。
+  - `npx tsc --noEmit --incremental false`：通过。
+  - `npm test -- --run`：31 files / 133 tests passed。
+  - `npm run build`：通过。
+- 当前边界：
+  - 本轮仍未覆盖“更新原资产”的二次确认路径；当前策略是保存为补强资产，不覆盖原始资产。
+  - 还未跑真实外部模型 deep 补强 smoke；下一步应验证实际输出质量是否足够支撑序章写作。
+
 ## 2026-06-02 Extract 深度补强入口 v1
 
 - 将上一轮后端 `deep_asset_enrichment` preview 任务接入 Extract 页面。

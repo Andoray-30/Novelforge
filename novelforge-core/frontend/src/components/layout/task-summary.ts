@@ -14,10 +14,12 @@ export interface ChapterIndexRecoveryDetails {
 }
 
 export interface RepairPreviewWritebackDetails {
+  characterNew: number
   relationshipNew: number
   relationshipDuplicates: number
   timelineNew: number
   timelineDuplicates: number
+  worldNew: number
   applyTypes: string[]
   hasWritableAssets: boolean
 }
@@ -163,27 +165,35 @@ export function getRepairPreviewWritebackDetails(resultValue: unknown): RepairPr
   const relationshipDiff = asRecord(diff?.relationships)
   const timelineDiff = asRecord(diff?.timeline)
   const repairType = typeof result.repair_type === 'string' ? result.repair_type : ''
+  const charactersCount = typeof result.characters_count === 'number' ? result.characters_count : 0
   const relationshipsCount = typeof result.relationships_count === 'number' ? result.relationships_count : 0
   const timelineCount = typeof result.timeline_count === 'number' ? result.timeline_count : 0
+  const worldCount = typeof result.world_count === 'number' ? result.world_count : 0
 
+  const characterNew = repairType === 'deep_assets' ? charactersCount : 0
   const relationshipNew = numberFromRecord(relationshipDiff, 'new') ?? relationshipsCount
   const relationshipDuplicates = numberFromRecord(relationshipDiff, 'duplicates') ?? 0
   const timelineNew = numberFromRecord(timelineDiff, 'new') ?? timelineCount
   const timelineDuplicates = numberFromRecord(timelineDiff, 'duplicates') ?? 0
+  const worldNew = repairType === 'deep_assets' ? worldCount : 0
 
   const applyTypes = repairType === 'relationships'
     ? ['relationships']
     : repairType === 'timeline'
       ? ['timeline']
+      : repairType === 'deep_assets'
+        ? ['characters', 'world', 'relationships', 'timeline']
       : ['relationships', 'timeline']
 
   return {
+    characterNew,
     relationshipNew,
     relationshipDuplicates,
     timelineNew,
     timelineDuplicates,
+    worldNew,
     applyTypes,
-    hasWritableAssets: relationshipNew + timelineNew > 0,
+    hasWritableAssets: characterNew + relationshipNew + timelineNew + worldNew > 0,
   }
 }
 
@@ -303,7 +313,7 @@ export function getTaskSummary(task: {
           timelineNew !== null || timelineDuplicates !== null
             ? `可写回时间线新增 ${timelineNew ?? timeline} / 跳过 ${timelineDuplicates ?? 0}`
             : null,
-          '角色和世界观仍需确认式写回入口。',
+          '确认后会保存为补强资产，不覆盖原始资产。',
         ].filter(Boolean).join(' ')
       }
       if (
@@ -333,11 +343,13 @@ export function getTaskSummary(task: {
 
   if ((task.type || '') === 'import_repair_apply') {
     const result = asRecord(task.result) ?? {}
+    const characters = typeof result.characters_count === 'number' ? result.characters_count : 0
+    const world = typeof result.world_count === 'number' ? result.world_count : 0
     const relationships = typeof result.relationships_count === 'number' ? result.relationships_count : 0
     const timeline = typeof result.timeline_count === 'number' ? result.timeline_count : 0
     const writtenAssets = getRepairApplyWrittenAssets(result)
     return normalizeTaskStatus(task.status) === 'COMPLETED'
-      ? `修复写回完成：关系 ${relationships} 条，时间线 ${timeline} 条，新增修复资产 ${writtenAssets.length || relationships + timeline} 个。`
+      ? `修复写回完成：角色 ${characters} 个，关系 ${relationships} 条，时间线 ${timeline} 条，世界观 ${world} 项，新增修复资产 ${writtenAssets.length || characters + relationships + timeline + world} 个。`
       : task.message || '修复写回正在处理中...'
   }
 

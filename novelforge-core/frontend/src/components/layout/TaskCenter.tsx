@@ -511,6 +511,8 @@ export const TaskCenter = () => {
                   <div className="mt-2 rounded-md border border-green-500/20 bg-green-500/5 p-2 text-[10px] text-muted-foreground">
                     <div className="font-semibold text-green-700 dark:text-green-300">确认写回预览</div>
                     <div className="mt-1 grid grid-cols-2 gap-1">
+                      <span>角色新增 {writebackDetails?.characterNew ?? 0}</span>
+                      <span>世界观新增 {writebackDetails?.worldNew ?? 0}</span>
                       <span>关系新增 {writebackDetails?.relationshipNew ?? 0}</span>
                       <span>关系跳过 {writebackDetails?.relationshipDuplicates ?? 0}</span>
                       <span>时间线新增 {writebackDetails?.timelineNew ?? 0}</span>

@@ -1980,6 +1980,84 @@ def test_import_repair_apply_task_writes_confirmed_preview_assets():
     assert timeline_items[0].relations == {"characters": ["林墨", "周岚"], "locations": ["雨城"]}
 
 
+def test_import_repair_apply_task_writes_deep_character_and_world_assets():
+    content_manager = RecordingContentManager()
+    scheduler = build_scheduler(content_manager=content_manager, storage_manager=MemoryStorageManager())
+    preview_result = {
+        "repair_type": "deep_assets",
+        "characters": [
+            {
+                "name": "Alex",
+                "role": "protagonist",
+                "description": "A focused protagonist with clearer motive.",
+                "personality": "guarded but loyal",
+                "quality_flags": ["needs_ai_repair"],
+            }
+        ],
+        "world_setting": {
+            "history": "The city records debts as public memory.",
+            "rules": ["Names can unlock old obligations."],
+            "themes": ["memory", "debt"],
+        },
+    }
+    task = Task(
+        id="task-deep-apply",
+        type="import_repair_apply",
+        status=TaskStatus.RUNNING,
+        priority=TaskPriority.MEDIUM,
+        parameters={
+            "session_id": "session-deep-apply",
+            "parent_id": "novel-deep-apply",
+            "preview_task_id": "preview-deep-1",
+            "preview_result": preview_result,
+        },
+        created_at=datetime.now(),
+    )
+
+    result = asyncio.run(scheduler._process_import_repair_apply_task(task))
+
+    character_items = [item for item in content_manager.items if item.metadata.type == ContentType.CHARACTER]
+    world_items = [item for item in content_manager.items if item.metadata.type == ContentType.WORLD]
+    assert result["write_mode"] == "confirmed"
+    assert result["characters_count"] == 1
+    assert result["world_count"] == 1
+    assert result["relationships_count"] == 0
+    assert result["timeline_count"] == 0
+    assert [asset["type"] for asset in result["written_assets"]] == ["character", "world"]
+    assert character_items[0].metadata.tags[:3] == ["repair-preview", "ai-repaired", "character-enrichment"]
+    assert character_items[0].extracted_data["source_type"] == "user_confirmed_repair"
+    assert character_items[0].extracted_data["repair_status"] == "confirmed"
+    assert character_items[0].extracted_data["repair_source_task_id"] == "preview-deep-1"
+    assert "character_enriched" in character_items[0].extracted_data["quality_flags"]
+    assert world_items[0].metadata.tags[:3] == ["repair-preview", "ai-repaired", "world-enrichment"]
+    assert world_items[0].extracted_data["source_type"] == "user_confirmed_repair"
+    assert world_items[0].extracted_data["repair_status"] == "confirmed"
+    assert world_items[0].extracted_data["repair_source_task_id"] == "preview-deep-1"
+    assert "world_enriched" in world_items[0].extracted_data["quality_flags"]
+
+    duplicate_task = Task(
+        id="task-deep-apply-duplicate",
+        type="import_repair_apply",
+        status=TaskStatus.RUNNING,
+        priority=TaskPriority.MEDIUM,
+        parameters={
+            "session_id": "session-deep-apply",
+            "parent_id": "novel-deep-apply",
+            "preview_task_id": "preview-deep-1",
+            "preview_result": preview_result,
+        },
+        created_at=datetime.now(),
+    )
+
+    duplicate_result = asyncio.run(scheduler._process_import_repair_apply_task(duplicate_task))
+
+    assert duplicate_result["characters_count"] == 0
+    assert duplicate_result["world_count"] == 0
+    assert duplicate_result["written_assets"] == []
+    assert len([item for item in content_manager.items if item.metadata.type == ContentType.CHARACTER]) == 1
+    assert len([item for item in content_manager.items if item.metadata.type == ContentType.WORLD]) == 1
+
+
 def test_import_repair_apply_task_skips_duplicate_relationship_and_timeline_assets():
     content_manager = RecordingContentManager()
     existing_relationship = ContentItem(
