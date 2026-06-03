@@ -11,6 +11,15 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-06-03 Codex P0 extraction reliability baseline stopped
+
+- 停止继续开发 `codex/p0-extraction-reliability-baseline` 半成品分支。
+- 该分支只作为实验 / 审计材料，不合并到 `main` 或 `codex/novelforge-next`。
+- 已新增交接文档：`project-docs/HANDOFF_CODEX_P0_EXTRACTION_BASELINE.md`。
+- 半成品 attempt / diagnostics / smoke 代码改动已丢弃，未提交到稳定分支。
+- 已清理本轮临时文件，后续迁移给 opencode 时应从干净分支重新实现。
+- 下一阶段建议：opencode 先做当前提取链路审计，再做 `AttemptStore + Deadline`，不要直接做 ModelRouter。
+
 ## 2026-06-02 模型健康角色推荐 v1
 
 - 将模型健康报告从“原始统计列表”升级为“按任务角色给出推荐模型”：
