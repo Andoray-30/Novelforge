@@ -170,10 +170,14 @@ class ChapterIndexExtractor:
         diagnostics_recorder: Optional[Callable[[Dict[str, Any]], Any]] = None,
         chapter_concurrency: Optional[int] = None,
         max_tokens: Optional[int] = None,
+        attempt_store: Optional[Any] = None,
+        deadline_seconds: Optional[float] = None,
     ):
         self.ai_service = ai_service
         self.config = config or ExtractionConfig(timeout=180.0, max_retries=1, retry_delay=1.0)
         self.diagnostics_recorder = diagnostics_recorder
+        self.attempt_store = attempt_store
+        self.deadline_seconds = deadline_seconds
         self.chapter_concurrency = self._clamp_int(
             chapter_concurrency if chapter_concurrency is not None else self._resolve_chapter_concurrency(),
             minimum=1,
@@ -299,53 +303,127 @@ class ChapterIndexExtractor:
         return index
 
     async def _extract_chapter_index_with_attempts(self, chapter: ChapterSource) -> tuple[ChapterIndex, List[Dict[str, Any]]]:
+        from ..services.deadline import Deadline, DeadlineExceeded
+
         prompt = self._build_chapter_prompt(chapter)
         last_error: Optional[Exception] = None
         attempts: List[Dict[str, Any]] = []
         max_retries = max(1, int(getattr(self.config, "max_retries", 1) or 1))
+
+        deadline = self._create_deadline()
+
         for attempt in range(max_retries):
+            if deadline is not None and deadline.is_expired:
+                exc = DeadlineExceeded("Chapter extraction deadline exceeded")
+                record = self._build_attempt_record(
+                    chapter,
+                    attempt_number=attempt + 1,
+                    status="deadline_exceeded",
+                    latency_ms=0,
+                    retry_count=attempt,
+                    needs_retry=True,
+                    deadline_remaining_ms=0,
+                )
+                attempts.append(record)
+                await self._record_diagnostic_event({"event_type": "attempt", "record": record})
+                await self._persist_attempt(chapter, attempt, record)
+                setattr(exc, "attempts", attempts)
+                raise exc
+
             started = time.perf_counter()
             try:
-                response = await self.ai_service.chat(
-                    prompt,
-                    max_tokens=self.max_tokens,
-                    timeout=self.config.timeout,
+                safe_timeout = self._safe_timeout(deadline)
+                response = await asyncio.wait_for(
+                    self.ai_service.chat(
+                        prompt,
+                        max_tokens=self.max_tokens,
+                        timeout=safe_timeout,
+                    ),
+                    timeout=safe_timeout,
                 )
                 index = self._parse_chapter_response(response, chapter)
-                attempts.append(
-                    self._build_attempt_record(
-                        chapter,
-                        attempt_number=attempt + 1,
-                        status="success",
-                        latency_ms=self._elapsed_ms(started),
-                        raw_response=response,
-                        parsed_candidate_counts=self._index_candidate_counts(index),
-                        retry_count=attempt,
-                        needs_retry=False,
-                    )
+                record = self._build_attempt_record(
+                    chapter,
+                    attempt_number=attempt + 1,
+                    status="success",
+                    latency_ms=self._elapsed_ms(started),
+                    raw_response=response,
+                    parsed_candidate_counts=self._index_candidate_counts(index),
+                    retry_count=attempt,
+                    needs_retry=False,
+                    deadline_remaining_ms=deadline.remaining_ms if deadline else None,
                 )
-                await self._record_diagnostic_event({"event_type": "attempt", "record": attempts[-1]})
+                attempts.append(record)
+                await self._record_diagnostic_event({"event_type": "attempt", "record": record})
+                await self._persist_attempt(chapter, attempt, record)
                 return index, attempts
+            except asyncio.TimeoutError:
+                is_final_attempt = attempt >= max_retries - 1
+                record = self._build_attempt_record(
+                    chapter,
+                    attempt_number=attempt + 1,
+                    status="deadline_exceeded",
+                    latency_ms=self._elapsed_ms(started),
+                    error=TimeoutError("Chapter extraction deadline exceeded"),
+                    retry_count=attempt,
+                    needs_retry=True,
+                    deadline_remaining_ms=0,
+                )
+                attempts.append(record)
+                await self._record_diagnostic_event({"event_type": "attempt", "record": record})
+                await self._persist_attempt(chapter, attempt, record)
+                if is_final_attempt:
+                    exc = DeadlineExceeded("Chapter extraction deadline exceeded")
+                    setattr(exc, "attempts", attempts)
+                    raise exc
+                await asyncio.sleep(self.config.retry_delay)
             except Exception as exc:
                 last_error = exc
                 is_final_attempt = attempt >= max_retries - 1
-                attempts.append(
-                    self._build_attempt_record(
-                        chapter,
-                        attempt_number=attempt + 1,
-                        status="failed",
-                        latency_ms=self._elapsed_ms(started),
-                        error=exc,
-                        retry_count=attempt,
-                        needs_retry=is_final_attempt,
-                    )
+                record = self._build_attempt_record(
+                    chapter,
+                    attempt_number=attempt + 1,
+                    status="failed",
+                    latency_ms=self._elapsed_ms(started),
+                    error=exc,
+                    retry_count=attempt,
+                    needs_retry=is_final_attempt,
+                    deadline_remaining_ms=deadline.remaining_ms if deadline else None,
                 )
-                await self._record_diagnostic_event({"event_type": "attempt", "record": attempts[-1]})
+                attempts.append(record)
+                await self._record_diagnostic_event({"event_type": "attempt", "record": record})
+                await self._persist_attempt(chapter, attempt, record)
                 if not is_final_attempt:
                     await asyncio.sleep(self.config.retry_delay)
         final_error = last_error or RuntimeError("chapter index extraction failed")
         setattr(final_error, "attempts", attempts)
         raise final_error
+
+    def _create_deadline(self) -> Optional[Any]:
+        from ..services.deadline import Deadline
+
+        if self.deadline_seconds is not None:
+            return Deadline(seconds=self.deadline_seconds)
+        if self.attempt_store is not None:
+            return Deadline(seconds=self.config.timeout * 1.5)
+        return None
+
+    def _safe_timeout(self, deadline: Optional[Any]) -> float:
+        if deadline is None:
+            return self.config.timeout
+        remaining_seconds = deadline.remaining_ms / 1000
+        return min(self.config.timeout, remaining_seconds)
+
+    async def _persist_attempt(self, chapter: ChapterSource, attempt: int, record: Dict[str, Any]) -> None:
+        if self.attempt_store is None:
+            return
+        from ..services.attempt_store import AttemptRecord
+
+        await self.attempt_store.record(AttemptRecord(
+            id=f"{chapter.id}-attempt-{attempt + 1}",
+            session_id="",
+            **record,
+        ))
 
     def _build_attempt_record(
         self,
@@ -359,6 +437,7 @@ class ChapterIndexExtractor:
         error: Optional[Exception] = None,
         retry_count: int = 0,
         needs_retry: bool = False,
+        deadline_remaining_ms: Optional[int] = None,
     ) -> Dict[str, Any]:
         response_text = raw_response or ""
         model_used = self._current_model_name()
@@ -380,6 +459,7 @@ class ChapterIndexExtractor:
             "parsed_candidate_counts": parsed_candidate_counts or {},
             "retry_count": retry_count,
             "needs_retry": bool(needs_retry),
+            "deadline_remaining_ms": deadline_remaining_ms,
         }
         return record
 

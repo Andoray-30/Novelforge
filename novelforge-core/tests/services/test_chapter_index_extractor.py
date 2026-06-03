@@ -468,11 +468,11 @@ def test_chapter_index_records_failed_attempts_as_retryable():
         {
             "chapter_id": "chapter-2",
             "title": "第二章",
-            "error": "API request timed out (3s)",
-            "error_type": "timeout",
+            "error": "Chapter extraction deadline exceeded",
+            "error_type": "DeadlineExceeded",
         }
     ]
-    assert result.diagnostics.chapter_index_attempts[0]["status"] == "failed"
+    assert result.diagnostics.chapter_index_attempts[0]["status"] == "deadline_exceeded"
     assert result.diagnostics.chapter_index_attempts[0]["error_type"] == "timeout"
     assert result.diagnostics.chapter_index_attempts[0]["needs_retry"] is True
     assert result.diagnostics.chapter_index_status[0]["needs_retry"] is True

@@ -11,6 +11,54 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-06-04 Phase A: AttemptStore + Deadline 实现
+
+### 本轮完成
+- 实现集中式 AttemptStore v1：
+  - AttemptRecord Pydantic 模型（20 个字段）
+  - AttemptStore 类封装 StorageManager，使用 `attempt_` 前缀
+  - 支持按 session_id 和 chapter_id 查询
+  - 支持并发写入（asyncio.Lock）
+  - AttemptStats 聚合统计（成功率、延迟、错误分布）
+- 实现 Deadline 类：
+  - 基于单调时钟（time.monotonic）
+  - 支持 remaining_ms、is_expired、check() 方法
+  - 支持上下文管理器协议
+- 集成到 ChapterIndexExtractor：
+  - 新增 attempt_store 和 deadline_seconds 参数
+  - 每个章节提取前创建 Deadline
+  - 成功/失败/超时尝试记录到 AttemptStore
+  - 使用 asyncio.wait_for 强制 Deadline
+  - 向后兼容（不传参数时行为不变）
+
+### 新增文件
+- `novelforge-core/novelforge/services/attempt_store.py` — AttemptRecord + AttemptStore
+- `novelforge-core/novelforge/services/deadline.py` — Deadline 类
+- `novelforge-core/tests/services/test_attempt_store.py` — 11 个测试
+- `novelforge-core/tests/services/test_deadline.py` — 10 个测试
+- `novelforge-core/tests/services/test_chapter_index_deadline.py` — 6 个测试
+
+### 修改文件
+- `novelforge-core/novelforge/extractors/chapter_index_extractor.py` — 注入 Deadline + AttemptStore
+- `novelforge-core/tests/services/test_chapter_index_extractor.py` — 更新超时测试
+
+### 验证
+- `pytest novelforge-core/tests/services/test_attempt_store.py -v`：11 passed
+- `pytest novelforge-core/tests/services/test_deadline.py -v`：10 passed
+- `pytest novelforge-core/tests/services/test_chapter_index_deadline.py -v`：6 passed
+- `pytest novelforge-core/tests/services/test_chapter_index_extractor.py -v`：15 passed（向后兼容）
+
+### 当前边界
+- AttemptStore 使用 StorageManager 键值存储，未使用 content_db
+- Deadline 默认使用 timeout × 1.5，可通过 deadline_seconds 自定义
+- API 端点 `/api/extraction/attempts` 尚未实现
+- 未实现 SchemaRepairer、Retry Queue、ModelRouter
+
+### 下一步建议
+- 实现 `/api/extraction/attempts` API 端点
+- 将 AttemptStore 集成到 AITaskScheduler
+- 实现 SchemaRepairer（处理 raw_response_present=true 的失败）
+
 ## 2026-06-03 Codex P0 extraction reliability baseline stopped
 
 - 停止继续开发 `codex/p0-extraction-reliability-baseline` 半成品分支。
