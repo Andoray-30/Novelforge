@@ -11,6 +11,47 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-06-04 Phase C.1.1: Retry / Attempt Hardening
+
+### 本轮完成
+- 修复 6 个正确性问题：
+  1. **error_message 字段映射**（严重）：`_build_attempt_record` 和 `_build_chapter_status` 使用 `"error"` key，但 `AttemptRecord` 期望 `error_message`。Pydantic 静默忽略 extra 字段，导致 error_message 始终为 None。已修复为 `"error_message"`。
+  2. **session_id 过滤不一致**（严重）：`list_by_chapter` 和 `should_skip_chapter` 不按 session_id 过滤，导致跨 session 数据泄露。已添加 session_id 参数。
+  3. **空内容 retry 假成功**（致命）：`retry_pending_chapters` 构造 chapter_data 时硬编码 `"content": ""`，空内容被过滤掉，retry 被标记为 success。已通过 `chapter_content` 字段缓存内容。
+  4. **suppress_auto_enqueue 缺失**：retry 执行路径没有抑制自动入队的机制，导致重复 enqueue。已添加参数。
+  5. **Attempt ID 非全局唯一**：格式 `{chapter_id}-attempt-{N}` 可能覆盖历史。已改为 UUID。
+  6. **partial_recoverable 状态区分度不足**：没有区分 exhausted 状态。已添加 `partial_exhausted`。
+
+### 修改文件
+- `novelforge-core/novelforge/extractors/chapter_index_extractor.py` — error_message 字段映射、Attempt ID UUID
+- `novelforge-core/novelforge/services/attempt_store.py` — list_by_chapter 添加 session_id 过滤
+- `novelforge-core/novelforge/services/retry_queue.py` — list_by_chapter/should_skip_chapter 添加 session_id 过滤、RetryJob 添加 chapter_content 字段
+- `novelforge-core/novelforge/services/extraction_service.py` — suppress_auto_enqueue 参数、chapter_content 填充、error_message 字段读取
+- `novelforge-core/novelforge/api/__init__.py` — partial_exhausted 状态、should_skip_chapter session_id 传递
+- `novelforge-core/tests/services/test_chapter_index_extractor.py` — 更新 error_message 字段断言
+
+### 验证
+- `pytest novelforge-core/tests/ -v`：241 passed
+- git diff --check：通过
+
+### 风险评估
+- **低风险**：所有改动都是字段重命名或参数添加，向后兼容
+- **低风险**：session_id 过滤使用 Optional 参数，默认 None 不影响现有调用
+- **低风险**：chapter_content 字段默认空字符串，不影响现有序列化
+
+### 当前状态
+- retry 不会空跑并假成功
+- retry 不会重复 enqueue job
+- AttemptRecord 不会覆盖历史
+- error_message 能正确持久化并安全返回
+- session / parent 作用域不再污染
+- partial_recoverable 语义基于当前 unresolved 状态
+
+### 下一步建议
+- 可以安全进入 Phase C.2 前端 Attempt/Retry 诊断接入
+- 可以进入 Budgeted Scheduler 实现
+- 可以进入 PerformanceProfile 实现
+
 ## 2026-06-04 Phase C.1: Attempt / Retry API 与诊断暴露
 
 ### 本轮完成

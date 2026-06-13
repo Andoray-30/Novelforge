@@ -168,6 +168,7 @@ class ExtractionService:
         repair_strategy: Optional[Dict[str, Any]] = None,
         session_id: Optional[str] = None,
         parent_id: Optional[str] = None,
+        suppress_auto_enqueue: bool = False,
     ) -> Dict[str, Any]:
         role = model_role or "extractor_fast"
         runtime_settings = (
@@ -211,7 +212,7 @@ class ExtractionService:
             diagnostics["repair_strategy"] = repair_strategy
 
         retry_stats = None
-        if self.retry_queue and result.diagnostics.failed_chapters:
+        if self.retry_queue and result.diagnostics.failed_chapters and not suppress_auto_enqueue:
             from .retry_queue import RetryJob
             from .error_classifier import is_retryable
 
@@ -219,8 +220,13 @@ class ExtractionService:
                 error_type = failed.get("error_type", "")
                 if not is_retryable(error_type):
                     continue
-                if await self.retry_queue.should_skip_chapter(failed.get("chapter_id", "")):
+                if await self.retry_queue.should_skip_chapter(failed.get("chapter_id", ""), session_id=session_id):
                     continue
+                chapter_content = ""
+                for ch in chapters:
+                    if ch.get("id") == failed.get("chapter_id"):
+                        chapter_content = ch.get("content", "")
+                        break
                 job = RetryJob(
                     job_id=str(uuid.uuid4())[:20],
                     session_id=session_id or "",
@@ -228,9 +234,10 @@ class ExtractionService:
                     chapter_title=failed.get("title", ""),
                     chapter_order=failed.get("chapter_order", 0),
                     error_type=error_type,
-                    error_message=failed.get("error", ""),
+                    error_message=failed.get("error_message", ""),
                     original_attempt_id=f"{failed.get('chapter_id', '')}-attempt-final",
                     model_used=failed.get("model_used", ""),
+                    chapter_content=chapter_content,
                 )
                 await self.retry_queue.enqueue(job)
             retry_stats = await self.retry_queue.stats(session_id=session_id)
@@ -474,7 +481,7 @@ class ExtractionService:
         skipped = 0
 
         for job in pending_jobs:
-            if await self.retry_queue.should_skip_chapter(job.chapter_id):
+            if await self.retry_queue.should_skip_chapter(job.chapter_id, session_id=session_id):
                 await self.retry_queue.mark_cancelled(job.job_id)
                 skipped += 1
                 continue
@@ -484,16 +491,17 @@ class ExtractionService:
                     "id": job.chapter_id,
                     "title": job.chapter_title,
                     "chapter_index": job.chapter_order,
-                    "content": "",
+                    "content": job.chapter_content,
                 }
                 result = await self.extract_chapter_index_assets(
                     chapters=[chapter_data],
                     model_role=model_role,
                     session_id=session_id,
+                    suppress_auto_enqueue=True,
                 )
                 if result.get("failed_chapters"):
                     error_type = result["failed_chapters"][0].get("error_type", "unknown")
-                    error_message = result["failed_chapters"][0].get("error", "unknown")
+                    error_message = result["failed_chapters"][0].get("error_message", "unknown")
                     await self.retry_queue.mark_failed(job.job_id, error_type, error_message)
                 else:
                     await self.retry_queue.mark_success(job.job_id, f"{job.chapter_id}-retry-{job.retry_count + 1}")

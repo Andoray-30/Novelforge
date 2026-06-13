@@ -439,7 +439,7 @@ def test_chapter_index_records_success_attempt_diagnostics():
             "attempt_count": 1,
             "latency_ms": status[0]["latency_ms"],
             "error_type": None,
-            "error": None,
+            "error_message": None,
             "parsed_candidate_counts": {
                 "characters": 1,
                 "interactions": 0,

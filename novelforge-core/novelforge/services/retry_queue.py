@@ -39,6 +39,7 @@ class RetryJob(BaseModel):
     error_message: str
     original_attempt_id: str
     model_used: str
+    chapter_content: str = ""
     status: str = "pending"
     retry_count: int = 0
     max_retries: int = 3
@@ -121,13 +122,15 @@ class RetryQueue:
         results.sort(key=lambda j: (j.chapter_order, j.retry_count))
         return results
 
-    async def list_by_chapter(self, chapter_id: str) -> List[RetryJob]:
+    async def list_by_chapter(self, chapter_id: str, session_id: Optional[str] = None) -> List[RetryJob]:
         all_keys = await self._storage.list_keys()
         job_keys = [k for k in all_keys if k.startswith(RETRY_JOB_KEY_PREFIX)]
         results: List[RetryJob] = []
         for key in job_keys:
             data = await self._storage.load(key)
             if data and data.get("chapter_id") == chapter_id:
+                if session_id and data.get("session_id") != session_id:
+                    continue
                 results.append(RetryJob(**data))
         results.sort(key=lambda j: j.retry_count)
         return results
@@ -188,8 +191,8 @@ class RetryQueue:
         delay += random.uniform(-jitter_range, jitter_range)
         return max(0, delay)
 
-    async def should_skip_chapter(self, chapter_id: str) -> bool:
-        records = await self._attempt_store.list_by_chapter(chapter_id)
+    async def should_skip_chapter(self, chapter_id: str, session_id: Optional[str] = None) -> bool:
+        records = await self._attempt_store.list_by_chapter(chapter_id, session_id=session_id)
         return any(r.status == "success" for r in records)
 
     async def stats(self, session_id: Optional[str] = None) -> RetryQueueStats:

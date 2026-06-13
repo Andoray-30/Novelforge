@@ -2187,15 +2187,15 @@ async def get_attempt_summary(
            and stats.success_count > 0
        )
        if stats.total_attempts == 0:
-           overall_status = "no_data"
+          overall_status = "no_data"
        elif stats.failed_count == 0:
-           overall_status = "success"
+          overall_status = "success"
        elif stats.success_count == 0:
-           overall_status = "failed"
+          overall_status = "failed"
        elif partial_recoverable:
-           overall_status = "partial"
+          overall_status = "partial"
        else:
-           overall_status = "partial"
+          overall_status = "partial_exhausted"
        return {
            **stats.model_dump(),
            "session_id": session_id,
@@ -2393,7 +2393,7 @@ async def retry_attempt(attempt_id: str, request: RetryAttemptRequest):
                status_code=status.HTTP_400_BAD_REQUEST,
                detail="该 Attempt 不可重试",
            )
-       if await retry_queue.should_skip_chapter(record.chapter_id):
+       if await retry_queue.should_skip_chapter(record.chapter_id, session_id=request.session_id):
            raise HTTPException(
                status_code=status.HTTP_400_BAD_REQUEST,
                detail="该章节已成功，无需重试",

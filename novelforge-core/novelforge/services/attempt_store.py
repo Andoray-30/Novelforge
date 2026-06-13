@@ -120,8 +120,8 @@ class AttemptStore:
         results.sort(key=lambda r: (r.chapter_order, r.attempt_number))
         return results
 
-    async def list_by_chapter(self, chapter_id: str) -> List[AttemptRecord]:
-        """List all attempts for a given chapter."""
+    async def list_by_chapter(self, chapter_id: str, session_id: Optional[str] = None) -> List[AttemptRecord]:
+        """List all attempts for a given chapter, optionally filtered by session_id."""
         all_keys = await self._storage.list_keys()
         attempt_keys = [k for k in all_keys if k.startswith(ATTEMPT_KEY_PREFIX)]
 
@@ -129,6 +129,8 @@ class AttemptStore:
         for key in attempt_keys:
             data = await self._storage.load(key)
             if data and data.get("chapter_id") == chapter_id:
+                if session_id and data.get("session_id") != session_id:
+                    continue
                 results.append(AttemptRecord(**data))
 
         results.sort(key=lambda r: r.attempt_number)

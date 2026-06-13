@@ -461,10 +461,11 @@ class ChapterIndexExtractor:
     async def _persist_attempt(self, chapter: ChapterSource, attempt: int, record: Dict[str, Any]) -> None:
         if self.attempt_store is None:
             return
+        import uuid as _uuid
         from ..services.attempt_store import AttemptRecord
 
         await self.attempt_store.record(AttemptRecord(
-            id=f"{chapter.id}-attempt-{attempt + 1}",
+            id=f"{chapter.id}-attempt-{_uuid.uuid4().hex[:12]}",
             session_id=self.session_id,
             **record,
         ))
@@ -503,7 +504,7 @@ class ChapterIndexExtractor:
             "chapter_concurrency": self.chapter_concurrency,
             "latency_ms": latency_ms,
             "error_type": self._classify_error(error) if error else None,
-            "error": str(error)[:500] if error else None,
+            "error_message": str(error)[:500] if error else None,
             "raw_response_hash": self._hash_response(response_text) if response_text else None,
             "raw_response_chars": len(response_text),
             "parsed_candidate_counts": parsed_candidate_counts or {},
@@ -546,7 +547,7 @@ class ChapterIndexExtractor:
             "attempt_count": len(attempts),
             "latency_ms": sum(int(attempt.get("latency_ms") or 0) for attempt in attempts),
             "error_type": latest_attempt.get("error_type") or (self._classify_error(error) if error else None),
-            "error": latest_attempt.get("error") or (str(error)[:500] if error else None),
+            "error_message": latest_attempt.get("error_message") or (str(error)[:500] if error else None),
             "parsed_candidate_counts": parsed_counts,
             "needs_retry": not success,
         }
