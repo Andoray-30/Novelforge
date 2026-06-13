@@ -511,5 +511,17 @@ class ExtractionService:
 _extraction_service: Optional[ExtractionService] = None
 
 
-def get_extraction_service(ai_service: AIService, config: Config, storage_manager: Optional[Any] = None) -> ExtractionService:
-    return ExtractionService(ai_service, config, storage_manager)
+def get_extraction_service(
+    ai_service: AIService,
+    config: Config,
+    storage_manager: Optional[Any] = None,
+    attempt_store: Optional[Any] = None,
+    retry_queue: Optional[Any] = None,
+) -> ExtractionService:
+    return ExtractionService(
+        ai_service,
+        config,
+        storage_manager,
+        attempt_store=attempt_store,
+        retry_queue=retry_queue,
+    )

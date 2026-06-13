@@ -11,6 +11,53 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-06-04 Phase C.1: Attempt / Retry API 与诊断暴露
+
+### 本轮完成
+- 接线 AttemptStore/RetryQueue 到 API 层：
+  - 更新 get_extraction_service() 接受 attempt_store 和 retry_queue 参数
+  - 在 api/__init__.py 中创建 AttemptStore 和 RetryQueue 实例
+  - extraction_service 现在能访问 attempt_store 和 retry_queue
+- 实现 Attempt 查询 API：
+  - GET /api/extraction/attempts/summary — 统计 + partial_recoverable 状态
+  - GET /api/extraction/attempts — 列表查询（支持 status/chapter_id/limit 过滤）
+  - GET /api/extraction/attempts/{attempt_id} — 单条查询（403/404 处理）
+  - raw_response_preview 截断到 100 字符
+- 实现 Retry Queue 查询 API：
+  - GET /api/extraction/retry-queue — 列表 + stats（支持 status/limit 过滤）
+  - GET /api/extraction/retry-queue/{job_id} — 单条查询（403/404 处理）
+- 实现 Retry 操作 API：
+  - POST /api/extraction/retry-queue/run-due — 触发处理 due retry jobs
+  - POST /api/extraction/attempts/{attempt_id}/retry — 为单个 attempt 创建 retry job
+  - 验证：不可重试 attempt 返回 400，已成功章节返回 400
+- 项目状态语义：
+  - partial_recoverable：有成功也有失败可重试
+  - overall_status：success/partial/failed/no_data
+
+### 新增文件
+- `novelforge-core/tests/api/test_attempt_retry_api.py` — 14 个测试
+
+### 修改文件
+- `novelforge-core/novelforge/services/extraction_service.py` — 更新 get_extraction_service()
+- `novelforge-core/novelforge/api/__init__.py` — 添加 7 个新端点
+
+### 验证
+- `pytest novelforge-core/tests/api/test_attempt_retry_api.py -v`：14 passed
+- `pytest novelforge-core/tests/services/ -v`：179 passed
+- API 端点加载验证：Attempt endpoints 4 个，Retry endpoints 4 个
+
+### 当前边界
+- Attempt/Retry API 只查询和操作，不实现后台调度
+- 不返回完整 raw_response_text（截断到 100 字符）
+- 不调用真实外部 provider
+- 前端类型和 API 客户端留到后续实现
+
+### 下一步建议
+- 实现 Budgeted Scheduler
+- 实现 PerformanceProfile
+- 实现 ModelRouter
+- 前端集成 Attempt/Retry API
+
 ## 2026-06-04 Phase C: Retry Queue v1
 
 ### 本轮完成

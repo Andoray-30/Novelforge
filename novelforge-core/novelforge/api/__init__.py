@@ -253,6 +253,12 @@ storage_manager = StorageManager(
     content_db_path=config.content_database_path,
 )
 
+# Create attempt store and retry queue.
+from ..services.attempt_store import AttemptStore
+from ..services.retry_queue import RetryQueue
+attempt_store = AttemptStore(storage_manager=storage_manager)
+retry_queue = RetryQueue(storage_manager=storage_manager, attempt_store=attempt_store)
+
 # Create content manager.
 content_manager = ContentManager(
     storage_manager,
@@ -260,7 +266,7 @@ content_manager = ContentManager(
 )
 
 # Create extraction service.
-extraction_service = get_extraction_service(ai_service, config, storage_manager)
+extraction_service = get_extraction_service(ai_service, config, storage_manager, attempt_store=attempt_store, retry_queue=retry_queue)
 
 # Create AI scheduler.
 ai_scheduler = get_ai_scheduler(ai_service, storage_manager, config, content_manager)
@@ -2167,6 +2173,101 @@ async def get_extraction_model_health(
        )
 
 
+@app.get("/api/extraction/attempts/summary", response_model=dict)
+async def get_attempt_summary(
+    session_id: str = Query(..., min_length=1),
+    parent_id: Optional[str] = Query(None),
+):
+   """Return attempt statistics and project recovery status."""
+   try:
+       stats = await attempt_store.stats(session_id=session_id)
+       partial_recoverable = (
+           stats.failed_count > 0
+           and stats.chapters_needing_retry > 0
+           and stats.success_count > 0
+       )
+       if stats.total_attempts == 0:
+           overall_status = "no_data"
+       elif stats.failed_count == 0:
+           overall_status = "success"
+       elif stats.success_count == 0:
+           overall_status = "failed"
+       elif partial_recoverable:
+           overall_status = "partial"
+       else:
+           overall_status = "partial"
+       return {
+           **stats.model_dump(),
+           "session_id": session_id,
+           "partial_recoverable": partial_recoverable,
+           "overall_status": overall_status,
+       }
+   except Exception as e:
+       raise HTTPException(
+           status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+           detail=f"Attempt 统计查询失败: {str(e)}",
+       )
+
+
+@app.get("/api/extraction/attempts", response_model=dict)
+async def list_attempts(
+    session_id: str = Query(..., min_length=1),
+    parent_id: Optional[str] = Query(None),
+    status_filter: Optional[str] = Query(None, alias="status"),
+    chapter_id: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+):
+   """List extraction attempts for a session."""
+   try:
+       records = await attempt_store.list_by_session(session_id=session_id)
+       if status_filter:
+           records = [r for r in records if r.status == status_filter]
+       if chapter_id:
+           records = [r for r in records if r.chapter_id == chapter_id]
+       total = len(records)
+       items = [r.model_dump() for r in records[:limit]]
+       for item in items:
+           if item.get("raw_response_preview") and len(item["raw_response_preview"]) > 100:
+               item["raw_response_preview"] = item["raw_response_preview"][:100] + "..."
+       return {"items": items, "total": total}
+   except Exception as e:
+       raise HTTPException(
+           status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+           detail=f"Attempt 列表查询失败: {str(e)}",
+       )
+
+
+@app.get("/api/extraction/attempts/{attempt_id}", response_model=dict)
+async def get_attempt(
+    attempt_id: str,
+    session_id: str = Query(..., min_length=1),
+):
+   """Get a single extraction attempt by ID."""
+   try:
+       record = await attempt_store.get(attempt_id=attempt_id)
+       if record is None:
+           raise HTTPException(
+               status_code=status.HTTP_404_NOT_FOUND,
+               detail="Attempt 记录不存在",
+           )
+       if record.session_id and record.session_id != session_id:
+           raise HTTPException(
+               status_code=status.HTTP_403_FORBIDDEN,
+               detail="Attempt 记录不属于当前项目",
+           )
+       data = record.model_dump()
+       if data.get("raw_response_preview") and len(data["raw_response_preview"]) > 100:
+           data["raw_response_preview"] = data["raw_response_preview"][:100] + "..."
+       return data
+   except HTTPException:
+       raise
+   except Exception as e:
+       raise HTTPException(
+           status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+           detail=f"Attempt 查询失败: {str(e)}",
+       )
+
+
 @app.get("/api/extraction/chapter-index-runs/{run_key}", response_model=dict)
 async def get_chapter_index_run(
     run_key: str,
@@ -2193,6 +2294,132 @@ async def get_chapter_index_run(
            detail="章节索引运行记录不属于当前项目",
        )
    return _serialize_chapter_index_run_state(run_key, loaded, include_indices=include_indices)
+
+
+@app.get("/api/extraction/retry-queue", response_model=dict)
+async def list_retry_queue(
+    session_id: str = Query(..., min_length=1),
+    parent_id: Optional[str] = Query(None),
+    status_filter: Optional[str] = Query(None, alias="status"),
+    limit: int = Query(100, ge=1, le=500),
+):
+   """List retry jobs for a session with optional filters."""
+   try:
+       jobs = await retry_queue.list_by_session(session_id=session_id)
+       if status_filter:
+           jobs = [j for j in jobs if j.status == status_filter]
+       total = len(jobs)
+       items = [j.model_dump() for j in jobs[:limit]]
+       stats = await retry_queue.stats(session_id=session_id)
+       return {"items": items, "total": total, "stats": stats.model_dump()}
+   except Exception as e:
+       raise HTTPException(
+           status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+           detail=f"Retry Queue 查询失败: {str(e)}",
+       )
+
+
+@app.get("/api/extraction/retry-queue/{job_id}", response_model=dict)
+async def get_retry_job(
+    job_id: str,
+    session_id: str = Query(..., min_length=1),
+):
+   """Get a single retry job by ID."""
+   try:
+       job = await retry_queue.get(job_id=job_id)
+       if job is None:
+           raise HTTPException(
+               status_code=status.HTTP_404_NOT_FOUND,
+               detail="Retry Job 不存在",
+           )
+       if job.session_id and job.session_id != session_id:
+           raise HTTPException(
+               status_code=status.HTTP_403_FORBIDDEN,
+               detail="Retry Job 不属于当前项目",
+           )
+       return job.model_dump()
+   except HTTPException:
+       raise
+   except Exception as e:
+       raise HTTPException(
+           status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+           detail=f"Retry Job 查询失败: {str(e)}",
+       )
+
+
+class RetryRunDueRequest(BaseModel):
+    session_id: str = Field(..., min_length=1)
+    model_role: str = Field(default="extractor_repair")
+
+
+class RetryAttemptRequest(BaseModel):
+    session_id: str = Field(..., min_length=1)
+
+
+@app.post("/api/extraction/retry-queue/run-due", response_model=dict)
+async def run_due_retries(request: RetryRunDueRequest):
+   """Trigger processing of due retry jobs."""
+   try:
+       result = await extraction_service.retry_pending_chapters(
+           session_id=request.session_id,
+           model_role=request.model_role,
+       )
+       return result
+   except Exception as e:
+       raise HTTPException(
+           status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+           detail=f"Retry 执行失败: {str(e)}",
+       )
+
+
+@app.post("/api/extraction/attempts/{attempt_id}/retry", response_model=dict)
+async def retry_attempt(attempt_id: str, request: RetryAttemptRequest):
+   """Create a retry job for a specific attempt."""
+   try:
+       record = await attempt_store.get(attempt_id=attempt_id)
+       if record is None:
+           raise HTTPException(
+               status_code=status.HTTP_404_NOT_FOUND,
+               detail="Attempt 记录不存在",
+           )
+       if record.session_id and record.session_id != request.session_id:
+           raise HTTPException(
+               status_code=status.HTTP_403_FORBIDDEN,
+               detail="Attempt 记录不属于当前项目",
+           )
+       from ..services.error_classifier import is_retryable
+       if not record.needs_retry or not is_retryable(record.error_type or ""):
+           raise HTTPException(
+               status_code=status.HTTP_400_BAD_REQUEST,
+               detail="该 Attempt 不可重试",
+           )
+       if await retry_queue.should_skip_chapter(record.chapter_id):
+           raise HTTPException(
+               status_code=status.HTTP_400_BAD_REQUEST,
+               detail="该章节已成功，无需重试",
+           )
+       from ..services.retry_queue import RetryJob
+       import uuid as _uuid
+       job = RetryJob(
+           job_id=str(_uuid.uuid4())[:20],
+           session_id=request.session_id,
+           chapter_id=record.chapter_id,
+           chapter_title=record.chapter_title,
+           chapter_order=record.chapter_order,
+           error_type=record.error_type or "unknown",
+           error_message=record.error_message or "",
+           original_attempt_id=attempt_id,
+           model_used=record.model_used,
+       )
+       job_id = await retry_queue.enqueue(job)
+       return {"job_id": job_id, "status": "queued"}
+   except HTTPException:
+       raise
+   except Exception as e:
+       raise HTTPException(
+           status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+           detail=f"Retry 创建失败: {str(e)}",
+       )
 
 
 # Content management endpoints.
