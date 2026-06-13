@@ -57,6 +57,13 @@ class AttemptRecord(BaseModel):
     repair_latency_ms: int = 0
     schema_valid_after_repair: bool = False
 
+    # Budget tracking fields
+    budget_phase: Optional[str] = None  # "first_pass" | "repair" | "retry"
+    budget_status: Optional[str] = None  # "accepted" | "deferred" | "skipped"
+    budget_deferred_reason: Optional[str] = None
+    estimated_tokens: int = 0
+    estimated_model_calls: int = 0
+
 
 class AttemptStats(BaseModel):
     """Aggregated statistics for attempt records."""

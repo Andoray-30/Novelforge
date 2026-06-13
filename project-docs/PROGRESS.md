@@ -11,6 +11,57 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-06-04 Phase D: Budgeted Scheduler v1
+
+### 本轮完成
+- 实现 BudgetedScheduler 模块（budgeted_scheduler.py）：
+  - BudgetPolicy：max_model_calls、max_retry_attempts、max_repair_attempts、max_wall_clock_seconds、max_estimated_tokens
+  - BudgetState：model_calls_used、tokens_used、completed_chapters、deferred_chapters
+  - BudgetedWorkItem：chapter_id、phase、estimated_model_calls、estimated_tokens、retry_count、repair_count
+  - BudgetSummary：total_accepted、total_deferred、total_skipped、model_calls_remaining、tokens_remaining、wall_clock_remaining
+  - BudgetedScheduler：plan()、can_start()、charge()、defer()、summary()
+- 集成到 ExtractionService：
+  - extract_chapter_index_assets() 使用 BudgetedScheduler 过滤章节
+  - 成功章节自动跳过
+  - 预算不足时章节被 deferred
+  - budget_summary 随结果返回
+- 集成到 RetryQueue：
+  - retry_pending_chapters() 使用 BudgetedScheduler 检查预算
+  - 预算不足时 retry job 被 deferred
+  - budget_summary 随结果返回
+- 扩展 AttemptRecord 预算元数据字段：
+  - budget_phase、budget_status、budget_deferred_reason
+  - estimated_tokens、estimated_model_calls
+
+### 新增文件
+- `novelforge-core/novelforge/services/budgeted_scheduler.py` — BudgetedScheduler 模块
+- `novelforge-core/tests/services/test_budgeted_scheduler.py` — 13 个测试
+
+### 修改文件
+- `novelforge-core/novelforge/services/attempt_store.py` — 添加预算元数据字段
+- `novelforge-core/novelforge/services/extraction_service.py` — 集成 BudgetedScheduler
+
+### 验证
+- `pytest novelforge-core/tests/services/test_budgeted_scheduler.py -v`：13 passed
+- `pytest novelforge-core/tests/ -v`：268 passed
+
+### 风险评估
+- **低风险**：BudgetedScheduler 使用 Optional 参数，向后兼容
+- **低风险**：预算检查使用单调时钟，不受系统时间影响
+- **低风险**：成功章节自动跳过，避免重复执行
+
+### 当前状态
+- 长篇提取可以带预算执行
+- 预算不足时任务被 deferred，而不是假成功或整本失败
+- 成功章节结果保留
+- repair / retry 受预算限制
+- budget_summary 可查询
+
+### 下一步建议
+- 可以进入 PerformanceProfile 实现
+- 可以进入 ModelRouter 实现
+- 可以进入 Deep Synthesis 实现
+
 ## 2026-06-04 Phase C.2: 前端 Attempt / Retry 诊断接入
 
 ### 本轮完成

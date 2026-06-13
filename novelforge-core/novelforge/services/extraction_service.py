@@ -46,6 +46,7 @@ class ExtractionService:
         attempt_store: Optional[Any] = None,
         retry_queue: Optional[Any] = None,
         content_manager: Optional[Any] = None,
+        budget_policy: Optional[Any] = None,
     ):
         self.ai_service = ai_service
         self.config = config
@@ -53,6 +54,7 @@ class ExtractionService:
         self.attempt_store = attempt_store
         self.retry_queue = retry_queue
         self.content_manager = content_manager
+        self.budget_policy = budget_policy
         self.model_router = ModelRouter(ai_service, config, storage=storage_manager)
 
         unified_config = ExtractionConfig(
@@ -172,12 +174,41 @@ class ExtractionService:
         parent_id: Optional[str] = None,
         suppress_auto_enqueue: bool = False,
     ) -> Dict[str, Any]:
+        from .budgeted_scheduler import BudgetedScheduler, BudgetedWorkItem
+
         role = model_role or "extractor_fast"
         runtime_settings = (
             repair_strategy.get("runtime_settings_overrides")
             if isinstance(repair_strategy, dict) and isinstance(repair_strategy.get("runtime_settings_overrides"), dict)
             else None
         )
+
+        budget_summary = None
+        if self.budget_policy and getattr(self.budget_policy, "enabled", True):
+            scheduler = BudgetedScheduler(policy=self.budget_policy)
+            successful_ids = []
+            if self.attempt_store:
+                for ch in chapters:
+                    records = await self.attempt_store.list_by_chapter(ch.get("id", ""), session_id=session_id)
+                    if any(r.status == "success" for r in records):
+                        successful_ids.append(ch.get("id", ""))
+
+            work_items = [
+                BudgetedWorkItem(
+                    chapter_id=ch.get("id", ""),
+                    chapter_title=ch.get("title", ""),
+                    chapter_order=ch.get("chapter_index", 0),
+                    phase="first_pass",
+                )
+                for ch in chapters
+            ]
+            plan_result = scheduler.plan(work_items, successful_chapter_ids=successful_ids)
+            chapters = [
+                ch for ch in chapters
+                if any(item.chapter_id == ch.get("id", "") for item in plan_result.accepted)
+            ]
+            budget_summary = scheduler.summary()
+
         extractor = self._build_chapter_index_extractor(
             ai_service=self.ai_service,
             diagnostics_recorder=diagnostics_recorder,
@@ -259,6 +290,7 @@ class ExtractionService:
             "timeline_mismatch_events": result.diagnostics.timeline_mismatch_events,
             "model_route": model_route,
             "retry_stats": retry_stats.model_dump() if retry_stats else None,
+            "budget_summary": budget_summary.model_dump() if budget_summary else None,
         }
 
     async def extract_all(self, text: str) -> Dict[str, Any]:
@@ -474,6 +506,7 @@ class ExtractionService:
         model_role: str = "extractor_repair",
     ) -> Dict[str, Any]:
         import uuid as _uuid
+        from .budgeted_scheduler import BudgetedScheduler, BudgetedWorkItem
 
         if not self.retry_queue:
             return {"accepted": 0, "skipped_already_success": 0, "queued": 0, "error": "retry_queue_not_configured"}
@@ -481,12 +514,28 @@ class ExtractionService:
         pending_jobs = await self.retry_queue.list_pending(session_id=session_id)
         accepted = 0
         skipped = 0
+        deferred = 0
+
+        scheduler = None
+        if self.budget_policy and getattr(self.budget_policy, "enabled", True):
+            scheduler = BudgetedScheduler(policy=self.budget_policy)
 
         for job in pending_jobs:
             if await self.retry_queue.should_skip_chapter(job.chapter_id, session_id=session_id):
                 await self.retry_queue.mark_cancelled(job.job_id)
                 skipped += 1
                 continue
+
+            if scheduler and not scheduler.can_start(BudgetedWorkItem(
+                chapter_id=job.chapter_id,
+                chapter_title=job.chapter_title,
+                chapter_order=job.chapter_order,
+                phase="retry",
+                retry_count=job.retry_count,
+            )):
+                deferred += 1
+                continue
+
             await self.retry_queue.mark_running(job.job_id)
             try:
                 from .retry_content_resolver import RetryContentResolver
@@ -505,6 +554,13 @@ class ExtractionService:
                 else:
                     await self.retry_queue.mark_success(job.job_id, f"{job.chapter_id}-retry-{job.retry_count + 1}")
                     accepted += 1
+                    if scheduler:
+                        scheduler.charge(BudgetedWorkItem(
+                            chapter_id=job.chapter_id,
+                            chapter_title=job.chapter_title,
+                            chapter_order=job.chapter_order,
+                            phase="retry",
+                        ))
             except Exception as exc:
                 await self.retry_queue.mark_failed(job.job_id, type(exc).__name__, str(exc)[:500])
 
@@ -512,6 +568,8 @@ class ExtractionService:
             "accepted": accepted,
             "skipped_already_success": skipped,
             "queued": len(pending_jobs),
+            "deferred": deferred,
+            "budget_summary": scheduler.summary().model_dump() if scheduler else None,
         }
 
 
@@ -525,6 +583,7 @@ def get_extraction_service(
     attempt_store: Optional[Any] = None,
     retry_queue: Optional[Any] = None,
     content_manager: Optional[Any] = None,
+    budget_policy: Optional[Any] = None,
 ) -> ExtractionService:
     return ExtractionService(
         ai_service,
@@ -533,4 +592,5 @@ def get_extraction_service(
         attempt_store=attempt_store,
         retry_queue=retry_queue,
         content_manager=content_manager,
+        budget_policy=budget_policy,
     )
