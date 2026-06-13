@@ -45,12 +45,14 @@ class ExtractionService:
         storage_manager: Optional[Any] = None,
         attempt_store: Optional[Any] = None,
         retry_queue: Optional[Any] = None,
+        content_manager: Optional[Any] = None,
     ):
         self.ai_service = ai_service
         self.config = config
         self.storage_manager = storage_manager
         self.attempt_store = attempt_store
         self.retry_queue = retry_queue
+        self.content_manager = content_manager
         self.model_router = ModelRouter(ai_service, config, storage=storage_manager)
 
         unified_config = ExtractionConfig(
@@ -487,12 +489,9 @@ class ExtractionService:
                 continue
             await self.retry_queue.mark_running(job.job_id)
             try:
-                chapter_data = {
-                    "id": job.chapter_id,
-                    "title": job.chapter_title,
-                    "chapter_index": job.chapter_order,
-                    "content": job.chapter_content,
-                }
+                from .retry_content_resolver import RetryContentResolver
+                resolver = RetryContentResolver(content_manager=self.content_manager)
+                chapter_data = await resolver.resolve(job)
                 result = await self.extract_chapter_index_assets(
                     chapters=[chapter_data],
                     model_role=model_role,
@@ -525,6 +524,7 @@ def get_extraction_service(
     storage_manager: Optional[Any] = None,
     attempt_store: Optional[Any] = None,
     retry_queue: Optional[Any] = None,
+    content_manager: Optional[Any] = None,
 ) -> ExtractionService:
     return ExtractionService(
         ai_service,
@@ -532,4 +532,5 @@ def get_extraction_service(
         storage_manager,
         attempt_store=attempt_store,
         retry_queue=retry_queue,
+        content_manager=content_manager,
     )

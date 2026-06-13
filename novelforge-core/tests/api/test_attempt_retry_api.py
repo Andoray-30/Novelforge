@@ -121,3 +121,27 @@ def test_list_attempts_truncates_preview(client):
     for item in data["items"]:
         if item.get("raw_response_preview"):
             assert len(item["raw_response_preview"]) <= 103
+
+
+def test_list_retry_queue_redacts_chapter_content(client):
+    response = client.get("/api/extraction/retry-queue?session_id=test-redact-list")
+    assert response.status_code == 200
+    data = response.json()
+    for item in data["items"]:
+        assert "chapter_content" not in item
+
+
+def test_get_retry_job_redacts_chapter_content(client):
+    response = client.get("/api/extraction/retry-queue/nonexistent?session_id=test-redact-get")
+    assert response.status_code == 404
+
+
+def test_retry_queue_response_includes_safe_source_ref_metadata(client):
+    response = client.get("/api/extraction/retry-queue?session_id=test-source-ref")
+    assert response.status_code == 200
+    data = response.json()
+    for item in data["items"]:
+        assert "chapter_content" not in item
+        if "source_ref" in item and item["source_ref"]:
+            assert "kind" in item["source_ref"]
+            assert "content_id" in item["source_ref"]

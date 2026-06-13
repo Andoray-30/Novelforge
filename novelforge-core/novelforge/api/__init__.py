@@ -266,7 +266,7 @@ content_manager = ContentManager(
 )
 
 # Create extraction service.
-extraction_service = get_extraction_service(ai_service, config, storage_manager, attempt_store=attempt_store, retry_queue=retry_queue)
+extraction_service = get_extraction_service(ai_service, config, storage_manager, attempt_store=attempt_store, retry_queue=retry_queue, content_manager=content_manager)
 
 # Create AI scheduler.
 ai_scheduler = get_ai_scheduler(ai_service, storage_manager, config, content_manager)
@@ -2296,6 +2296,35 @@ async def get_chapter_index_run(
    return _serialize_chapter_index_run_state(run_key, loaded, include_indices=include_indices)
 
 
+SAFE_RETRY_JOB_FIELDS = {
+    "job_id",
+    "session_id",
+    "chapter_id",
+    "chapter_title",
+    "chapter_order",
+    "error_type",
+    "error_message",
+    "original_attempt_id",
+    "model_used",
+    "source_ref",
+    "status",
+    "retry_count",
+    "max_retries",
+    "next_retry_at",
+    "last_error_type",
+    "last_error_message",
+    "result_attempt_id",
+    "created_at",
+    "updated_at",
+    "completed_at",
+}
+
+
+def _serialize_retry_job(job: Any) -> dict:
+    data = job.model_dump()
+    return {k: v for k, v in data.items() if k in SAFE_RETRY_JOB_FIELDS}
+
+
 @app.get("/api/extraction/retry-queue", response_model=dict)
 async def list_retry_queue(
     session_id: str = Query(..., min_length=1),
@@ -2309,7 +2338,7 @@ async def list_retry_queue(
        if status_filter:
            jobs = [j for j in jobs if j.status == status_filter]
        total = len(jobs)
-       items = [j.model_dump() for j in jobs[:limit]]
+       items = [_serialize_retry_job(j) for j in jobs[:limit]]
        stats = await retry_queue.stats(session_id=session_id)
        return {"items": items, "total": total, "stats": stats.model_dump()}
    except Exception as e:
@@ -2337,7 +2366,7 @@ async def get_retry_job(
                status_code=status.HTTP_403_FORBIDDEN,
                detail="Retry Job 不属于当前项目",
            )
-       return job.model_dump()
+       return _serialize_retry_job(job)
    except HTTPException:
        raise
    except Exception as e:

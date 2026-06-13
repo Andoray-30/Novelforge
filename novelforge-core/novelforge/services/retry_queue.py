@@ -29,6 +29,14 @@ def _generate_id() -> str:
     return str(uuid.uuid4())[:20]
 
 
+class RetrySourceRef(BaseModel):
+    kind: str = "content_item"
+    content_id: str
+    session_id: str
+    parent_id: Optional[str] = None
+    import_task_id: Optional[str] = None
+
+
 class RetryJob(BaseModel):
     job_id: str
     session_id: str
@@ -39,7 +47,7 @@ class RetryJob(BaseModel):
     error_message: str
     original_attempt_id: str
     model_used: str
-    chapter_content: str = ""
+    source_ref: Optional[RetrySourceRef] = None
     status: str = "pending"
     retry_count: int = 0
     max_retries: int = 3
@@ -54,6 +62,8 @@ class RetryJob(BaseModel):
     created_at: str = Field(default_factory=_now_iso)
     updated_at: str = Field(default_factory=_now_iso)
     completed_at: Optional[str] = None
+
+    model_config = {"extra": "ignore"}
 
 
 class RetryQueueStats(BaseModel):

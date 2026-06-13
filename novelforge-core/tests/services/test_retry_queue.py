@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from novelforge.services.attempt_store import AttemptRecord, AttemptStore
-from novelforge.services.retry_queue import RetryJob, RetryQueue, RetryQueueStats
+from novelforge.services.retry_queue import RetryJob, RetryQueue, RetryQueueStats, RetrySourceRef
 
 
 class MemoryStorage:
@@ -35,6 +35,11 @@ def _make_job(**overrides) -> RetryJob:
         "error_message": "429 Too Many Requests",
         "original_attempt_id": "chapter-1-attempt-1",
         "model_used": "test-model",
+        "source_ref": RetrySourceRef(
+            kind="content_item",
+            content_id="chapter-1",
+            session_id="session-a",
+        ),
     }
     defaults.update(overrides)
     return RetryJob(**defaults)
@@ -336,3 +341,80 @@ async def test_stats_counts_by_status():
     assert stats.exhausted_count == 1
     assert stats.error_breakdown["rate_limited"] == 3
     assert stats.error_breakdown["timeout"] == 1
+
+
+# === RetrySourceRef Tests ===
+
+
+def test_retry_job_uses_source_ref_not_chapter_content():
+    """RetryJob 必须使用 source_ref 而不是 chapter_content。"""
+    from novelforge.services.retry_queue import RetrySourceRef
+
+    source_ref = RetrySourceRef(
+        kind="content_item",
+        content_id="chapter-1",
+        session_id="session-a",
+    )
+    job = _make_job(source_ref=source_ref)
+    assert job.source_ref is not None
+    assert job.source_ref.kind == "content_item"
+    assert job.source_ref.content_id == "chapter-1"
+    assert job.source_ref.session_id == "session-a"
+
+
+def test_retry_job_serializes_without_chapter_content():
+    """RetryJob 序列化时不能包含 chapter_content。"""
+    from novelforge.services.retry_queue import RetrySourceRef
+
+    source_ref = RetrySourceRef(
+        kind="content_item",
+        content_id="chapter-1",
+        session_id="session-a",
+    )
+    job = _make_job(source_ref=source_ref)
+    data = job.model_dump()
+    assert "chapter_content" not in data
+    assert "source_ref" in data
+    assert data["source_ref"]["kind"] == "content_item"
+
+
+def test_retry_job_ignores_legacy_chapter_content_on_load():
+    """RetryJob 必须忽略旧的 chapter_content 字段。"""
+    legacy_data = {
+        "job_id": "job-legacy",
+        "session_id": "session-a",
+        "chapter_id": "chapter-1",
+        "chapter_title": "第一章",
+        "chapter_order": 1,
+        "error_type": "timeout",
+        "error_message": "Request timed out",
+        "original_attempt_id": "chapter-1-attempt-1",
+        "model_used": "test-model",
+        "chapter_content": "这是旧的章节内容，不应该被保留",
+    }
+    job = RetryJob(**legacy_data)
+    data = job.model_dump()
+    assert "chapter_content" not in data
+
+
+@pytest.mark.asyncio
+async def test_enqueue_does_not_persist_chapter_content():
+    """enqueue 不能持久化 chapter_content。"""
+    from novelforge.services.retry_queue import RetrySourceRef
+
+    storage = MemoryStorage()
+    attempt_store = AttemptStore(storage_manager=storage)
+    queue = RetryQueue(storage_manager=storage, attempt_store=attempt_store)
+
+    source_ref = RetrySourceRef(
+        kind="content_item",
+        content_id="chapter-1",
+        session_id="session-a",
+    )
+    job = _make_job(source_ref=source_ref)
+    await queue.enqueue(job)
+
+    stored_data = storage.data.get("retry_job_job-001")
+    assert stored_data is not None
+    assert "chapter_content" not in stored_data
+    assert "source_ref" in stored_data

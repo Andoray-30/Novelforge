@@ -11,6 +11,57 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-06-04 Phase C.1.2: Retry SourceRef 与 API 脱敏收口
+
+### 本轮完成
+- 移除 RetryJob.chapter_content 长期持久化：
+  - 新增 RetrySourceRef 数据模型（kind、content_id、session_id、parent_id、import_task_id）
+  - 移除 chapter_content 字段，改用 source_ref 引用
+  - Pydantic model_config 设置 extra="ignore" 忽略旧数据
+- 实现 RetryContentResolver：
+  - 从 ContentManager 按 source_ref.content_id 加载章节内容
+  - 验证 session_id、parent_id、content_type
+  - 内容为空时抛出 retry_source_content_empty
+- API 脱敏：
+  - 新增 _serialize_retry_job() 白名单序列化函数
+  - SAFE_RETRY_JOB_FIELDS 定义安全字段集合
+  - retry queue list/get 端点不再返回 chapter_content
+- 注入 ContentManager：
+  - ExtractionService.__init__ 新增 content_manager 参数
+  - get_extraction_service 接受并传递 content_manager
+  - api/__init__.py 传递 content_manager 到 extraction_service
+
+### 新增文件
+- `novelforge-core/novelforge/services/retry_content_resolver.py` — RetryContentResolver
+- `novelforge-core/tests/services/test_retry_content_resolver.py` — 7 个测试
+
+### 修改文件
+- `novelforge-core/novelforge/services/retry_queue.py` — 添加 RetrySourceRef、移除 chapter_content
+- `novelforge-core/novelforge/services/extraction_service.py` — 注入 content_manager、使用 resolver
+- `novelforge-core/novelforge/api/__init__.py` — API 脱敏、传递 content_manager
+- `novelforge-core/tests/services/test_retry_queue.py` — 更新测试使用 source_ref
+- `novelforge-core/tests/api/test_attempt_retry_api.py` — 添加脱敏测试
+
+### 验证
+- `pytest novelforge-core/tests/ -v`：255 passed
+- git diff --check：通过
+
+### 风险评估
+- **低风险**：RetrySourceRef 使用 Optional 字段，向后兼容
+- **低风险**：API 脱敏使用白名单，防止未来字段泄露
+- **低风险**：ContentManager 注入使用 Optional，不影响现有调用
+
+### 当前状态
+- Retry Queue 不再持久化完整章节正文
+- Retry API 不返回完整章节正文
+- Retry 仍然能通过 source_ref 解析真实内容并执行
+- 找不到真实内容时明确 failed，不会假成功
+
+### 下一步建议
+- 可以安全进入 Phase C.2 前端 Attempt/Retry 诊断接入
+- 可以进入 Budgeted Scheduler 实现
+- 可以进入 PerformanceProfile 实现
+
 ## 2026-06-04 Phase C.1.1: Retry / Attempt Hardening
 
 ### 本轮完成
