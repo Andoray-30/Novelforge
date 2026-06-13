@@ -173,6 +173,7 @@ class ChapterIndexExtractor:
         attempt_store: Optional[Any] = None,
         deadline_seconds: Optional[float] = None,
         schema_repairer: Optional[Any] = None,
+        session_id: str = "",
     ):
         self.ai_service = ai_service
         self.config = config or ExtractionConfig(timeout=180.0, max_retries=1, retry_delay=1.0)
@@ -180,6 +181,7 @@ class ChapterIndexExtractor:
         self.attempt_store = attempt_store
         self.deadline_seconds = deadline_seconds
         self.schema_repairer = schema_repairer
+        self.session_id = session_id
         self.chapter_concurrency = self._clamp_int(
             chapter_concurrency if chapter_concurrency is not None else self._resolve_chapter_concurrency(),
             minimum=1,
@@ -311,6 +313,7 @@ class ChapterIndexExtractor:
         last_error: Optional[Exception] = None
         attempts: List[Dict[str, Any]] = []
         max_retries = max(1, int(getattr(self.config, "max_retries", 1) or 1))
+        response: Optional[str] = None
 
         deadline = self._create_deadline()
 
@@ -422,7 +425,7 @@ class ChapterIndexExtractor:
                     latency_ms=self._elapsed_ms(started),
                     error=exc,
                     retry_count=attempt,
-                    needs_retry=is_final_attempt,
+                    needs_retry=True,
                     deadline_remaining_ms=deadline.remaining_ms if deadline else None,
                     raw_response_preview=response[:300] if response else None,
                     repair_layer=repair_result.repair_layer if repair_result else None,
@@ -462,7 +465,7 @@ class ChapterIndexExtractor:
 
         await self.attempt_store.record(AttemptRecord(
             id=f"{chapter.id}-attempt-{attempt + 1}",
-            session_id="",
+            session_id=self.session_id,
             **record,
         ))
 

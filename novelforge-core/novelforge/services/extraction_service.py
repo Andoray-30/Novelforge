@@ -38,10 +38,19 @@ logger = logging.getLogger(__name__)
 class ExtractionService:
     """High level extraction orchestration service."""
 
-    def __init__(self, ai_service: AIService, config: Config, storage_manager: Optional[Any] = None):
+    def __init__(
+        self,
+        ai_service: AIService,
+        config: Config,
+        storage_manager: Optional[Any] = None,
+        attempt_store: Optional[Any] = None,
+        retry_queue: Optional[Any] = None,
+    ):
         self.ai_service = ai_service
         self.config = config
         self.storage_manager = storage_manager
+        self.attempt_store = attempt_store
+        self.retry_queue = retry_queue
         self.model_router = ModelRouter(ai_service, config, storage=storage_manager)
 
         unified_config = ExtractionConfig(
@@ -106,6 +115,7 @@ class ExtractionService:
         diagnostics_recorder: Optional[Any],
         role: str,
         runtime_settings: Optional[Dict[str, Any]] = None,
+        session_id: str = "",
     ) -> ChapterIndexExtractor:
         from .schema_repairer import LocalJsonRepairer, ModelSchemaRepairer, SchemaRepairer
 
@@ -131,6 +141,8 @@ class ExtractionService:
             chapter_concurrency=int(settings["concurrency"]) if "concurrency" in settings else None,
             max_tokens=int(settings["max_tokens"]) if "max_tokens" in settings else None,
             schema_repairer=schema_repairer,
+            attempt_store=self.attempt_store,
+            session_id=session_id,
         )
 
     async def extract_characters(self, text: str) -> List[Character]:
@@ -168,6 +180,7 @@ class ExtractionService:
             diagnostics_recorder=diagnostics_recorder,
             role=role,
             runtime_settings=runtime_settings,
+            session_id=session_id or "",
         )
         model_route = None
         if getattr(self.config, "enable_model_router", True):
@@ -188,6 +201,7 @@ class ExtractionService:
                     diagnostics_recorder=diagnostics_recorder,
                     role=role,
                     runtime_settings=runtime_settings,
+                    session_id=session_id or "",
                 )
         result = await extractor.extract_and_merge(chapters)
         diagnostics = result.diagnostics.model_dump()
@@ -195,6 +209,32 @@ class ExtractionService:
             diagnostics["model_route"] = model_route
         if repair_strategy:
             diagnostics["repair_strategy"] = repair_strategy
+
+        retry_stats = None
+        if self.retry_queue and result.diagnostics.failed_chapters:
+            from .retry_queue import RetryJob
+            from .error_classifier import is_retryable
+
+            for failed in result.diagnostics.failed_chapters:
+                error_type = failed.get("error_type", "")
+                if not is_retryable(error_type):
+                    continue
+                if await self.retry_queue.should_skip_chapter(failed.get("chapter_id", "")):
+                    continue
+                job = RetryJob(
+                    job_id=str(uuid.uuid4())[:20],
+                    session_id=session_id or "",
+                    chapter_id=failed.get("chapter_id", ""),
+                    chapter_title=failed.get("title", ""),
+                    chapter_order=failed.get("chapter_order", 0),
+                    error_type=error_type,
+                    error_message=failed.get("error", ""),
+                    original_attempt_id=f"{failed.get('chapter_id', '')}-attempt-final",
+                    model_used=failed.get("model_used", ""),
+                )
+                await self.retry_queue.enqueue(job)
+            retry_stats = await self.retry_queue.stats(session_id=session_id)
+
         return {
             "characters": result.characters,
             "world_setting": result.world_setting,
@@ -209,6 +249,7 @@ class ExtractionService:
             "relationship_unresolved_endpoints": result.diagnostics.relationship_unresolved_endpoints,
             "timeline_mismatch_events": result.diagnostics.timeline_mismatch_events,
             "model_route": model_route,
+            "retry_stats": retry_stats.model_dump() if retry_stats else None,
         }
 
     async def extract_all(self, text: str) -> Dict[str, Any]:
@@ -417,6 +458,54 @@ class ExtractionService:
 
     async def enhance_relationships_data(self, relationships: List[NetworkEdge], text: str) -> List[NetworkEdge]:
         return relationships
+
+    async def retry_pending_chapters(
+        self,
+        session_id: str,
+        model_role: str = "extractor_repair",
+    ) -> Dict[str, Any]:
+        import uuid as _uuid
+
+        if not self.retry_queue:
+            return {"accepted": 0, "skipped_already_success": 0, "queued": 0, "error": "retry_queue_not_configured"}
+
+        pending_jobs = await self.retry_queue.list_pending(session_id=session_id)
+        accepted = 0
+        skipped = 0
+
+        for job in pending_jobs:
+            if await self.retry_queue.should_skip_chapter(job.chapter_id):
+                await self.retry_queue.mark_cancelled(job.job_id)
+                skipped += 1
+                continue
+            await self.retry_queue.mark_running(job.job_id)
+            try:
+                chapter_data = {
+                    "id": job.chapter_id,
+                    "title": job.chapter_title,
+                    "chapter_index": job.chapter_order,
+                    "content": "",
+                }
+                result = await self.extract_chapter_index_assets(
+                    chapters=[chapter_data],
+                    model_role=model_role,
+                    session_id=session_id,
+                )
+                if result.get("failed_chapters"):
+                    error_type = result["failed_chapters"][0].get("error_type", "unknown")
+                    error_message = result["failed_chapters"][0].get("error", "unknown")
+                    await self.retry_queue.mark_failed(job.job_id, error_type, error_message)
+                else:
+                    await self.retry_queue.mark_success(job.job_id, f"{job.chapter_id}-retry-{job.retry_count + 1}")
+                    accepted += 1
+            except Exception as exc:
+                await self.retry_queue.mark_failed(job.job_id, type(exc).__name__, str(exc)[:500])
+
+        return {
+            "accepted": accepted,
+            "skipped_already_success": skipped,
+            "queued": len(pending_jobs),
+        }
 
 
 _extraction_service: Optional[ExtractionService] = None

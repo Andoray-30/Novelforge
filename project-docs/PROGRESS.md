@@ -11,6 +11,57 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-06-04 Phase C: Retry Queue v1
+
+### 本轮完成
+- 修复 attempt 追踪中的 4 个预存 bug：
+  - session_id 硬编码为空字符串 → 从 ExtractionService 传递
+  - response 变量在异常处理中可能未定义 → 初始化为 None
+  - needs_retry 语义反转 → 所有失败尝试都设置 True
+  - ExtractionService 未传递 attempt_store → 现在传递
+- 创建统一错误分类器模块（error_classifier.py）：
+  - classify_error()：统一错误分类
+  - is_retryable()：判断是否可重试
+  - RETRYABLE_ERROR_TYPES：rate_limited、gateway_timeout、timeout、provider_unavailable、empty_content、json_invalid
+  - NON_RETRYABLE_ERROR_TYPES：auth_failed
+- 实现 RetryQueue 核心模块（retry_queue.py）：
+  - RetryJob 数据模型（20+ 字段）
+  - RetryQueue 类：enqueue、get、list_pending、list_by_session、list_by_chapter
+  - mark_running、mark_success、mark_failed、mark_cancelled
+  - compute_next_delay：指数退避 + 抖动
+  - should_skip_chapter：跳过已成功章节
+  - stats：聚合统计
+- 集成到 ExtractionService：
+  - 提取失败后自动入队可重试章节
+  - retry_pending_chapters() 方法处理队列
+  - 返回 retry_stats 统计
+
+### 新增文件
+- `novelforge-core/novelforge/services/error_classifier.py` — 统一错误分类器
+- `novelforge-core/novelforge/services/retry_queue.py` — RetryQueue 核心模块
+- `novelforge-core/tests/services/test_retry_queue.py` — 22 个测试
+
+### 修改文件
+- `novelforge-core/novelforge/extractors/chapter_index_extractor.py` — 修复 bug、添加 session_id
+- `novelforge-core/novelforge/services/extraction_service.py` — 集成 RetryQueue
+
+### 验证
+- `pytest novelforge-core/tests/services/test_retry_queue.py -v`：22 passed
+- `pytest novelforge-core/tests/services/ -v`：179 passed（157 原有 + 22 新增）
+
+### 当前边界
+- Retry Queue 只处理失败 attempt，不重跑成功章节
+- 不无限重试，max_retries=3 默认
+- 不调用真实外部 provider
+- Retry Queue 是恢复机制，不是 ModelRouter
+- API 端点留到 Phase C.1 实现
+
+### 下一步建议
+- 实现 retry API 端点（Phase C.1）
+- 实现 Budgeted Scheduler
+- 实现 PerformanceProfile
+- 实现 ModelRouter
+
 ## 2026-06-04 Phase B.1: SchemaRepairer 安全审查与收口
 
 ### 审查结果
