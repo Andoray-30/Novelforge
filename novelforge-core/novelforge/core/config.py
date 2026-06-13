@@ -147,6 +147,10 @@ class Config:
         # SillyTavern 配置
         self.sillytavern_url: Optional[str] = os.getenv("SILLYTAVERN_URL")
         
+        # Schema repair 配置
+        self.enable_schema_repair: bool = os.getenv("ENABLE_SCHEMA_REPAIR", "true").lower() == "true"
+        self.enable_model_schema_repair: bool = os.getenv("ENABLE_MODEL_SCHEMA_REPAIR", "false").lower() == "true"
+        
         # 提取配置
         self.max_text_length: int = int(os.getenv("MAX_TEXT_LENGTH", "5000"))
         self.max_characters: int = int(os.getenv("MAX_CHARACTERS", "20"))

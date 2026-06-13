@@ -115,7 +115,7 @@ class ExtractionService:
         if getattr(self.config, "enable_schema_repair", True):
             local_repairer = LocalJsonRepairer()
             model_repairer = None
-            if getattr(self.config, "enable_model_schema_repair", True):
+            if getattr(self.config, "enable_model_schema_repair", False):
                 repair_settings = self._model_role_settings("schema_repair")
                 repair_timeout = float(repair_settings.get("timeout", 120.0))
                 model_repairer = ModelSchemaRepairer(ai_service=ai_service, timeout=repair_timeout)

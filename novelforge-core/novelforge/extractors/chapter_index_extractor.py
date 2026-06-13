@@ -400,11 +400,12 @@ class ChapterIndexExtractor:
                                 retry_count=attempt,
                                 needs_retry=False,
                                 deadline_remaining_ms=deadline.remaining_ms if deadline else None,
-                                raw_response_text=response[:2000] if response else None,
+                                raw_response_preview=response[:300] if response else None,
                                 repair_layer=repair_result.repair_layer,
                                 repair_fixes=repair_result.fixes_applied,
                                 repair_model_used=repair_result.model_used,
                                 repair_latency_ms=repair_result.latency_ms,
+                                schema_valid_after_repair=True,
                             )
                             attempts.append(record)
                             await self._record_diagnostic_event({"event_type": "attempt", "record": record})
@@ -423,11 +424,12 @@ class ChapterIndexExtractor:
                     retry_count=attempt,
                     needs_retry=is_final_attempt,
                     deadline_remaining_ms=deadline.remaining_ms if deadline else None,
-                    raw_response_text=response[:2000] if response else None,
+                    raw_response_preview=response[:300] if response else None,
                     repair_layer=repair_result.repair_layer if repair_result else None,
                     repair_fixes=repair_result.fixes_applied if repair_result else [],
                     repair_model_used=repair_result.model_used if repair_result else None,
                     repair_latency_ms=repair_result.latency_ms if repair_result else 0,
+                    schema_valid_after_repair=False,
                 )
                 attempts.append(record)
                 await self._record_diagnostic_event({"event_type": "attempt", "record": record})
@@ -477,11 +479,12 @@ class ChapterIndexExtractor:
         retry_count: int = 0,
         needs_retry: bool = False,
         deadline_remaining_ms: Optional[int] = None,
-        raw_response_text: Optional[str] = None,
+        raw_response_preview: Optional[str] = None,
         repair_layer: Optional[str] = None,
         repair_fixes: Optional[List[str]] = None,
         repair_model_used: Optional[str] = None,
         repair_latency_ms: int = 0,
+        schema_valid_after_repair: bool = False,
     ) -> Dict[str, Any]:
         response_text = raw_response or ""
         model_used = self._current_model_name()
@@ -504,11 +507,12 @@ class ChapterIndexExtractor:
             "retry_count": retry_count,
             "needs_retry": bool(needs_retry),
             "deadline_remaining_ms": deadline_remaining_ms,
-            "raw_response_text": raw_response_text,
+            "raw_response_preview": raw_response_preview,
             "repair_layer": repair_layer,
             "repair_fixes": repair_fixes or [],
             "repair_model_used": repair_model_used,
             "repair_latency_ms": repair_latency_ms,
+            "schema_valid_after_repair": schema_valid_after_repair,
         }
         return record
 

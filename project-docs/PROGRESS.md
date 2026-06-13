@@ -11,6 +11,50 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-06-04 Phase B.1: SchemaRepairer 安全审查与收口
+
+### 审查结果
+- **raw_response_text 存储风险**：已修复
+  - 移除 AttemptStore 中的 raw_response_text 字段（原 2000 字符）
+  - 改为 raw_response_preview（最大 300 字符，仅用于诊断）
+  - 长期记录只保存：raw_response_hash、raw_response_chars、raw_response_preview
+- **repair 状态语义**：已确认
+  - clean_parse_success：无 repair 参与
+  - local_repair_success：本地修复成功
+  - model_repair_success：模型修复成功
+  - local_repair_failed / model_repair_failed：修复失败
+  - schema_valid_after_repair：修复后 schema 验证结果
+- **schema_repair 配置**：已补充
+  - ENABLE_SCHEMA_REPAIR=true（默认开启本地修复）
+  - ENABLE_MODEL_SCHEMA_REPAIR=false（默认关闭模型修复，避免未配置模型时报错）
+  - 未配置 schema_repair 模型时，降级为 local-only
+- **model repair 输入边界**：已确认
+  - ModelSchemaRepairer 只接收 raw JSON response（不是原文章节全文）
+  - Prompt 明确要求"不要修改内容、不要提取信息、不要添加字段"
+- **统计准备**：已确认
+  - AttemptStats 包含：repair_local_count、repair_model_count、repair_failed_count、repair_success_rate
+  - 可用于后续 PerformanceProfile / ModelRouter
+
+### 修复文件
+- `novelforge-core/novelforge/services/attempt_store.py` — raw_response_text → raw_response_preview
+- `novelforge-core/novelforge/extractors/chapter_index_extractor.py` — 更新字段名和长度限制
+- `novelforge-core/novelforge/core/config.py` — 添加 ENABLE_SCHEMA_REPAIR、ENABLE_MODEL_SCHEMA_REPAIR
+- `novelforge-core/novelforge/services/extraction_service.py` — 修复默认值
+
+### 验证
+- `pytest novelforge-core/tests/services/ -v`：157 passed
+- git diff --check：通过
+
+### 风险评估
+- **低风险**：raw_response_text 已移除，改为短 preview
+- **低风险**：model repair 默认关闭，不会自动调用外部模型
+- **低风险**：local repair 默认开启，不依赖外部 provider
+
+### 下一步建议
+- 可以进入 Retry Queue 实现
+- 可以进入 Budgeted Scheduler 实现
+- 可以进入 PerformanceProfile 实现
+
 ## 2026-06-04 Phase B: SchemaRepairer + 格式校准模型
 
 ### 本轮完成

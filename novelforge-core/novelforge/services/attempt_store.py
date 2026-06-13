@@ -50,11 +50,12 @@ class AttemptRecord(BaseModel):
     created_at: str = Field(default_factory=_now_iso)
 
     # Schema repair tracking fields
-    raw_response_text: Optional[str] = None  # Truncated to 2000 chars on failure
+    raw_response_preview: Optional[str] = None  # Short preview only (max 300 chars)
     repair_layer: Optional[str] = None  # "local" | "model" | None
     repair_fixes: List[str] = Field(default_factory=list)
     repair_model_used: Optional[str] = None
     repair_latency_ms: int = 0
+    schema_valid_after_repair: bool = False
 
 
 class AttemptStats(BaseModel):
