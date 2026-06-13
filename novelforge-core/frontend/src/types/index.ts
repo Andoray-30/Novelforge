@@ -616,3 +616,119 @@ export interface ImportResult {
   message: string;
   imported_items: string[];
 }
+
+// === Attempt / Retry Types ===
+
+export type ExtractionAttemptStatus = 'pending' | 'running' | 'success' | 'failed' | 'deadline_exceeded' | 'skipped';
+export type RetryJobStatus = 'pending' | 'waiting' | 'running' | 'success' | 'failed' | 'exhausted' | 'cancelled';
+export type ExtractionRecoveryStatus = 'no_data' | 'success' | 'partial' | 'partial_exhausted' | 'failed';
+
+export interface RetrySourceRef {
+  kind: string;
+  content_id: string;
+  session_id: string;
+  parent_id?: string | null;
+  import_task_id?: string | null;
+}
+
+export interface ExtractionAttempt {
+  id: string;
+  session_id: string;
+  chapter_id: string;
+  chapter_title: string;
+  chapter_order: number;
+  attempt_number: number;
+  status: ExtractionAttemptStatus;
+  model_used: string;
+  timeout: number;
+  max_tokens: number;
+  latency_ms: number;
+  error_type?: string | null;
+  error_message?: string | null;
+  raw_response_hash?: string | null;
+  raw_response_chars: number;
+  raw_response_preview?: string | null;
+  parsed_candidate_counts: Record<string, number>;
+  retry_count: number;
+  needs_retry: boolean;
+  deadline_remaining_ms?: number | null;
+  repair_layer?: string | null;
+  repair_fixes: string[];
+  repair_model_used?: string | null;
+  repair_latency_ms: number;
+  schema_valid_after_repair: boolean;
+  created_at: string;
+}
+
+export interface ExtractionAttemptSummary {
+  total_attempts: number;
+  success_count: number;
+  failed_count: number;
+  deadline_exceeded_count: number;
+  skipped_count: number;
+  avg_latency_ms: number;
+  p95_latency_ms: number;
+  error_breakdown: Record<string, number>;
+  chapters_with_attempts: number;
+  chapters_needing_retry: number;
+  repair_local_count: number;
+  repair_model_count: number;
+  repair_failed_count: number;
+  repair_success_rate: number;
+  session_id: string;
+  partial_recoverable: boolean;
+  overall_status: ExtractionRecoveryStatus;
+}
+
+export interface RetryJob {
+  job_id: string;
+  session_id: string;
+  chapter_id: string;
+  chapter_title: string;
+  chapter_order: number;
+  error_type: string;
+  error_message: string;
+  original_attempt_id: string;
+  model_used: string;
+  source_ref?: RetrySourceRef | null;
+  status: RetryJobStatus;
+  retry_count: number;
+  max_retries: number;
+  next_retry_at?: string | null;
+  last_error_type?: string | null;
+  last_error_message?: string | null;
+  result_attempt_id?: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string | null;
+}
+
+export interface RetryQueueStats {
+  total_jobs: number;
+  pending_count: number;
+  waiting_count: number;
+  running_count: number;
+  success_count: number;
+  failed_count: number;
+  exhausted_count: number;
+  cancelled_count: number;
+  error_breakdown: Record<string, number>;
+  avg_retries_to_success: number;
+}
+
+export interface RetryQueueSummary {
+  items: RetryJob[];
+  total: number;
+  stats: RetryQueueStats;
+}
+
+export interface RunDueRetryJobsResponse {
+  accepted: number;
+  skipped_already_success: number;
+  queued: number;
+}
+
+export interface RetryExtractionAttemptResponse {
+  job_id: string;
+  status: string;
+}

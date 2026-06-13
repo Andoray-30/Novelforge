@@ -11,6 +11,56 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-06-04 Phase C.2: 前端 Attempt / Retry 诊断接入
+
+### 本轮完成
+- 新增前端类型：
+  - ExtractionAttemptStatus、RetryJobStatus、ExtractionRecoveryStatus
+  - ExtractionAttempt、ExtractionAttemptSummary
+  - RetrySourceRef、RetryJob、RetryQueueStats、RetryQueueSummary
+  - RunDueRetryJobsResponse、RetryExtractionAttemptResponse
+- 新增 API 客户端：
+  - extractionAttemptService：getSummary、list、get、retry
+  - retryQueueService：list、get、runDue
+- 新增恢复状态工具：
+  - extraction-recovery-utils.ts：中文状态标签、重试过滤、摘要卡片
+  - 15 个测试全部通过
+- 接入轻量级提取诊断 UI：
+  - 在 extract/page.tsx 中添加恢复诊断状态和效果
+  - 显示 Attempt / Retry 恢复诊断卡片
+  - 支持刷新诊断、运行到期重试操作
+  - 显示整体状态（partial_recoverable / partial_exhausted）
+
+### 新增文件
+- `novelforge-core/frontend/src/app/extract/extraction-recovery-utils.ts` — 恢复状态工具
+- `novelforge-core/frontend/src/app/extract/extraction-recovery-utils.test.ts` — 15 个测试
+
+### 修改文件
+- `novelforge-core/frontend/src/types/index.ts` — 添加 Attempt/Retry 类型
+- `novelforge-core/frontend/src/lib/api/novelforge-api.ts` — 添加 API 客户端方法
+- `novelforge-core/frontend/src/app/extract/page.tsx` — 接入恢复诊断 UI
+
+### 验证
+- `npm test -- --run`：148 passed
+- `npx tsc --noEmit --incremental false`：通过
+
+### 风险评估
+- **低风险**：所有新类型使用 Optional 字段，向后兼容
+- **低风险**：API 客户端使用现有 APIClient 模式
+- **低风险**：UI 组件遵循现有 DiagnosticArea 模式
+
+### 当前状态
+- 前端能展示 Attempt Summary
+- 前端能展示 Retry Queue Summary
+- partial_recoverable / partial_exhausted 可见
+- repair / retry / exhausted 统计可见
+- 可手动触发 run-due retry
+
+### 下一步建议
+- 可以进入 Budgeted Scheduler 实现
+- 可以进入 PerformanceProfile 实现
+- 可以进入 ModelRouter 实现
+
 ## 2026-06-04 Phase C.1.2: Retry SourceRef 与 API 脱敏收口
 
 ### 本轮完成

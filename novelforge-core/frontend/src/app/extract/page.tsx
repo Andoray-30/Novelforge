@@ -20,11 +20,12 @@ import {
   Users,
   Wrench,
 } from 'lucide-react';
-import { chapterIndexRunService, contentService, modelHealthService, taskService, textProcessingService } from '@/lib/api';
+import { chapterIndexRunService, contentService, extractionAttemptService, modelHealthService, retryQueueService, taskService, textProcessingService } from '@/lib/api';
 import { buildAssetQualityDiagnostics, type AssetQualityDiagnosticsResult } from '@/lib/asset-quality-diagnostics';
 import { getModelHealthRankingReasonLabel, getModelProbeStatusLabel, getModelRouteSummary, normalizeModelRoute } from '@/lib/model-route-summary';
 import { buildPersistedModelHealthSummary, buildRecentModelHealthSummary } from './model-health-summary';
 import { getNovelImportStageLabel, parseNovelImportTaskResult } from '@/lib/task-events';
+import { buildRecoverySummaryCards, RECOVERY_STATUS_LABELS } from './extraction-recovery-utils';
 import { useAppStore } from '@/lib/hooks/use-app-store';
 import { useSessionTaskEvents } from '@/lib/hooks/use-session-task-events';
 import { useSessions } from '@/lib/hooks/use-sessions';
@@ -677,6 +678,11 @@ export default function ExtractPage() {
   const [modelHealthReport, setModelHealthReport] = useState<ModelHealthReport | null>(null);
   const [modelHealthError, setModelHealthError] = useState<string | null>(null);
   const [modelHealthLoading, setModelHealthLoading] = useState(false);
+  const [attemptSummary, setAttemptSummary] = useState<import('@/types').ExtractionAttemptSummary | null>(null);
+  const [retryQueueSummary, setRetryQueueSummary] = useState<import('@/types').RetryQueueSummary | null>(null);
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  const [recoverySubmitting, setRecoverySubmitting] = useState<string | null>(null);
 
   const { currentSession, currentSessionId, createSession, switchSession, loadSessions } = useSessions();
   const setSelectedNovelId = useAppStore((state) => state.setSelectedNovelId);
@@ -895,6 +901,46 @@ export default function ExtractPage() {
     };
     void loadChapterIndexRuns();
     void loadModelHealth();
+    return () => {
+      disposed = true;
+    };
+  }, [completedResult?.parent_id, completedResult?.session_id, currentSessionId, savedSummary?.sessionId, status]);
+
+  useEffect(() => {
+    const sessionId = completedResult?.session_id || savedSummary?.sessionId || currentSessionId;
+    const parentId = completedResult?.parent_id || null;
+    if (!sessionId || status !== 'success') {
+      setAttemptSummary(null);
+      setRetryQueueSummary(null);
+      setRecoveryLoading(false);
+      setRecoveryError(null);
+      return;
+    }
+
+    let disposed = false;
+    setRecoveryLoading(true);
+    setRecoveryError(null);
+    const loadRecoveryDiagnostics = async () => {
+      try {
+        const [summary, retryQueue] = await Promise.all([
+          extractionAttemptService.getSummary({ sessionId, parentId }),
+          retryQueueService.list({ sessionId, parentId, limit: 20 }),
+        ]);
+        if (!disposed) {
+          setAttemptSummary(summary);
+          setRetryQueueSummary(retryQueue);
+        }
+      } catch (error) {
+        if (!disposed) {
+          setAttemptSummary(null);
+          setRetryQueueSummary(null);
+          setRecoveryError(error instanceof Error ? error.message : '恢复诊断读取失败');
+        }
+      } finally {
+        if (!disposed) setRecoveryLoading(false);
+      }
+    };
+    void loadRecoveryDiagnostics();
     return () => {
       disposed = true;
     };
@@ -1396,6 +1442,94 @@ export default function ExtractPage() {
               </article>
             ))}
           </div>
+
+          {attemptSummary ? (
+            <div className="mt-5 rounded-2xl border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] p-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-[var(--nf-text)]">Attempt / Retry 恢复诊断</h3>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className="nf-button nf-button--secondary text-xs"
+                    disabled={recoveryLoading || recoverySubmitting !== null}
+                    onClick={async () => {
+                      const sessionId = completedResult?.session_id || savedSummary?.sessionId || currentSessionId;
+                      if (!sessionId) return;
+                      setRecoveryLoading(true);
+                      try {
+                        const [summary, retryQueue] = await Promise.all([
+                          extractionAttemptService.getSummary({ sessionId }),
+                          retryQueueService.list({ sessionId, limit: 20 }),
+                        ]);
+                        setAttemptSummary(summary);
+                        setRetryQueueSummary(retryQueue);
+                      } catch {
+                        // 刷新失败不阻断用户流程。
+                      } finally {
+                        setRecoveryLoading(false);
+                      }
+                    }}
+                  >
+                    {recoveryLoading ? '刷新中...' : '刷新诊断'}
+                  </button>
+                  {retryQueueSummary && retryQueueSummary.stats.pending_count > 0 ? (
+                    <button
+                      type="button"
+                      className="nf-button nf-button--primary text-xs"
+                      disabled={recoverySubmitting !== null}
+                      onClick={async () => {
+                        const sessionId = completedResult?.session_id || savedSummary?.sessionId || currentSessionId;
+                        if (!sessionId) return;
+                        setRecoverySubmitting('run_due');
+                        try {
+                          await retryQueueService.runDue({ sessionId });
+                          const [summary, retryQueue] = await Promise.all([
+                            extractionAttemptService.getSummary({ sessionId }),
+                            retryQueueService.list({ sessionId, limit: 20 }),
+                          ]);
+                          setAttemptSummary(summary);
+                          setRetryQueueSummary(retryQueue);
+                        } catch {
+                          // 运行重试失败不阻断用户流程。
+                        } finally {
+                          setRecoverySubmitting(null);
+                        }
+                      }}
+                    >
+                      {recoverySubmitting === 'run_due' ? '执行中...' : '运行到期重试'}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                {buildRecoverySummaryCards(attemptSummary, retryQueueSummary).map((card) => (
+                  <div key={card.label} className="rounded-xl border border-[var(--nf-border)] bg-[var(--nf-surface)] px-3 py-2">
+                    <p className="text-xs text-[var(--nf-text-subtle)]">{card.label}</p>
+                    <p className={['mt-1 text-sm font-bold', card.tone === 'danger' ? 'text-[var(--nf-danger)]' : card.tone === 'warning' ? 'text-[var(--nf-warning)]' : card.tone === 'success' ? 'text-[var(--nf-success)]' : 'text-[var(--nf-text)]'].join(' ')}>
+                      {card.value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-3 rounded-xl border border-[var(--nf-border)] bg-[var(--nf-surface)] px-3 py-2">
+                <p className="text-xs text-[var(--nf-text-subtle)]">整体状态</p>
+                <p className="mt-1 text-sm font-bold text-[var(--nf-text)]">
+                  {RECOVERY_STATUS_LABELS[attemptSummary.overall_status] || attemptSummary.overall_status}
+                  {attemptSummary.partial_recoverable ? '（可重试）' : ''}
+                </p>
+              </div>
+
+              {recoveryError ? (
+                <div className="nf-alert nf-alert--danger mt-3">{recoveryError}</div>
+              ) : null}
+            </div>
+          ) : recoveryLoading ? (
+            <div className="nf-alert mt-5">正在加载恢复诊断...</div>
+          ) : recoveryError ? (
+            <div className="nf-alert nf-alert--danger mt-5">{recoveryError}</div>
+          ) : null}
 
           <details className="mt-5 rounded-2xl border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] p-4">
             <summary className="cursor-pointer text-sm font-bold text-[var(--nf-text)]">查看详细诊断日志</summary>
