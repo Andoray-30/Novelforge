@@ -11,6 +11,58 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-06-04 Phase D.1: Budgeted Scheduler 语义收口与 SourceRef 回归修复
+
+### 本轮完成
+- 修复 BudgetSummary 统计语义：
+  - total_accepted 现在表示 accepted work item 数（而非 model_calls_used）
+  - total_skipped 现在表示 skipped work item 数
+  - deferred_by_reason 现在正确聚合
+  - 新增 model_calls_used 字段
+- 修复 token 预算扣减：
+  - plan() 接受 item 时现在累加 tokens_used
+  - token 预算检查现在真正生效
+- 修复 RetryJob source_ref 回归：
+  - auto-enqueue 现在构造 RetrySourceRef（不再传 chapter_content）
+  - manual retry API 现在构造 RetrySourceRef
+  - source_ref 包含 kind、content_id、session_id、parent_id
+- 持久化 deferred retry jobs：
+  - 新增 RetryQueue.mark_deferred() 方法
+  - deferred jobs 状态变为 "waiting"，设置 next_retry_at
+  - retry_pending_chapters() 现在调用 mark_deferred()
+
+### 新增文件
+- 无
+
+### 修改文件
+- `novelforge-core/novelforge/services/budgeted_scheduler.py` — 修复 BudgetState/BudgetSummary 语义
+- `novelforge-core/novelforge/services/retry_queue.py` — 添加 mark_deferred() 方法
+- `novelforge-core/novelforge/services/extraction_service.py` — 修复 source_ref 创建、调用 mark_deferred
+- `novelforge-core/novelforge/api/__init__.py` — 修复 manual retry source_ref 创建
+- `novelforge-core/tests/services/test_budgeted_scheduler.py` — 添加语义测试
+- `novelforge-core/tests/services/test_retry_queue.py` — 添加 source_ref 和 deferred 测试
+- `project-docs/PROGRESS.md` — 添加 Phase D.1 记录
+
+### 验证
+- `pytest novelforge-core/tests/services/test_budgeted_scheduler.py -v`：17 passed
+- `pytest novelforge-core/tests/services/test_retry_queue.py tests/services/test_retry_content_resolver.py tests/api/test_attempt_retry_api.py -v`：57 passed
+- `pytest novelforge-core/tests/ -v`：279 passed
+
+### 风险评估
+- **低风险**：所有改动都是语义修复，向后兼容
+- **低风险**：source_ref 使用 Optional 字段，旧数据仍可加载
+- **低风险**：mark_deferred 使用 waiting 状态，与现有 stats 兼容
+
+### 当前状态
+- BudgetSummary 统计语义可信
+- estimated token budget 有实际效果
+- 自动 enqueue retry job 使用 source_ref，不回退到 chapter_content
+- retry budget 不足状态可持久化/可查询
+
+### 下一步建议
+- 可以进入 Phase E PerformanceProfile 实现
+- 可以进入 Phase F ModelRouter 实现
+
 ## 2026-06-04 Phase D: Budgeted Scheduler v1
 
 ### 本轮完成

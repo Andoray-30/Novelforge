@@ -190,6 +190,19 @@ class RetryQueue:
         job.updated_at = _now_iso()
         await self.enqueue(job)
 
+    async def mark_deferred(self, job_id: str, reason: str, delay_seconds: Optional[float] = None) -> None:
+        job = await self.get(job_id)
+        if job is None:
+            return
+        job.status = "waiting"
+        job.last_error_type = reason
+        job.last_error_message = f"Deferred: {reason}"
+        job.updated_at = _now_iso()
+        if delay_seconds is not None:
+            next_at = datetime.now() + timedelta(seconds=delay_seconds)
+            job.next_retry_at = next_at.isoformat()
+        await self.enqueue(job)
+
     def compute_next_delay(self, retry_count: int, job: Optional[RetryJob] = None) -> float:
         base = job.base_delay_seconds if job else 30.0
         multiplier = job.backoff_multiplier if job else 2.0

@@ -418,3 +418,143 @@ async def test_enqueue_does_not_persist_chapter_content():
     assert stored_data is not None
     assert "chapter_content" not in stored_data
     assert "source_ref" in stored_data
+
+
+@pytest.mark.asyncio
+async def test_auto_enqueue_creates_retry_job_with_source_ref():
+    from novelforge.services.retry_queue import RetrySourceRef
+
+    storage = MemoryStorage()
+    attempt_store = AttemptStore(storage_manager=storage)
+    queue = RetryQueue(storage_manager=storage, attempt_store=attempt_store)
+
+    source_ref = RetrySourceRef(
+        kind="content_item",
+        content_id="chapter-1",
+        session_id="session-a",
+    )
+    job = _make_job(source_ref=source_ref)
+    await queue.enqueue(job)
+
+    loaded = await queue.get("job-001")
+    assert loaded is not None
+    assert loaded.source_ref is not None
+    assert loaded.source_ref.kind == "content_item"
+    assert loaded.source_ref.content_id == "chapter-1"
+    assert loaded.source_ref.session_id == "session-a"
+
+
+@pytest.mark.asyncio
+async def test_auto_enqueue_does_not_persist_chapter_content():
+    from novelforge.services.retry_queue import RetrySourceRef
+
+    storage = MemoryStorage()
+    attempt_store = AttemptStore(storage_manager=storage)
+    queue = RetryQueue(storage_manager=storage, attempt_store=attempt_store)
+
+    source_ref = RetrySourceRef(
+        kind="content_item",
+        content_id="chapter-1",
+        session_id="session-a",
+    )
+    job = _make_job(source_ref=source_ref)
+    await queue.enqueue(job)
+
+    loaded = await queue.get("job-001")
+    assert loaded is not None
+    data = loaded.model_dump()
+    assert "chapter_content" not in data
+
+
+@pytest.mark.asyncio
+async def test_retry_job_with_source_ref_can_be_resolved():
+    from novelforge.services.retry_content_resolver import RetryContentResolver
+    from novelforge.services.retry_queue import RetrySourceRef
+
+    class FakeContentItem:
+        def __init__(self, content_id, content, session_id):
+            self.metadata = type("Metadata", (), {
+                "id": content_id,
+                "session_id": session_id,
+                "type": "chapter",
+            })()
+            self.content = content
+
+    class FakeContentManager:
+        def __init__(self, items):
+            self._items = {item.metadata.id: item for item in items}
+
+        async def get_content(self, content_id):
+            return self._items.get(content_id)
+
+    item = FakeContentItem("chapter-1", "这是正文内容", "session-a")
+    manager = FakeContentManager([item])
+    resolver = RetryContentResolver(content_manager=manager)
+
+    source_ref = RetrySourceRef(
+        kind="content_item",
+        content_id="chapter-1",
+        session_id="session-a",
+    )
+    job = _make_job(source_ref=source_ref)
+    result = await resolver.resolve(job)
+
+    assert result["id"] == "chapter-1"
+    assert result["content"] == "这是正文内容"
+
+
+@pytest.mark.asyncio
+async def test_retry_job_without_source_ref_fails_resolution():
+    from novelforge.services.retry_content_resolver import RetryContentResolver
+
+    resolver = RetryContentResolver(content_manager=None)
+    job = _make_job(source_ref=None)
+
+    with pytest.raises(ValueError, match="retry_source_ref_missing"):
+        await resolver.resolve(job)
+
+
+@pytest.mark.asyncio
+async def test_mark_deferred_persists_state():
+    storage = MemoryStorage()
+    attempt_store = AttemptStore(storage_manager=storage)
+    queue = RetryQueue(storage_manager=storage, attempt_store=attempt_store)
+
+    job = _make_job()
+    await queue.enqueue(job)
+    await queue.mark_deferred("job-001", "budget_exhausted", delay_seconds=300.0)
+
+    loaded = await queue.get("job-001")
+    assert loaded is not None
+    assert loaded.status == "waiting"
+    assert loaded.last_error_type == "budget_exhausted"
+    assert loaded.next_retry_at is not None
+
+
+@pytest.mark.asyncio
+async def test_mark_deferred_updates_stats():
+    storage = MemoryStorage()
+    attempt_store = AttemptStore(storage_manager=storage)
+    queue = RetryQueue(storage_manager=storage, attempt_store=attempt_store)
+
+    job = _make_job()
+    await queue.enqueue(job)
+    await queue.mark_deferred("job-001", "budget_exhausted")
+
+    stats = await queue.stats()
+    assert stats.waiting_count == 1
+    assert stats.pending_count == 0
+
+
+@pytest.mark.asyncio
+async def test_deferred_job_not_in_pending_list():
+    storage = MemoryStorage()
+    attempt_store = AttemptStore(storage_manager=storage)
+    queue = RetryQueue(storage_manager=storage, attempt_store=attempt_store)
+
+    job = _make_job()
+    await queue.enqueue(job)
+    await queue.mark_deferred("job-001", "budget_exhausted")
+
+    pending = await queue.list_pending()
+    assert len(pending) == 0

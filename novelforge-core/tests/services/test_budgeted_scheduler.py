@@ -55,8 +55,10 @@ def test_budget_state_starts_empty():
     state = BudgetState()
     assert state.model_calls_used == 0
     assert state.tokens_used == 0
-    assert state.completed_chapters == []
+    assert state.accepted_count == 0
+    assert state.skipped_chapters == []
     assert state.deferred_chapters == []
+    assert state.deferred_by_reason == {}
 
 
 def test_work_item_validates_phase():
@@ -175,3 +177,52 @@ def test_disabled_scheduler_accepts_all():
     result = scheduler.plan(items)
     assert len(result.accepted) == 3
     assert len(result.deferred) == 0
+
+
+def test_summary_accepted_count_distinct_from_model_calls():
+    scheduler = BudgetedScheduler(policy=make_policy(max_model_calls=10))
+    items = [
+        make_item(chapter_id="ch-1", estimated_model_calls=3),
+        make_item(chapter_id="ch-2", estimated_model_calls=5),
+    ]
+    result = scheduler.plan(items)
+    summary = scheduler.summary()
+    assert summary.total_accepted == 2
+    assert summary.model_calls_used == 8
+
+
+def test_summary_skipped_counts_successful_chapters():
+    scheduler = BudgetedScheduler(policy=make_policy())
+    items = [
+        make_item(chapter_id="ch-1"),
+        make_item(chapter_id="ch-2"),
+        make_item(chapter_id="ch-3"),
+    ]
+    result = scheduler.plan(items, successful_chapter_ids=["ch-1", "ch-2"])
+    summary = scheduler.summary()
+    assert summary.total_skipped == 2
+    assert summary.total_accepted == 1
+
+
+def test_token_budget_defers_when_exceeded():
+    scheduler = BudgetedScheduler(policy=make_policy(max_estimated_tokens=5000))
+    items = [
+        make_item(chapter_id="ch-1", estimated_tokens=4000),
+        make_item(chapter_id="ch-2", estimated_tokens=4000),
+    ]
+    result = scheduler.plan(items)
+    assert len(result.accepted) == 1
+    assert len(result.deferred) == 1
+    assert result.deferred[0].reason == "budget_exhausted"
+
+
+def test_deferred_by_reason_aggregation():
+    scheduler = BudgetedScheduler(policy=make_policy(max_model_calls=1))
+    items = [
+        make_item(chapter_id="ch-1"),
+        make_item(chapter_id="ch-2"),
+        make_item(chapter_id="ch-3"),
+    ]
+    result = scheduler.plan(items)
+    summary = scheduler.summary()
+    assert summary.deferred_by_reason.get("budget_exhausted") == 2

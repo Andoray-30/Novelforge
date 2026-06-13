@@ -25,8 +25,10 @@ class BudgetPolicy:
 class BudgetState:
     model_calls_used: int = 0
     tokens_used: int = 0
-    completed_chapters: List[str] = field(default_factory=list)
+    accepted_count: int = 0
+    skipped_chapters: List[str] = field(default_factory=list)
     deferred_chapters: List[str] = field(default_factory=list)
+    deferred_by_reason: Dict[str, int] = field(default_factory=dict)
     started_at_monotonic: float = field(default_factory=time.monotonic)
 
 
@@ -55,6 +57,7 @@ class BudgetSummary:
     total_accepted: int = 0
     total_deferred: int = 0
     total_skipped: int = 0
+    model_calls_used: int = 0
     model_calls_remaining: int = 0
     tokens_remaining: int = 0
     wall_clock_remaining: float = 0.0
@@ -84,10 +87,12 @@ class BudgetedScheduler:
         for item in sorted_items:
             if item.chapter_id in successful:
                 result.skipped.append(item)
+                self.state.skipped_chapters.append(item.chapter_id)
                 continue
 
             if not self.policy.enabled:
                 result.accepted.append(item)
+                self.state.accepted_count += 1
                 accepted_by_phase[item.phase] = accepted_by_phase.get(item.phase, 0) + 1
                 continue
 
@@ -95,11 +100,14 @@ class BudgetedScheduler:
                 item.reason = "budget_exhausted"
                 result.deferred.append(item)
                 self.state.deferred_chapters.append(item.chapter_id)
+                self.state.deferred_by_reason["budget_exhausted"] = self.state.deferred_by_reason.get("budget_exhausted", 0) + 1
                 continue
 
             result.accepted.append(item)
+            self.state.accepted_count += 1
             accepted_by_phase[item.phase] = accepted_by_phase.get(item.phase, 0) + 1
             self.state.model_calls_used += item.estimated_model_calls
+            self.state.tokens_used += item.estimated_tokens
 
         return result
 
@@ -121,15 +129,15 @@ class BudgetedScheduler:
         elapsed = now - self.state.started_at_monotonic
         wall_remaining = max(0, self.policy.max_wall_clock_seconds - elapsed)
 
-        deferred_by_reason: Dict[str, int] = {}
         return BudgetSummary(
-            total_accepted=self.state.model_calls_used,
+            total_accepted=self.state.accepted_count,
             total_deferred=len(self.state.deferred_chapters),
-            total_skipped=len(self.state.completed_chapters),
+            total_skipped=len(self.state.skipped_chapters),
+            model_calls_used=self.state.model_calls_used,
             model_calls_remaining=max(0, self.policy.max_model_calls - self.state.model_calls_used),
             tokens_remaining=max(0, self.policy.max_estimated_tokens - self.state.tokens_used),
             wall_clock_remaining=wall_remaining,
-            deferred_by_reason=deferred_by_reason,
+            deferred_by_reason=dict(self.state.deferred_by_reason),
         )
 
     def _has_budget_for(self, item: BudgetedWorkItem, accepted_by_phase: Dict[str, int]) -> bool:

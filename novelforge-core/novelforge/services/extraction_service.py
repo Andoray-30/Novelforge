@@ -246,7 +246,7 @@ class ExtractionService:
 
         retry_stats = None
         if self.retry_queue and result.diagnostics.failed_chapters and not suppress_auto_enqueue:
-            from .retry_queue import RetryJob
+            from .retry_queue import RetryJob, RetrySourceRef
             from .error_classifier import is_retryable
 
             for failed in result.diagnostics.failed_chapters:
@@ -255,11 +255,12 @@ class ExtractionService:
                     continue
                 if await self.retry_queue.should_skip_chapter(failed.get("chapter_id", ""), session_id=session_id):
                     continue
-                chapter_content = ""
-                for ch in chapters:
-                    if ch.get("id") == failed.get("chapter_id"):
-                        chapter_content = ch.get("content", "")
-                        break
+                source_ref = RetrySourceRef(
+                    kind="content_item",
+                    content_id=failed.get("chapter_id", ""),
+                    session_id=session_id or "",
+                    parent_id=parent_id,
+                )
                 job = RetryJob(
                     job_id=str(uuid.uuid4())[:20],
                     session_id=session_id or "",
@@ -270,7 +271,7 @@ class ExtractionService:
                     error_message=failed.get("error_message", ""),
                     original_attempt_id=f"{failed.get('chapter_id', '')}-attempt-final",
                     model_used=failed.get("model_used", ""),
-                    chapter_content=chapter_content,
+                    source_ref=source_ref,
                 )
                 await self.retry_queue.enqueue(job)
             retry_stats = await self.retry_queue.stats(session_id=session_id)
@@ -533,6 +534,7 @@ class ExtractionService:
                 phase="retry",
                 retry_count=job.retry_count,
             )):
+                await self.retry_queue.mark_deferred(job.job_id, "budget_exhausted")
                 deferred += 1
                 continue
 

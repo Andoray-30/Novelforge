@@ -2427,8 +2427,13 @@ async def retry_attempt(attempt_id: str, request: RetryAttemptRequest):
                status_code=status.HTTP_400_BAD_REQUEST,
                detail="该章节已成功，无需重试",
            )
-       from ..services.retry_queue import RetryJob
+       from ..services.retry_queue import RetryJob, RetrySourceRef
        import uuid as _uuid
+       source_ref = RetrySourceRef(
+           kind="content_item",
+           content_id=record.chapter_id,
+           session_id=request.session_id,
+       )
        job = RetryJob(
            job_id=str(_uuid.uuid4())[:20],
            session_id=request.session_id,
@@ -2439,6 +2444,7 @@ async def retry_attempt(attempt_id: str, request: RetryAttemptRequest):
            error_message=record.error_message or "",
            original_attempt_id=attempt_id,
            model_used=record.model_used,
+           source_ref=source_ref,
        )
        job_id = await retry_queue.enqueue(job)
        return {"job_id": job_id, "status": "queued"}
