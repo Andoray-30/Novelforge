@@ -87,6 +87,10 @@ class Config:
                 "NOVELFORGE_JUDGE_MODELS",
                 [self.pro_model, self.model, *self.fallback_models],
             ),
+            "schema_repair": self._model_pool_from_env(
+                "NOVELFORGE_SCHEMA_REPAIR_MODELS",
+                [self.fast_model, self.model, *self.fallback_models],
+            ),
         }
         self.model_role_settings: dict[str, dict[str, float | int]] = {
             "extractor_fast": self._model_role_settings_from_env(
@@ -130,6 +134,13 @@ class Config:
                 concurrency=2,
                 chunk_size=4000,
                 max_tokens=3000,
+            ),
+            "schema_repair": self._model_role_settings_from_env(
+                "NOVELFORGE_SCHEMA_REPAIR",
+                timeout=120.0,
+                concurrency=2,
+                chunk_size=4000,
+                max_tokens=4000,
             ),
         }
         

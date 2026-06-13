@@ -976,6 +976,7 @@ def test_chapter_index_repair_strategy_combines_error_type_actions():
     assert strategy["actions"] == [
         "cooldown_and_lower_concurrency",
         "prefer_json_repair",
+        "schema_repair_first",
         "switch_model_after_empty_content",
     ]
     assert strategy["runtime_settings_overrides"]["concurrency"] == 1
@@ -1065,7 +1066,7 @@ def test_chapter_index_rerun_splits_batches_by_error_type():
         for call in calls
     }
     assert actions_by_chapter["chapter-timeout"] == ["shrink_chunk_and_extend_timeout"]
-    assert actions_by_chapter["chapter-json"] == ["prefer_json_repair"]
+    assert actions_by_chapter["chapter-json"] == ["prefer_json_repair", "schema_repair_first"]
     assert storage.saved["chapter_index_run_repair-split"]["repair_strategy"]["split_by_error_type"] is True
     assert storage.saved["chapter_index_run_repair-split"]["repair_strategy"]["batch_count"] == 2
     assert len(result["analysis_diagnostics"]["repair_strategy_batches"]) == 2

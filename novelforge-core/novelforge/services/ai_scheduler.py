@@ -516,6 +516,7 @@ class AITaskScheduler:
             actions.append("prefer_json_repair")
             runtime_overrides["max_tokens"] = int(max(base_number("max_tokens", 3000), 4000))
             runtime_overrides["timeout"] = max(base_number("timeout", 300.0), 300.0)
+            actions.append("schema_repair_first")
 
         if "empty_content" in error_types:
             actions.append("switch_model_after_empty_content")

@@ -18,6 +18,7 @@ ROLE_LATENCY_TOLERANCE_MS = {
     "judge": 45_000,
     "extractor_deep": 90_000,
     "writer_pro": 90_000,
+    "schema_repair": 30_000,
 }
 
 

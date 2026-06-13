@@ -107,13 +107,30 @@ class ExtractionService:
         role: str,
         runtime_settings: Optional[Dict[str, Any]] = None,
     ) -> ChapterIndexExtractor:
+        from .schema_repairer import LocalJsonRepairer, ModelSchemaRepairer, SchemaRepairer
+
         settings = self._model_role_settings(role, runtime_settings)
+
+        schema_repairer = None
+        if getattr(self.config, "enable_schema_repair", True):
+            local_repairer = LocalJsonRepairer()
+            model_repairer = None
+            if getattr(self.config, "enable_model_schema_repair", True):
+                repair_settings = self._model_role_settings("schema_repair")
+                repair_timeout = float(repair_settings.get("timeout", 120.0))
+                model_repairer = ModelSchemaRepairer(ai_service=ai_service, timeout=repair_timeout)
+            schema_repairer = SchemaRepairer(
+                local_repairer=local_repairer,
+                model_repairer=model_repairer,
+            )
+
         return ChapterIndexExtractor(
             config=self._chapter_index_config_for_role(role, settings),
             ai_service=ai_service,
             diagnostics_recorder=diagnostics_recorder,
             chapter_concurrency=int(settings["concurrency"]) if "concurrency" in settings else None,
             max_tokens=int(settings["max_tokens"]) if "max_tokens" in settings else None,
+            schema_repairer=schema_repairer,
         )
 
     async def extract_characters(self, text: str) -> List[Character]:

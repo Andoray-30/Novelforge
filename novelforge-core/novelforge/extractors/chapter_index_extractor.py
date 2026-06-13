@@ -172,12 +172,14 @@ class ChapterIndexExtractor:
         max_tokens: Optional[int] = None,
         attempt_store: Optional[Any] = None,
         deadline_seconds: Optional[float] = None,
+        schema_repairer: Optional[Any] = None,
     ):
         self.ai_service = ai_service
         self.config = config or ExtractionConfig(timeout=180.0, max_retries=1, retry_delay=1.0)
         self.diagnostics_recorder = diagnostics_recorder
         self.attempt_store = attempt_store
         self.deadline_seconds = deadline_seconds
+        self.schema_repairer = schema_repairer
         self.chapter_concurrency = self._clamp_int(
             chapter_concurrency if chapter_concurrency is not None else self._resolve_chapter_concurrency(),
             minimum=1,
@@ -380,6 +382,38 @@ class ChapterIndexExtractor:
             except Exception as exc:
                 last_error = exc
                 is_final_attempt = attempt >= max_retries - 1
+
+                # Attempt schema repair for JSON parse errors
+                repair_result = None
+                if self.schema_repairer is not None and self._is_json_error(exc) and response:
+                    repair_result = await self.schema_repairer.repair(response)
+                    if repair_result.success:
+                        try:
+                            index = self._parse_chapter_response(repair_result.repaired_text, chapter)
+                            record = self._build_attempt_record(
+                                chapter,
+                                attempt_number=attempt + 1,
+                                status="success",
+                                latency_ms=self._elapsed_ms(started),
+                                raw_response=response,
+                                parsed_candidate_counts=self._index_candidate_counts(index),
+                                retry_count=attempt,
+                                needs_retry=False,
+                                deadline_remaining_ms=deadline.remaining_ms if deadline else None,
+                                raw_response_text=response[:2000] if response else None,
+                                repair_layer=repair_result.repair_layer,
+                                repair_fixes=repair_result.fixes_applied,
+                                repair_model_used=repair_result.model_used,
+                                repair_latency_ms=repair_result.latency_ms,
+                            )
+                            attempts.append(record)
+                            await self._record_diagnostic_event({"event_type": "attempt", "record": record})
+                            await self._persist_attempt(chapter, attempt, record)
+                            return index, attempts
+                        except Exception:
+                            # Repair succeeded but parse still failed
+                            pass
+
                 record = self._build_attempt_record(
                     chapter,
                     attempt_number=attempt + 1,
@@ -389,6 +423,11 @@ class ChapterIndexExtractor:
                     retry_count=attempt,
                     needs_retry=is_final_attempt,
                     deadline_remaining_ms=deadline.remaining_ms if deadline else None,
+                    raw_response_text=response[:2000] if response else None,
+                    repair_layer=repair_result.repair_layer if repair_result else None,
+                    repair_fixes=repair_result.fixes_applied if repair_result else [],
+                    repair_model_used=repair_result.model_used if repair_result else None,
+                    repair_latency_ms=repair_result.latency_ms if repair_result else 0,
                 )
                 attempts.append(record)
                 await self._record_diagnostic_event({"event_type": "attempt", "record": record})
@@ -438,6 +477,11 @@ class ChapterIndexExtractor:
         retry_count: int = 0,
         needs_retry: bool = False,
         deadline_remaining_ms: Optional[int] = None,
+        raw_response_text: Optional[str] = None,
+        repair_layer: Optional[str] = None,
+        repair_fixes: Optional[List[str]] = None,
+        repair_model_used: Optional[str] = None,
+        repair_latency_ms: int = 0,
     ) -> Dict[str, Any]:
         response_text = raw_response or ""
         model_used = self._current_model_name()
@@ -460,6 +504,11 @@ class ChapterIndexExtractor:
             "retry_count": retry_count,
             "needs_retry": bool(needs_retry),
             "deadline_remaining_ms": deadline_remaining_ms,
+            "raw_response_text": raw_response_text,
+            "repair_layer": repair_layer,
+            "repair_fixes": repair_fixes or [],
+            "repair_model_used": repair_model_used,
+            "repair_latency_ms": repair_latency_ms,
         }
         return record
 
@@ -541,6 +590,13 @@ class ChapterIndexExtractor:
         if "empty content" in text:
             return "empty_content"
         return error.__class__.__name__
+
+    @staticmethod
+    def _is_json_error(error: Exception) -> bool:
+        if isinstance(error, json.JSONDecodeError):
+            return True
+        text = str(error).lower()
+        return "json" in text or "parse" in text or "expecting" in text
 
     def _build_chapter_prompt(self, chapter: ChapterSource) -> str:
         return f"""你是小说创作分析助手。请为单章建立结构化索引，目标是帮助后续 AI 写出动人、优美、有情绪张力的小说序章。

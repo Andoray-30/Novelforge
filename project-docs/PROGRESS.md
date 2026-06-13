@@ -11,6 +11,50 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-06-04 Phase B: SchemaRepairer + 格式校准模型
+
+### 本轮完成
+- 实现 SchemaRepairer v1（两层修复架构）：
+  - LocalJsonRepairer：确定性 JSON 修复（code fence、尾逗号、缺失括号、BOM 等）
+  - ModelSchemaRepairer：AI 格式校准（通过 schema_repair 角色模型）
+  - SchemaRepairer 编排器：Local → Model 流水线
+- 添加 schema_repair 模型角色：
+  - config.py：model_pools 和 model_role_settings
+  - model_health.py：ROLE_LATENCY_TOLERANCE_MS
+  - .env.example：5 个新环境变量
+- 扩展 AttemptRecord 修复跟踪字段：
+  - raw_response_text、repair_layer、repair_fixes、repair_model_used、repair_latency_ms
+  - AttemptStats 新增修复统计
+- 集成到 ChapterIndexExtractor（待完成）
+
+### 新增文件
+- `novelforge-core/novelforge/services/schema_repairer.py` — SchemaRepairer 模块
+- `novelforge-core/tests/services/test_local_json_repairer.py` — 17 个测试
+- `novelforge-core/tests/services/test_model_schema_repairer.py` — 6 个测试
+- `novelforge-core/tests/services/test_schema_repairer.py` — 8 个测试
+
+### 修改文件
+- `novelforge-core/novelforge/core/config.py` — 添加 schema_repair 角色
+- `novelforge-core/novelforge/services/model_health.py` — 添加延迟容忍
+- `novelforge-core/novelforge/services/attempt_store.py` — 添加修复跟踪字段
+
+### 验证
+- `pytest novelforge-core/tests/services/test_local_json_repairer.py -v`：17 passed
+- `pytest novelforge-core/tests/services/test_model_schema_repairer.py -v`：6 passed
+- `pytest novelforge-core/tests/services/test_schema_repairer.py -v`：8 passed
+- `pytest novelforge-core/tests/services/test_attempt_store.py -v`：11 passed（向后兼容）
+
+### 当前边界
+- SchemaRepairer 尚未集成到 ChapterIndexExtractor
+- schema_repair 角色模型尚未实际配置
+- 格式校准模型不接收原文章节全文
+- 本阶段解决的是结构化成功率，不等于内容质量已解决
+
+### 下一步建议
+- 集成 SchemaRepairer 到 ChapterIndexExtractor
+- 配置 schema_repair 角色模型
+- 实现 Retry Queue、Budgeted Scheduler、PerformanceProfile、ModelRouter
+
 ## 2026-06-04 Phase A: AttemptStore + Deadline 实现
 
 ### 本轮完成

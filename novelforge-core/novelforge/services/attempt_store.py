@@ -49,6 +49,13 @@ class AttemptRecord(BaseModel):
     deadline_remaining_ms: Optional[int] = None
     created_at: str = Field(default_factory=_now_iso)
 
+    # Schema repair tracking fields
+    raw_response_text: Optional[str] = None  # Truncated to 2000 chars on failure
+    repair_layer: Optional[str] = None  # "local" | "model" | None
+    repair_fixes: List[str] = Field(default_factory=list)
+    repair_model_used: Optional[str] = None
+    repair_latency_ms: int = 0
+
 
 class AttemptStats(BaseModel):
     """Aggregated statistics for attempt records."""
@@ -63,6 +70,12 @@ class AttemptStats(BaseModel):
     error_breakdown: Dict[str, int] = Field(default_factory=dict)
     chapters_with_attempts: int = 0
     chapters_needing_retry: int = 0
+
+    # Schema repair statistics
+    repair_local_count: int = 0
+    repair_model_count: int = 0
+    repair_failed_count: int = 0
+    repair_success_rate: float = 0.0
 
 
 class AttemptStore:
@@ -154,6 +167,13 @@ class AttemptStore:
         chapters = set(r.chapter_id for r in records)
         chapters_needing_retry = set(r.chapter_id for r in records if r.needs_retry)
 
+        # Schema repair statistics
+        repair_local = sum(1 for r in records if r.repair_layer == "local")
+        repair_model = sum(1 for r in records if r.repair_layer == "model")
+        repair_failed = sum(1 for r in records if r.repair_layer is not None and r.status == "failed")
+        repair_total = repair_local + repair_model + repair_failed
+        repair_success_rate = (repair_local + repair_model) / repair_total if repair_total > 0 else 0.0
+
         return AttemptStats(
             total_attempts=total,
             success_count=success,
@@ -165,4 +185,8 @@ class AttemptStore:
             error_breakdown=error_breakdown,
             chapters_with_attempts=len(chapters),
             chapters_needing_retry=len(chapters_needing_retry),
+            repair_local_count=repair_local,
+            repair_model_count=repair_model,
+            repair_failed_count=repair_failed,
+            repair_success_rate=repair_success_rate,
         )
