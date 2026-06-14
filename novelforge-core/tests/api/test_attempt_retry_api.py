@@ -145,3 +145,125 @@ def test_retry_queue_response_includes_safe_source_ref_metadata(client):
         if "source_ref" in item and item["source_ref"]:
             assert "kind" in item["source_ref"]
             assert "content_id" in item["source_ref"]
+
+
+def test_get_performance_profile_returns_empty_for_no_data(client):
+    """GET /api/extraction/performance-profile returns empty for no data."""
+    response = client.get("/api/extraction/performance-profile?session_id=test-profile-empty")
+    assert response.status_code == 200
+    data = response.json()
+    assert "profiles" in data
+    assert "generated_at" in data
+    assert "source_attempt_count" in data
+    assert "warnings" in data
+    assert data["profiles"] == []
+    assert data["source_attempt_count"] == 0
+
+
+def test_get_performance_profile_with_scope_session(client):
+    """GET /api/extraction/performance-profile supports scope=session."""
+    response = client.get(
+        "/api/extraction/performance-profile?session_id=test-profile-session&scope=session"
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "profiles" in data
+
+
+def test_get_performance_profile_with_scope_global(client):
+    """GET /api/extraction/performance-profile supports scope=global."""
+    response = client.get(
+        "/api/extraction/performance-profile?session_id=global-placeholder&scope=global"
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "profiles" in data
+
+
+def test_get_performance_profile_with_model_filter(client):
+    """GET /api/extraction/performance-profile supports model_used filter."""
+    response = client.get(
+        "/api/extraction/performance-profile?session_id=test-profile-model&model_used=gpt-4"
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "profiles" in data
+
+
+def test_get_performance_profile_with_role_filter(client):
+    """GET /api/extraction/performance-profile supports task_role filter."""
+    response = client.get(
+        "/api/extraction/performance-profile?session_id=test-profile-role&task_role=extractor_fast"
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "profiles" in data
+
+
+def test_get_performance_profile_with_bucket_filter(client):
+    """GET /api/extraction/performance-profile supports token_bucket filter."""
+    response = client.get(
+        "/api/extraction/performance-profile?session_id=test-profile-bucket&token_bucket=medium"
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "profiles" in data
+
+
+def test_post_rebuild_performance_profile(client):
+    """POST /api/extraction/performance-profile/rebuild returns profiles."""
+    response = client.post(
+        "/api/extraction/performance-profile/rebuild",
+        json={"session_id": "test-rebuild", "scope": "session"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "profiles" in data
+    assert "generated_at" in data
+
+
+def test_post_rebuild_global_performance_profile(client):
+    """POST /api/extraction/performance-profile/rebuild supports global scope."""
+    response = client.post(
+        "/api/extraction/performance-profile/rebuild",
+        json={"session_id": "", "scope": "global"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "profiles" in data
+
+
+def test_performance_profile_no_raw_response_text(client):
+    """PerformanceProfile API must not expose raw_response_text."""
+    response = client.get(
+        "/api/extraction/performance-profile?session_id=test-profile-safe"
+    )
+    assert response.status_code == 200
+    data = response.json()
+    for profile in data.get("profiles", []):
+        assert "raw_response_text" not in profile
+        assert "raw_response_preview" not in profile
+
+
+def test_performance_profile_no_chapter_content(client):
+    """PerformanceProfile API must not expose chapter content."""
+    response = client.get(
+        "/api/extraction/performance-profile?session_id=test-profile-no-content"
+    )
+    assert response.status_code == 200
+    data = response.json()
+    for profile in data.get("profiles", []):
+        assert "chapter_content" not in profile
+        assert "chapter_text" not in profile
+
+
+def test_performance_profile_has_metrics_fields(client):
+    """PerformanceProfile response must contain metrics fields."""
+    response = client.get(
+        "/api/extraction/performance-profile?session_id=test-profile-metrics"
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "profiles" in data
+    assert "generated_at" in data
+    assert "source_attempt_count" in data

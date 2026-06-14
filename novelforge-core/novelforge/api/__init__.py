@@ -2457,6 +2457,64 @@ async def retry_attempt(attempt_id: str, request: RetryAttemptRequest):
        )
 
 
+@app.get("/api/extraction/performance-profile", response_model=dict)
+async def get_performance_profile(
+    session_id: str = Query(..., min_length=1),
+    scope: str = Query("session"),
+    model_used: Optional[str] = Query(None),
+    task_role: Optional[str] = Query(None),
+    token_bucket: Optional[str] = Query(None),
+):
+    try:
+        from ..services.performance_profile import PerformanceProfileService
+        service = PerformanceProfileService(
+            attempt_store=attempt_store,
+            retry_queue=retry_queue,
+            model_pools=getattr(config, "model_pools", {}),
+        )
+        result = await service.compute_profiles(
+            session_id=session_id,
+            scope=scope,
+            model_used=model_used,
+            task_role=task_role,
+            token_bucket=token_bucket,
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Performance profile 查询失败: {str(e)}",
+        )
+
+
+@app.post("/api/extraction/performance-profile/rebuild", response_model=dict)
+async def rebuild_performance_profile(request: dict):
+    try:
+        session_id = request.get("session_id", "")
+        scope = request.get("scope", "session")
+        from ..services.performance_profile import (
+            PerformanceProfileService,
+            PerformanceProfileStore,
+        )
+        profile_store = PerformanceProfileStore(storage_manager)
+        service = PerformanceProfileService(
+            attempt_store=attempt_store,
+            retry_queue=retry_queue,
+            model_pools=getattr(config, "model_pools", {}),
+            profile_store=profile_store,
+        )
+        result = await service.compute_profiles(
+            session_id=session_id,
+            scope=scope,
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Performance profile rebuild 失败: {str(e)}",
+        )
+
+
 # Content management endpoints.
 @app.post("/api/content/create", response_model=dict)
 async def create_content(request: ContentCreateRequest):

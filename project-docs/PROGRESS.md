@@ -11,6 +11,66 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-06-14 Phase E: PerformanceProfile v1
+
+### 本轮完成
+- 实现 PerformanceProfile 模块（performance_profile.py）：
+  - PerformanceProfileKey：scope、session_id、model_used、task_role、token_bucket
+  - PerformanceProfileMetrics：total_attempts、success_rate、latency percentiles、error breakdown、repair/retry salvage rates、confidence_level、recommendation_hint
+  - PerformanceProfile：key + metrics + generated_at + source_attempt_count
+  - token_bucket()：small (<3k) / medium (3k-8k) / large (>8k)
+  - confidence_level()：low (<5) / medium (5-30) / high (≥30)
+  - percentile()：nearest-rank method with optional zero filtering
+  - derive_task_role()：从 model_pools 推导，repair_layer=="model" → schema_repair
+  - recommendation_hints()：基于 success_rate、latency、timeout_rate、json_invalid_rate 生成诊断建议
+- 实现 PerformanceProfileStore：
+  - 使用 StorageManager 持久化
+  - key 格式：perf_profile_{scope}_{session_id}_{model}_{role}_{bucket}
+  - 支持 rebuild 覆盖旧 profile
+  - 支持 session/global 区分
+- 实现 PerformanceProfileService：
+  - 从 AttemptStore 加载 attempt records
+  - 从 RetryQueue 加载 retry jobs
+  - 按 (model_used, task_role, token_bucket, session_id) 分组
+  - 单次遍历聚合所有指标
+  - 支持 model_used、task_role、token_bucket 过滤
+- 新增 API 端点：
+  - GET /api/extraction/performance-profile
+  - POST /api/extraction/performance-profile/rebuild
+- 新增测试：
+  - 66 个服务测试（数据模型、辅助函数、聚合、存储）
+  - 11 个 API 测试（端点、过滤、安全输出）
+
+### 新增文件
+- `novelforge-core/novelforge/services/performance_profile.py` — PerformanceProfile 模块
+- `novelforge-core/tests/services/test_performance_profile.py` — 66 个测试
+
+### 修改文件
+- `novelforge-core/novelforge/api/__init__.py` — 添加 API 端点
+- `novelforge-core/tests/api/test_attempt_retry_api.py` — 添加 API 测试
+- `project-docs/PROGRESS.md` — 添加 Phase E 记录
+
+### 验证
+- `pytest tests/services/test_performance_profile.py -v`：66 passed
+- `pytest tests/api/test_attempt_retry_api.py -v`：28 passed
+- `pytest tests/ -v`：356 passed
+
+### 风险评估
+- **低风险**：PerformanceProfile 是独立模块，不修改现有逻辑
+- **低风险**：API 端点使用现有 attempt_store 和 retry_queue 实例
+- **低风险**：task_role 从 model_pools 推导，不修改 AttemptRecord schema
+
+### 当前状态
+- 能从 AttemptStore / RetryQueue 聚合模型表现
+- 能生成 per model / per task_role / per token bucket profile
+- 能计算 success_rate、error breakdown、latency p95、repair_salvage_rate、retry_salvage_rate
+- 能通过 API 查询 profile
+- 不泄露 raw response 或章节正文
+
+### 下一步建议
+- 可以进入 Phase F ModelRouter 实现
+- 可以进入 Phase G Deep Synthesis 实现
+
 ## 2026-06-04 Phase D.1: Budgeted Scheduler 语义收口与 SourceRef 回归修复
 
 ### 本轮完成
