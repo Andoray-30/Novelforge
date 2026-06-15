@@ -6,7 +6,7 @@ import json
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .ai_service import AIService
 from .model_health import list_model_health_events, rank_model_candidates_by_health
@@ -14,6 +14,137 @@ from ..core.config import Config
 
 
 EXTRACTOR_ROLES = {"extractor_fast", "extractor_deep", "extractor_repair"}
+
+
+ROLE_LATENCY_TOLERANCE_MS = {
+    "extractor_fast": 20_000,
+    "writer_fast": 20_000,
+    "extractor_repair": 45_000,
+    "judge": 45_000,
+    "extractor_deep": 90_000,
+    "writer_pro": 90_000,
+    "schema_repair": 30_000,
+}
+
+
+def rank_candidates_by_profile(
+    role: str,
+    candidates: List[str],
+    profiles: Dict[str, Dict[str, Any]],
+    token_bucket: Optional[str] = None,
+) -> Tuple[List[str], List[Dict[str, Any]]]:
+    if not profiles:
+        return candidates, []
+
+    rankings: List[Dict[str, Any]] = []
+    for index, model in enumerate(candidates):
+        profile = profiles.get(model)
+        if not profile:
+            rankings.append({
+                "model": model,
+                "score": 0,
+                "reason": "no_profile",
+                "original_index": index,
+                "confidence_level": "low",
+            })
+            continue
+
+        confidence = profile.get("confidence_level", "low")
+        success_rate = profile.get("success_rate", 0.0)
+        timeout_rate = profile.get("timeout_rate", 0.0)
+        json_invalid_rate = profile.get("json_invalid_rate", 0.0)
+        p95_latency_ms = profile.get("p95_latency_ms", 0.0)
+        repair_salvage_rate = profile.get("repair_salvage_rate", 0.0)
+        retry_salvage_rate = profile.get("retry_salvage_rate", 0.0)
+        budget_deferred_count = profile.get("budget_deferred_count", 0)
+        budget_exhausted_count = profile.get("budget_exhausted_count", 0)
+
+        if confidence == "low":
+            rankings.append({
+                "model": model,
+                "score": 0,
+                "reason": "low_confidence",
+                "original_index": index,
+                "confidence_level": confidence,
+                "success_rate": success_rate,
+                "p95_latency_ms": p95_latency_ms,
+            })
+            continue
+
+        score = 0
+        reasons: List[str] = []
+
+        score += int(success_rate * 100)
+        if success_rate >= 0.9:
+            reasons.append("high_success_rate")
+
+        latency_penalty = 0
+        tolerance = ROLE_LATENCY_TOLERANCE_MS.get(role, 30000)
+        if p95_latency_ms > tolerance:
+            overage = p95_latency_ms - tolerance
+            latency_penalty = min(30, int(overage / 1000))
+            reasons.append("high_latency")
+
+        if role == "extractor_deep":
+            latency_penalty = max(0, latency_penalty - 10)
+
+        score -= latency_penalty
+
+        timeout_penalty = int(timeout_rate * 50)
+        score -= timeout_penalty
+        if timeout_rate > 0.1:
+            reasons.append("high_timeout_rate")
+
+        json_penalty = int(json_invalid_rate * 40)
+        if role == "schema_repair":
+            if repair_salvage_rate > 0.5:
+                json_penalty = max(0, json_penalty - 20)
+                reasons.append("repairable_format")
+        score -= json_penalty
+
+        if role == "schema_repair":
+            repair_bonus = int(repair_salvage_rate * 30)
+            score += repair_bonus
+            if repair_salvage_rate > 0.5:
+                reasons.append("high_repair_salvage")
+
+        if json_invalid_rate > 0.2 and repair_salvage_rate > 0.3:
+            reasons.append("needs_schema_repair")
+
+        budget_penalty = (budget_deferred_count + budget_exhausted_count) * 5
+        score -= min(20, budget_penalty)
+
+        hint = profile.get("recommendation_hint", "")
+        hints_list = hint.split(",") if hint else []
+
+        hint_flags: List[str] = []
+        if "needs_schema_repair" in hints_list:
+            hint_flags.append("needs_schema_repair")
+        if "high_timeout_risk" in hints_list:
+            hint_flags.append("high_timeout_risk")
+        if "unstable_format" in hints_list:
+            hint_flags.append("unstable_format")
+
+        rankings.append({
+            "model": model,
+            "score": max(0, score),
+            "reason": ",".join(reasons) if reasons else "neutral",
+            "original_index": index,
+            "confidence_level": confidence,
+            "success_rate": success_rate,
+            "p95_latency_ms": p95_latency_ms,
+            "timeout_rate": timeout_rate,
+            "json_invalid_rate": json_invalid_rate,
+            "repair_salvage_rate": repair_salvage_rate,
+            "retry_salvage_rate": retry_salvage_rate,
+            "recommendation_hint": hint,
+            "hint_flags": hint_flags,
+        })
+
+    ranked = sorted(rankings, key=lambda x: x["score"], reverse=True)
+    ranked_candidates = [r["model"] for r in ranked]
+
+    return ranked_candidates, ranked
 
 
 @dataclass
@@ -74,6 +205,9 @@ class ModelRouteDecision:
     probe_results: List[ModelProbeResult] = field(default_factory=list)
     original_candidates: List[str] = field(default_factory=list)
     health_rankings: List[Dict[str, Any]] = field(default_factory=list)
+    profile_rankings: List[Dict[str, Any]] = field(default_factory=list)
+    profile_confidence: Optional[str] = None
+    profile_warnings: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         payload = {
@@ -88,7 +222,33 @@ class ModelRouteDecision:
         if self.health_rankings:
             payload["health_rankings"] = self.health_rankings
             payload["candidate_order_source"] = "health_history"
+        if self.profile_rankings:
+            payload["profile_rankings"] = self.profile_rankings
+            payload["profile_order_source"] = "performance_profile"
+        if self.profile_confidence:
+            payload["profile_confidence"] = self.profile_confidence
+        if self.profile_warnings:
+            payload["profile_warnings"] = self.profile_warnings
+        selected_profile = self._selected_profile_summary()
+        if selected_profile:
+            payload["selected_profile_hint"] = selected_profile.get("recommendation_hint", "")
+            payload["selected_profile_metrics"] = selected_profile
         return payload
+
+    def _selected_profile_summary(self) -> Optional[Dict[str, Any]]:
+        if not self.profile_rankings:
+            return None
+        for ranking in self.profile_rankings:
+            if ranking.get("model") == self.selected_model:
+                return {
+                    "success_rate": ranking.get("success_rate", 0.0),
+                    "p95_latency_ms": ranking.get("p95_latency_ms", 0.0),
+                    "timeout_rate": ranking.get("timeout_rate", 0.0),
+                    "repair_salvage_rate": ranking.get("repair_salvage_rate", 0.0),
+                    "confidence_level": ranking.get("confidence_level", "low"),
+                    "recommendation_hint": ranking.get("recommendation_hint", ""),
+                }
+        return None
 
 
 class ModelRouter:
@@ -118,11 +278,13 @@ class ModelRouter:
         *,
         storage: Any = None,
         clock: Callable[[], float] = time.time,
+        profile_store: Any = None,
     ):
         self.ai_service = ai_service
         self.config = config
         self.storage = storage
         self.clock = clock
+        self.profile_store = profile_store
         self.cooldowns: Dict[str, float] = {}
         self.last_decisions: Dict[str, ModelRouteDecision] = {}
 
@@ -150,6 +312,60 @@ class ModelRouter:
             session_id=session_id,
             parent_id=parent_id,
         )
+
+        profile_rankings: List[Dict[str, Any]] = []
+        profile_order_source: Optional[str] = None
+        profile_confidence: str = "low"
+        profile_warnings: List[str] = []
+
+        enable_profile = getattr(self.config, "enable_profile_routing", False)
+        if enable_profile and self.profile_store and session_id:
+            try:
+                scope = getattr(self.config, "profile_routing_scope", "session")
+                min_confidence = getattr(self.config, "profile_routing_min_confidence", "medium")
+                allow_low = getattr(self.config, "profile_routing_allow_low_confidence", False)
+
+                if scope == "session":
+                    profiles_list = await self.profile_store.list_by_scope("session", session_id)
+                else:
+                    profiles_list = await self.profile_store.list_by_scope("global", "")
+
+                if not profiles_list and scope == "session":
+                    profiles_list = await self.profile_store.list_by_scope("global", "")
+                    if profiles_list:
+                        profile_warnings.append("fallback_to_global")
+
+                profiles_by_model: Dict[str, Any] = {}
+                for p in profiles_list:
+                    if p.key.task_role == role:
+                        model = p.key.model_used
+                        if model not in profiles_by_model or p.key.scope == "session":
+                            profiles_by_model[model] = p
+
+                if profiles_by_model:
+                    can_use = False
+                    for p in profiles_by_model.values():
+                        cl = p.metrics.confidence_level
+                        if cl == "high":
+                            can_use = True
+                            profile_confidence = "high"
+                        elif cl == "medium" and min_confidence in ("medium", "low"):
+                            can_use = True
+                            if profile_confidence != "high":
+                                profile_confidence = "medium"
+                        elif cl == "low" and allow_low:
+                            if profile_confidence == "low":
+                                profile_confidence = "low"
+
+                    if can_use:
+                        profiles_metrics = {model: p.metrics.model_dump() for model, p in profiles_by_model.items()}
+                        candidates, profile_rankings = rank_candidates_by_profile(
+                            role, candidates, profiles_metrics
+                        )
+                        profile_order_source = "performance_profile"
+            except Exception:
+                profile_warnings.append("profile_lookup_failed")
+
         available_candidates = [model for model in candidates if not self._is_cooling_down(model)]
         if not available_candidates:
             decision = ModelRouteDecision(
@@ -159,6 +375,9 @@ class ModelRouter:
                 candidates=candidates,
                 original_candidates=original_candidates,
                 health_rankings=health_rankings,
+                profile_rankings=profile_rankings,
+                profile_confidence=profile_confidence,
+                profile_warnings=profile_warnings,
             )
             self.last_decisions[role] = decision
             return decision
@@ -172,6 +391,9 @@ class ModelRouter:
                 candidates=candidates,
                 original_candidates=original_candidates,
                 health_rankings=health_rankings,
+                profile_rankings=profile_rankings,
+                profile_confidence=profile_confidence,
+                profile_warnings=profile_warnings,
             )
             self.last_decisions[role] = decision
             return decision
@@ -189,6 +411,9 @@ class ModelRouter:
                     probe_results=probe_results,
                     original_candidates=original_candidates,
                     health_rankings=health_rankings,
+                    profile_rankings=profile_rankings,
+                    profile_confidence=profile_confidence,
+                    profile_warnings=profile_warnings,
                 )
                 self.last_decisions[role] = decision
                 return decision
@@ -203,6 +428,9 @@ class ModelRouter:
             probe_results=probe_results,
             original_candidates=original_candidates,
             health_rankings=health_rankings,
+            profile_rankings=profile_rankings,
+            profile_confidence=profile_confidence,
+            profile_warnings=profile_warnings,
         )
         self.last_decisions[role] = decision
         return decision

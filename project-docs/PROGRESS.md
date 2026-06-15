@@ -2,14 +2,117 @@
 
 ## 阅读导航
 - 本文档分为四层：
-  - 顶部“阶段审计结论”：用于快速判断系统当前状态、主要短板与未来规划。
-  - 中部“当前阶段 / 已完成 / 正在处理 / 待处理”：用于跟踪当前工作流状态。
-  - 下部“历史详细记录”：保留过去每一轮修复动作，不删历史，便于回溯排查。
+  - 顶部"阶段审计结论"：用于快速判断系统当前状态、主要短板与未来规划。
+  - 中部"当前阶段 / 已完成 / 正在处理 / 待处理"：用于跟踪当前工作流状态。
+  - 下部"历史详细记录"：保留过去每一轮修复动作，不删历史，便于回溯排查。
   - 文末新增记录继续按日期追加，但不再依赖对话记忆维护全局判断。
 - 阅读建议：
-  - 想知道系统现在到了哪一步，先看“2026-04-19 审计补充（桥接与显示层）”和“2026-04-18 阶段审计结论”。
-  - 想知道当前正在做什么，看“正在处理 / 待处理”。
-  - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
+  - 想知道系统现在到了哪一步，先看"2026-04-19 审计补充（桥接与显示层）"和"2026-04-18 阶段审计结论"。
+  - 想知道当前正在做什么，看"正在处理 / 待处理"。
+  - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
+
+## 2026-06-14 Phase F: Profile-aware ModelRouter v1
+
+### 本轮完成
+- 修复 PROGRESS.md 中重复的 Phase E.1 记录
+- 添加 profile routing 配置到 Config：
+  - NOVELFORGE_ENABLE_PROFILE_ROUTING (默认 false)
+  - NOVELFORGE_PROFILE_ROUTING_MIN_CONFIDENCE (默认 medium)
+  - NOVELFORGE_PROFILE_ROUTING_SCOPE (默认 session)
+  - NOVELFORGE_PROFILE_ROUTING_ALLOW_LOW_CONFIDENCE (默认 false)
+- 实现 rank_candidates_by_profile() 纯函数：
+  - 基于 success_rate、timeout_rate、json_invalid_rate、p95_latency_ms 排序
+  - 支持 extractor_fast、schema_repair、extractor_deep 角色特化
+  - low confidence 不做强烈排序
+  - needs_schema_repair 标记
+- 修改 ModelRouter 接入 PerformanceProfile：
+  - 接受可选 profile_store 参数
+  - select_model() 在 health ranking 后应用 profile ranking
+  - 不绕过 cooldown 和 probe 逻辑
+- 扩展 ModelRouteDecision 包含 profile 字段：
+  - profile_rankings
+  - profile_confidence
+  - profile_warnings
+  - selected_profile_hint
+  - selected_profile_metrics
+- 编写 27 个 profile routing 测试（全部通过）
+
+### 修改文件
+- `novelforge-core/novelforge/core/config.py` — 添加 profile routing 配置
+- `novelforge-core/novelforge/services/model_router.py` — 实现 profile-aware routing
+- `novelforge-core/tests/services/test_model_router.py` — 添加 profile routing 测试
+- `project-docs/PROGRESS.md` — 添加 Phase F 记录
+
+### 验证
+- `pytest tests/services/test_model_router.py -v`：27 passed
+- `pytest tests/ -q`：378 passed
+
+### 风险评估
+- **低风险**：默认关闭 profile routing，不改变现有行为
+- **低风险**：profile ranking 在 health ranking 之后、probe 之前，不绕过 cooldown
+- **低风险**：low confidence 不做强决策，只做诊断
+
+### 当前状态
+- ModelRouter 能读取 PerformanceProfile 并生成 profile ranking
+- 默认关闭 profile routing，不改变现有行为
+- 开启后可按 medium/high confidence profile 调整候选顺序
+- route decision 能解释为什么选某个模型
+- 无 profile / 低 confidence 时安全 fallback
+
+### 下一步建议
+- 可以进入 Phase F.1 前端路由诊断
+- 可以进入 Phase G Deep Synthesis 实现
+
+## 2026-06-15 Phase F: Profile-aware ModelRouter v1
+
+### 本轮完成
+- 修复 PROGRESS.md 重复的 Phase E.1 记录
+- 添加 profile routing 配置到 Config：
+  - NOVELFORGE_ENABLE_PROFILE_ROUTING=false（默认关闭）
+  - NOVELFORGE_PROFILE_ROUTING_MIN_CONFIDENCE=medium
+  - NOVELFORGE_PROFILE_ROUTING_SCOPE=session
+  - NOVELFORGE_PROFILE_ROUTING_ALLOW_LOW_CONFIDENCE=false
+- 实现 rank_candidates_by_profile() 纯函数：
+  - 按 confidence_level、success_rate、timeout_rate、json_invalid_rate、p95_latency 排序
+  - schema_repair 角色优先 repair_salvage_rate
+  - extractor_deep 对 latency 更容忍
+  - json_invalid_rate 高但 repair_salvage_rate 高时标记 needs_schema_repair
+  - low confidence 不强排序
+- 修改 ModelRouter 接入 PerformanceProfile：
+  - __init__ 新增 profile_store 参数
+  - select_model 在 health ranking 后、probe 前插入 profile ranking
+  - session 无 profile 时 fallback 到 global
+- 扩展 ModelRouteDecision 包含 profile 字段：
+  - profile_rankings、profile_confidence、profile_warnings
+  - to_dict() 包含 profile_order_source、selected_profile_hint、selected_profile_metrics
+- 编写 17 个新测试覆盖 profile routing
+
+### 修改文件
+- `novelforge-core/novelforge/core/config.py` — 添加 profile routing 配置
+- `novelforge-core/novelforge/services/model_router.py` — 接入 PerformanceProfile
+- `novelforge-core/tests/services/test_model_router.py` — 添加 profile routing 测试
+- `project-docs/PROGRESS.md` — 添加 Phase F 记录
+
+### 验证
+- `pytest tests/services/test_model_router.py -v`：27 passed
+- `pytest tests/ -q`：378 passed
+
+### 风险评估
+- **低风险**：默认关闭 profile routing，不改变现有行为
+- **低风险**：profile 不可用时安全 fallback 到 health/probe 逻辑
+- **低风险**：low confidence 不做强决策
+
+### 当前状态
+- ModelRouter 能读取 PerformanceProfile 并生成 profile ranking
+- 默认关闭 profile routing，不改变现有行为
+- 开启后可按 medium/high confidence profile 调整候选顺序
+- route decision 能解释为什么选某个模型
+- MiMo 这类格式不稳但可修复模型能被标记 needs_schema_repair
+- schema_repair 角色可以基于 repair_salvage_rate 排序
+
+### 下一步建议
+- 可以进入 Phase F.1 前端路由诊断
+- 可以进入 Phase G Deep Synthesis 实现
 
 ## 2026-06-14 Phase E.1: PerformanceProfile 语义收口
 
@@ -43,63 +146,14 @@
 - `project-docs/PROGRESS.md` — 添加 Phase E.1 记录
 
 ### 验证
-- `pytest tests/services/test_performance_profile.py -v`：67 passed
-- `pytest tests/api/test_attempt_retry_api.py -v`：30 passed
-- `pytest tests/ -v`：361 passed
-
-### 风险评估
-- **低风险**：所有改动都是语义修复，向后兼容
-- **低风险**：token_bucket 新增 unknown 值，不影响现有 small/medium/large
-- **低风险**：retry 归属使用 attempt_id 优先匹配，fallback 到 chapter_id
-
-### 当前状态
-- recommendation_hint 使用真实 task_role
-- retry stats 优先按 original_attempt_id 归属
-- token bucket 对 unknown/0 tokens 不污染 small
-- rebuild 会清理旧 profile
-- API scope 校验完善
-
-### 下一步建议
-- 可以进入 Phase F ModelRouter 实现
-- 可以进入 Phase G Deep Synthesis 实现
-
-## 2026-06-14 Phase E.1: PerformanceProfile 语义收口
-
-### 本轮完成
-- 修复 recommendation_hints 参数错误：
-  - 传入真实 task_role 而非 confidence_level
-  - extractor_fast / schema_repair 角色有不同 latency tolerance
-- 修复 token_bucket 语义：
-  - estimated_tokens=0 或负数 -> unknown
-  - small (1-2999) / medium (3000-8000) / large (>8000)
-- 修复 retry 统计归属：
-  - 优先使用 original_attempt_id 匹配 AttemptRecord.id
-  - 匹配失败时 fallback 到 chapter_id，并记录 retry_fallback_by_chapter_id warning
-  - 不再把同一 chapter 下不同模型的 retry 混到同一 profile
-- 修复 rebuild 语义：
-  - rebuild 先删除对应 scope/session 的旧 profile，再保存新 profile
-  - session rebuild 不删除 global profile
-  - global rebuild 不删除 session profile
-- 修复 API scope 校验：
-  - scope 只能是 session/global，其他值返回 400
-  - session scope 必须要求 session_id 非空
-
-### 修改文件
-- `novelforge-core/novelforge/services/performance_profile.py` — 修复语义
-- `novelforge-core/tests/services/test_performance_profile.py` — 更新测试
-- `novelforge-core/novelforge/api/__init__.py` — 添加 scope 校验
-- `novelforge-core/tests/api/test_attempt_retry_api.py` — 添加 scope 测试
-- `project-docs/PROGRESS.md` — 添加 Phase E.1 记录
-
-### 验证
 - `pytest tests/services/test_performance_profile.py -v`：68 passed
 - `pytest tests/api/test_attempt_retry_api.py -v`：33 passed
 - `pytest tests/ -v`：361 passed
 
 ### 风险评估
 - **低风险**：所有改动都是语义修复，向后兼容
-- **低风险**：token_bucket 新增 unknown 值，旧数据 small 仍有效
-- **低风险**：retry 归属优先使用 attempt_id，fallback 到 chapter_id
+- **低风险**：token_bucket 新增 unknown 值，不影响现有 small/medium/large
+- **低风险**：retry 归属使用 attempt_id 优先匹配，fallback 到 chapter_id
 
 ### 当前状态
 - recommendation_hint 使用真实 task_role

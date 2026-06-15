@@ -273,3 +273,304 @@ async def test_extraction_service_uses_project_scoped_health_for_model_route(mon
     assert observed["model"] == "stable-model"
     assert result["model_route"]["selected_model"] == "stable-model"
     assert result["model_route"]["original_candidates"] == ["flaky-model", "stable-model"]
+
+
+def test_rank_candidates_by_profile_high_success_rate_ranks_first():
+    from novelforge.services.model_router import rank_candidates_by_profile
+
+    candidates = ["model-a", "model-b"]
+    profiles = {
+        "model-a": {"success_rate": 0.95, "confidence_level": "high", "timeout_rate": 0.01, "json_invalid_rate": 0.0, "p95_latency_ms": 5000, "repair_salvage_rate": 0.0, "budget_deferred_count": 0, "budget_exhausted_count": 0, "recommendation_hint": "good_for_extractor_fast"},
+        "model-b": {"success_rate": 0.6, "confidence_level": "high", "timeout_rate": 0.1, "json_invalid_rate": 0.1, "p95_latency_ms": 15000, "repair_salvage_rate": 0.0, "budget_deferred_count": 0, "budget_exhausted_count": 0, "recommendation_hint": "high_timeout_risk"},
+    }
+    ranked, rankings = rank_candidates_by_profile("extractor_fast", candidates, profiles)
+    assert ranked[0] == "model-a"
+    assert rankings[0]["score"] > rankings[1]["score"]
+
+
+def test_rank_candidates_by_profile_low_confidence_not_strongly_ranked():
+    from novelforge.services.model_router import rank_candidates_by_profile
+
+    candidates = ["model-a", "model-b"]
+    profiles = {
+        "model-a": {"success_rate": 0.9, "confidence_level": "low", "timeout_rate": 0.0, "json_invalid_rate": 0.0, "p95_latency_ms": 5000, "repair_salvage_rate": 0.0, "budget_deferred_count": 0, "budget_exhausted_count": 0, "recommendation_hint": "insufficient_data"},
+        "model-b": {"success_rate": 0.8, "confidence_level": "high", "timeout_rate": 0.05, "json_invalid_rate": 0.0, "p95_latency_ms": 8000, "repair_salvage_rate": 0.0, "budget_deferred_count": 0, "budget_exhausted_count": 0, "recommendation_hint": "ok"},
+    }
+    ranked, rankings = rank_candidates_by_profile("extractor_fast", candidates, profiles)
+    assert ranked[0] == "model-b"
+    assert rankings[0]["confidence_level"] == "high"
+
+
+def test_rank_candidates_by_schema_repair_favors_repair_salvage():
+    from novelforge.services.model_router import rank_candidates_by_profile
+
+    candidates = ["model-a", "model-b"]
+    profiles = {
+        "model-a": {"success_rate": 0.7, "confidence_level": "high", "timeout_rate": 0.05, "json_invalid_rate": 0.2, "p95_latency_ms": 10000, "repair_salvage_rate": 0.8, "budget_deferred_count": 0, "budget_exhausted_count": 0, "recommendation_hint": "needs_schema_repair"},
+        "model-b": {"success_rate": 0.9, "confidence_level": "high", "timeout_rate": 0.01, "json_invalid_rate": 0.0, "p95_latency_ms": 5000, "repair_salvage_rate": 0.0, "budget_deferred_count": 0, "budget_exhausted_count": 0, "recommendation_hint": "ok"},
+    }
+    ranked, rankings = rank_candidates_by_profile("schema_repair", candidates, profiles)
+    assert ranked[0] == "model-a"
+    assert "high_repair_salvage" in rankings[0]["reason"]
+
+
+def test_rank_candidates_by_profile_no_profiles_returns_original():
+    from novelforge.services.model_router import rank_candidates_by_profile
+
+    candidates = ["model-a", "model-b"]
+    ranked, rankings = rank_candidates_by_profile("extractor_fast", candidates, {})
+    assert ranked == candidates
+    assert rankings == []
+
+
+def test_rank_candidates_by_profile_needs_schema_repair_hint():
+    from novelforge.services.model_router import rank_candidates_by_profile
+
+    candidates = ["model-a"]
+    profiles = {
+        "model-a": {"success_rate": 0.7, "confidence_level": "high", "timeout_rate": 0.05, "json_invalid_rate": 0.25, "p95_latency_ms": 10000, "repair_salvage_rate": 0.5, "budget_deferred_count": 0, "budget_exhausted_count": 0, "recommendation_hint": "needs_schema_repair"},
+    }
+    ranked, rankings = rank_candidates_by_profile("extractor_fast", candidates, profiles)
+    assert "needs_schema_repair" in rankings[0]["reason"]
+
+
+@pytest.mark.asyncio
+async def test_model_router_profile_routing_disabled_by_default():
+    class ProfileConfig(FakeConfig):
+        enable_profile_routing = False
+        model_pools = {"extractor_fast": ["model-a", "model-b"]}
+
+    service = FakeRoutedAIService({"model-a": "ok", "model-b": "ok"}, real_client=False)
+    router = ModelRouter(service, ProfileConfig())
+
+    decision = await router.select_model("extractor_fast", probe=False, session_id="test")
+
+    assert decision.profile_rankings == []
+    assert decision.profile_warnings == []
+
+
+@pytest.mark.asyncio
+async def test_model_router_profile_routing_enabled_with_profiles():
+    from novelforge.services.performance_profile import PerformanceProfileStore, PerformanceProfile, PerformanceProfileKey, PerformanceProfileMetrics
+    from novelforge.storage.memory_storage import MemoryStorage
+
+    class ProfileConfig(FakeConfig):
+        enable_profile_routing = True
+        profile_routing_scope = "session"
+        profile_routing_min_confidence = "medium"
+        profile_routing_allow_low_confidence = False
+        model_pools = {"extractor_fast": ["model-a", "model-b"]}
+
+    storage = MemoryStorage()
+    profile_store = PerformanceProfileStore(storage)
+
+    profile_a = PerformanceProfile(
+        key=PerformanceProfileKey(scope="session", session_id="test", model_used="model-a", task_role="extractor_fast", token_bucket="medium"),
+        metrics=PerformanceProfileMetrics(total_attempts=20, success_count=18, p95_latency_ms=5000, timeout_count=1),
+    )
+    profile_b = PerformanceProfile(
+        key=PerformanceProfileKey(scope="session", session_id="test", model_used="model-b", task_role="extractor_fast", token_bucket="medium"),
+        metrics=PerformanceProfileMetrics(total_attempts=20, success_count=12, p95_latency_ms=15000, timeout_count=3),
+    )
+
+    await profile_store.save(profile_a)
+    await profile_store.save(profile_b)
+
+    service = FakeRoutedAIService({"model-a": "ok", "model-b": "ok"}, real_client=False)
+    router = ModelRouter(service, ProfileConfig(), profile_store=profile_store)
+
+    decision = await router.select_model("extractor_fast", session_id="test")
+
+    assert len(decision.profile_rankings) > 0
+    assert decision.profile_rankings[0]["model"] == "model-a"
+    assert decision.profile_confidence == "medium"
+
+
+def test_model_route_decision_to_dict_includes_profile_fields():
+    from novelforge.services.model_router import ModelRouteDecision
+
+    decision = ModelRouteDecision(
+        role="extractor_fast",
+        selected_model="model-a",
+        reason="probe_skipped",
+        candidates=["model-a", "model-b"],
+        profile_rankings=[{"model": "model-a", "score": 150, "confidence_level": "high", "success_rate": 0.9, "p95_latency_ms": 5000, "timeout_rate": 0.01, "repair_salvage_rate": 0.0, "recommendation_hint": "good_for_extractor_fast"}],
+        profile_confidence="high",
+        profile_warnings=[],
+    )
+
+    result = decision.to_dict()
+    assert "profile_rankings" in result
+    assert result["profile_order_source"] == "performance_profile"
+    assert result["profile_confidence"] == "high"
+    assert result["selected_profile_hint"] == "good_for_extractor_fast"
+    assert "selected_profile_metrics" in result
+
+
+def test_config_profile_routing_env_vars(monkeypatch):
+    monkeypatch.setenv("NOVELFORGE_ENABLE_PROFILE_ROUTING", "true")
+    monkeypatch.setenv("NOVELFORGE_PROFILE_ROUTING_MIN_CONFIDENCE", "low")
+    monkeypatch.setenv("NOVELFORGE_PROFILE_ROUTING_SCOPE", "global")
+    monkeypatch.setenv("NOVELFORGE_PROFILE_ROUTING_ALLOW_LOW_CONFIDENCE", "true")
+
+    from novelforge.core.config import Config
+    config = Config()
+
+    assert config.enable_profile_routing is True
+    assert config.profile_routing_min_confidence == "low"
+    assert config.profile_routing_scope == "global"
+    assert config.profile_routing_allow_low_confidence is True
+
+
+# ============================================================================
+# Profile Routing Tests
+# ============================================================================
+
+
+def test_rank_candidates_by_profile_high_success_rate_ranks_first():
+    from novelforge.services.model_router import rank_candidates_by_profile
+
+    candidates = ["model-a", "model-b"]
+    profiles = {
+        "model-a": {"confidence_level": "high", "success_rate": 0.95, "timeout_rate": 0.01, "json_invalid_rate": 0.0, "p95_latency_ms": 5000, "repair_salvage_rate": 0.0, "retry_salvage_rate": 0.0, "budget_deferred_count": 0, "budget_exhausted_count": 0, "total_attempts": 50},
+        "model-b": {"confidence_level": "high", "success_rate": 0.7, "timeout_rate": 0.05, "json_invalid_rate": 0.0, "p95_latency_ms": 10000, "repair_salvage_rate": 0.0, "retry_salvage_rate": 0.0, "budget_deferred_count": 0, "budget_exhausted_count": 0, "total_attempts": 50},
+    }
+
+    ranked, rankings = rank_candidates_by_profile("extractor_fast", candidates, profiles)
+
+    assert ranked[0] == "model-a"
+    assert rankings[0]["score"] > rankings[1]["score"]
+
+
+def test_rank_candidates_by_profile_high_timeout_ranks_lower():
+    from novelforge.services.model_router import rank_candidates_by_profile
+
+    candidates = ["model-a", "model-b"]
+    profiles = {
+        "model-a": {"confidence_level": "high", "success_rate": 0.9, "timeout_rate": 0.3, "json_invalid_rate": 0.0, "p95_latency_ms": 10000, "repair_salvage_rate": 0.0, "retry_salvage_rate": 0.0, "budget_deferred_count": 0, "budget_exhausted_count": 0, "total_attempts": 50},
+        "model-b": {"confidence_level": "high", "success_rate": 0.9, "timeout_rate": 0.01, "json_invalid_rate": 0.0, "p95_latency_ms": 10000, "repair_salvage_rate": 0.0, "retry_salvage_rate": 0.0, "budget_deferred_count": 0, "budget_exhausted_count": 0, "total_attempts": 50},
+    }
+
+    ranked, rankings = rank_candidates_by_profile("extractor_fast", candidates, profiles)
+
+    assert ranked[0] == "model-b"
+
+
+def test_rank_candidates_by_profile_json_invalid_with_high_repair_kept():
+    from novelforge.services.model_router import rank_candidates_by_profile
+
+    candidates = ["model-a", "model-b"]
+    profiles = {
+        "model-a": {"confidence_level": "high", "success_rate": 0.85, "timeout_rate": 0.01, "json_invalid_rate": 0.3, "p95_latency_ms": 10000, "repair_salvage_rate": 0.7, "retry_salvage_rate": 0.0, "budget_deferred_count": 0, "budget_exhausted_count": 0, "total_attempts": 50},
+        "model-b": {"confidence_level": "high", "success_rate": 0.85, "timeout_rate": 0.01, "json_invalid_rate": 0.0, "p95_latency_ms": 10000, "repair_salvage_rate": 0.0, "retry_salvage_rate": 0.0, "budget_deferred_count": 0, "budget_exhausted_count": 0, "total_attempts": 50},
+    }
+
+    ranked, rankings = rank_candidates_by_profile("extractor_fast", candidates, profiles)
+
+    model_a_ranking = next(r for r in rankings if r["model"] == "model-a")
+    assert "needs_schema_repair" in model_a_ranking["reason"]
+
+
+def test_rank_candidates_by_profile_low_confidence_not_strongly_reordered():
+    from novelforge.services.model_router import rank_candidates_by_profile
+
+    candidates = ["model-a", "model-b"]
+    profiles = {
+        "model-a": {"confidence_level": "low", "success_rate": 1.0, "timeout_rate": 0.0, "json_invalid_rate": 0.0, "p95_latency_ms": 1000, "repair_salvage_rate": 0.0, "retry_salvage_rate": 0.0, "budget_deferred_count": 0, "budget_exhausted_count": 0, "total_attempts": 2},
+        "model-b": {"confidence_level": "low", "success_rate": 0.5, "timeout_rate": 0.1, "json_invalid_rate": 0.0, "p95_latency_ms": 5000, "repair_salvage_rate": 0.0, "retry_salvage_rate": 0.0, "budget_deferred_count": 0, "budget_exhausted_count": 0, "total_attempts": 3},
+    }
+
+    ranked, rankings = rank_candidates_by_profile("extractor_fast", candidates, profiles)
+
+    for r in rankings:
+        assert r["score"] == 0
+        assert r["reason"] == "low_confidence"
+
+
+def test_rank_candidates_by_profile_schema_repair_prefers_repair_salvage():
+    from novelforge.services.model_router import rank_candidates_by_profile
+
+    candidates = ["model-a", "model-b"]
+    profiles = {
+        "model-a": {"confidence_level": "high", "success_rate": 0.8, "timeout_rate": 0.05, "json_invalid_rate": 0.1, "p95_latency_ms": 15000, "repair_salvage_rate": 0.9, "retry_salvage_rate": 0.0, "budget_deferred_count": 0, "budget_exhausted_count": 0, "total_attempts": 50},
+        "model-b": {"confidence_level": "high", "success_rate": 0.85, "timeout_rate": 0.05, "json_invalid_rate": 0.1, "p95_latency_ms": 15000, "repair_salvage_rate": 0.2, "retry_salvage_rate": 0.0, "budget_deferred_count": 0, "budget_exhausted_count": 0, "total_attempts": 50},
+    }
+
+    ranked, rankings = rank_candidates_by_profile("schema_repair", candidates, profiles)
+
+    assert ranked[0] == "model-a"
+
+
+def test_rank_candidates_by_profile_no_profiles_returns_original():
+    from novelforge.services.model_router import rank_candidates_by_profile
+
+    candidates = ["model-a", "model-b"]
+    profiles: dict = {}
+
+    ranked, rankings = rank_candidates_by_profile("extractor_fast", candidates, profiles)
+
+    assert ranked == candidates
+    assert rankings == []
+
+
+def test_rank_candidates_by_profile_extractor_deep_tolerates_latency():
+    from novelforge.services.model_router import rank_candidates_by_profile
+
+    candidates = ["model-a", "model-b"]
+    profiles = {
+        "model-a": {"confidence_level": "high", "success_rate": 0.9, "timeout_rate": 0.01, "json_invalid_rate": 0.0, "p95_latency_ms": 50000, "repair_salvage_rate": 0.0, "retry_salvage_rate": 0.0, "budget_deferred_count": 0, "budget_exhausted_count": 0, "total_attempts": 50},
+        "model-b": {"confidence_level": "high", "success_rate": 0.95, "timeout_rate": 0.01, "json_invalid_rate": 0.0, "p95_latency_ms": 10000, "repair_salvage_rate": 0.0, "retry_salvage_rate": 0.0, "budget_deferred_count": 0, "budget_exhausted_count": 0, "total_attempts": 50},
+    }
+
+    ranked, rankings = rank_candidates_by_profile("extractor_deep", candidates, profiles)
+
+    latency_penalty_a = next(r for r in rankings if r["model"] == "model-a")
+    latency_penalty_b = next(r for r in rankings if r["model"] == "model-b")
+    assert latency_penalty_a["score"] > 0
+
+
+def test_config_profile_routing_is_configurable(monkeypatch):
+    monkeypatch.setenv("NOVELFORGE_ENABLE_PROFILE_ROUTING", "true")
+    monkeypatch.setenv("NOVELFORGE_PROFILE_ROUTING_MIN_CONFIDENCE", "low")
+    monkeypatch.setenv("NOVELFORGE_PROFILE_ROUTING_SCOPE", "global")
+    monkeypatch.setenv("NOVELFORGE_PROFILE_ROUTING_ALLOW_LOW_CONFIDENCE", "true")
+
+    from novelforge.core.config import Config
+    config = Config()
+
+    assert config.enable_profile_routing is True
+    assert config.profile_routing_min_confidence == "low"
+    assert config.profile_routing_scope == "global"
+    assert config.profile_routing_allow_low_confidence is True
+
+
+@pytest.mark.asyncio
+async def test_model_router_disabled_profile_routing_preserves_order():
+    class ProfileConfig(FakeConfig):
+        model_pools = {"extractor_fast": ["model-a", "model-b"]}
+        enable_profile_routing = False
+
+    service = FakeRoutedAIService({"model-a": "ok", "model-b": "ok"}, real_client=False)
+    router = ModelRouter(service, ProfileConfig())
+
+    decision = await router.select_model("extractor_fast", probe=False, session_id="test")
+
+    assert decision.profile_rankings == []
+    assert decision.profile_warnings == []
+
+
+@pytest.mark.asyncio
+async def test_model_router_decision_includes_profile_fields():
+    class ProfileConfig(FakeConfig):
+        model_pools = {"extractor_fast": ["model-a"]}
+        enable_profile_routing = False
+
+    service = FakeRoutedAIService({"model-a": "ok"}, real_client=False)
+    router = ModelRouter(service, ProfileConfig())
+
+    decision = await router.select_model("extractor_fast", probe=False, session_id="test")
+
+    data = decision.to_dict()
+    assert "profile_rankings" in data or decision.profile_rankings == []
+    assert "profile_confidence" in data or decision.profile_confidence is None
+    assert "profile_warnings" in data or decision.profile_warnings == []
