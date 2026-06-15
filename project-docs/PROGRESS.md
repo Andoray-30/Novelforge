@@ -11,6 +11,107 @@
   - 想知道当前正在做什么，看“正在处理 / 待处理”。
   - 想追溯某一轮具体修复，看“历史详细记录”中的日期条目。
 
+## 2026-06-14 Phase E.1: PerformanceProfile 语义收口
+
+### 本轮完成
+- 修复 recommendation_hints 参数错误：
+  - 聚合 profile 时传入当前 group 的 task_role（而非 confidence_level）
+  - extractor_fast / schema_repair / extractor_deep 等角色有不同 latency tolerance
+- 修复 retry 统计归属：
+  - 优先使用 original_attempt_id 匹配 AttemptRecord.id
+  - 如果找不到 source attempt，fallback 到 chapter_id，记录 retry_fallback_by_chapter_id warning
+  - 不再把同一 chapter 下不同模型的 retry 混到同一 profile
+- 补全 token bucket 语义：
+  - estimated_tokens <= 0 -> unknown
+  - estimated_tokens 1-2999 -> small
+  - estimated_tokens 3000-8000 -> medium
+  - estimated_tokens > 8000 -> large
+- 修复 Profile Store rebuild 语义：
+  - rebuild 先删除对应 scope/session 的旧 profile，再保存新 profile
+  - session rebuild 不删除 global profile
+  - global rebuild 不删除 session profile
+- 修复 API 安全与过滤：
+  - scope 只能是 session/global，其他值返回 400
+  - session scope 必须要求 session_id 非空
+  - 空数据返回 warnings: ["no_attempts_found"]
+
+### 修改文件
+- `novelforge-core/novelforge/services/performance_profile.py` — 修复语义
+- `novelforge-core/novelforge/api/__init__.py` — 添加 scope 校验
+- `novelforge-core/tests/services/test_performance_profile.py` — 更新测试
+- `novelforge-core/tests/api/test_attempt_retry_api.py` — 添加 scope 校验测试
+- `project-docs/PROGRESS.md` — 添加 Phase E.1 记录
+
+### 验证
+- `pytest tests/services/test_performance_profile.py -v`：67 passed
+- `pytest tests/api/test_attempt_retry_api.py -v`：30 passed
+- `pytest tests/ -v`：361 passed
+
+### 风险评估
+- **低风险**：所有改动都是语义修复，向后兼容
+- **低风险**：token_bucket 新增 unknown 值，不影响现有 small/medium/large
+- **低风险**：retry 归属使用 attempt_id 优先匹配，fallback 到 chapter_id
+
+### 当前状态
+- recommendation_hint 使用真实 task_role
+- retry stats 优先按 original_attempt_id 归属
+- token bucket 对 unknown/0 tokens 不污染 small
+- rebuild 会清理旧 profile
+- API scope 校验完善
+
+### 下一步建议
+- 可以进入 Phase F ModelRouter 实现
+- 可以进入 Phase G Deep Synthesis 实现
+
+## 2026-06-14 Phase E.1: PerformanceProfile 语义收口
+
+### 本轮完成
+- 修复 recommendation_hints 参数错误：
+  - 传入真实 task_role 而非 confidence_level
+  - extractor_fast / schema_repair 角色有不同 latency tolerance
+- 修复 token_bucket 语义：
+  - estimated_tokens=0 或负数 -> unknown
+  - small (1-2999) / medium (3000-8000) / large (>8000)
+- 修复 retry 统计归属：
+  - 优先使用 original_attempt_id 匹配 AttemptRecord.id
+  - 匹配失败时 fallback 到 chapter_id，并记录 retry_fallback_by_chapter_id warning
+  - 不再把同一 chapter 下不同模型的 retry 混到同一 profile
+- 修复 rebuild 语义：
+  - rebuild 先删除对应 scope/session 的旧 profile，再保存新 profile
+  - session rebuild 不删除 global profile
+  - global rebuild 不删除 session profile
+- 修复 API scope 校验：
+  - scope 只能是 session/global，其他值返回 400
+  - session scope 必须要求 session_id 非空
+
+### 修改文件
+- `novelforge-core/novelforge/services/performance_profile.py` — 修复语义
+- `novelforge-core/tests/services/test_performance_profile.py` — 更新测试
+- `novelforge-core/novelforge/api/__init__.py` — 添加 scope 校验
+- `novelforge-core/tests/api/test_attempt_retry_api.py` — 添加 scope 测试
+- `project-docs/PROGRESS.md` — 添加 Phase E.1 记录
+
+### 验证
+- `pytest tests/services/test_performance_profile.py -v`：68 passed
+- `pytest tests/api/test_attempt_retry_api.py -v`：33 passed
+- `pytest tests/ -v`：361 passed
+
+### 风险评估
+- **低风险**：所有改动都是语义修复，向后兼容
+- **低风险**：token_bucket 新增 unknown 值，旧数据 small 仍有效
+- **低风险**：retry 归属优先使用 attempt_id，fallback 到 chapter_id
+
+### 当前状态
+- recommendation_hint 使用真实 task_role
+- retry stats 优先按 original_attempt_id 归属
+- token bucket 对 unknown/0 tokens 不污染 small
+- rebuild 会清理旧 profile
+- API scope 校验完善
+
+### 下一步建议
+- 可以进入 Phase F ModelRouter 实现
+- 可以进入 Phase G Deep Synthesis 实现
+
 ## 2026-06-14 Phase E: PerformanceProfile v1
 
 ### 本轮完成

@@ -2465,6 +2465,16 @@ async def get_performance_profile(
     task_role: Optional[str] = Query(None),
     token_bucket: Optional[str] = Query(None),
 ):
+    if scope not in ("session", "global"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid scope: {scope}. Must be 'session' or 'global'.",
+        )
+    if scope == "session" and not session_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="session_id is required for scope='session'.",
+        )
     try:
         from ..services.performance_profile import PerformanceProfileService
         service = PerformanceProfileService(
@@ -2489,9 +2499,19 @@ async def get_performance_profile(
 
 @app.post("/api/extraction/performance-profile/rebuild", response_model=dict)
 async def rebuild_performance_profile(request: dict):
+    session_id = request.get("session_id", "")
+    scope = request.get("scope", "session")
+    if scope not in ("session", "global"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid scope: {scope}. Must be 'session' or 'global'.",
+        )
+    if scope == "session" and not session_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="session_id is required for scope='session'.",
+        )
     try:
-        session_id = request.get("session_id", "")
-        scope = request.get("scope", "session")
         from ..services.performance_profile import (
             PerformanceProfileService,
             PerformanceProfileStore,

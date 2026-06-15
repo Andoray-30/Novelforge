@@ -267,3 +267,57 @@ def test_performance_profile_has_metrics_fields(client):
     assert "profiles" in data
     assert "generated_at" in data
     assert "source_attempt_count" in data
+
+
+def test_get_performance_profile_invalid_scope_returns_400(client):
+    """GET with invalid scope must return 400."""
+    response = client.get(
+        "/api/extraction/performance-profile?session_id=test&scope=invalid"
+    )
+    assert response.status_code == 400
+
+
+def test_post_rebuild_invalid_scope_returns_400(client):
+    """POST rebuild with invalid scope must return 400."""
+    response = client.post(
+        "/api/extraction/performance-profile/rebuild",
+        json={"session_id": "test", "scope": "invalid"},
+    )
+    assert response.status_code == 400
+
+
+def test_post_rebuild_session_scope_empty_session_id_returns_400(client):
+    """POST rebuild with session scope and empty session_id must return 400."""
+    response = client.post(
+        "/api/extraction/performance-profile/rebuild",
+        json={"session_id": "", "scope": "session"},
+    )
+    assert response.status_code == 400
+
+
+def test_empty_data_returns_warning(client):
+    """Empty data must return profiles=[] with warning."""
+    response = client.get(
+        "/api/extraction/performance-profile?session_id=test-empty-warn"
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["profiles"] == []
+    assert "no_attempts_found" in data.get("warnings", [])
+
+
+def test_get_performance_profile_invalid_scope_returns_400(client):
+    """GET /api/extraction/performance-profile rejects invalid scope."""
+    response = client.get(
+        "/api/extraction/performance-profile?session_id=test&scope=invalid"
+    )
+    assert response.status_code == 400
+
+
+def test_post_rebuild_invalid_scope_returns_400(client):
+    """POST /api/extraction/performance-profile/rebuild rejects invalid scope."""
+    response = client.post(
+        "/api/extraction/performance-profile/rebuild",
+        json={"session_id": "test", "scope": "invalid"},
+    )
+    assert response.status_code == 400

@@ -33,8 +33,16 @@ TOKEN_BUCKET_THRESHOLDS = {
 
 
 def token_bucket(estimated_tokens: int) -> str:
-    """Classify estimated_tokens into fixed bands: small/medium/large."""
-    if estimated_tokens < 3000:
+    """Classify estimated_tokens into fixed bands.
+
+    unknown: <= 0 (no token data available)
+    small: 1-2999
+    medium: 3000-8000
+    large: > 8000
+    """
+    if estimated_tokens <= 0:
+        return "unknown"
+    elif estimated_tokens < 3000:
         return "small"
     elif estimated_tokens <= 8000:
         return "medium"
@@ -318,7 +326,16 @@ class PerformanceProfileStore:
     async def rebuild(
         self, scope: str, session_id: str, profiles: List[PerformanceProfile]
     ) -> int:
-        """Rebuild profiles for a scope. Overwrites existing. Returns count."""
+        """Rebuild profiles for a scope. Deletes stale profiles first. Returns count."""
+        all_keys = await self._storage.list_keys()
+        if scope == "session":
+            prefix = f"{PERF_PROFILE_KEY_PREFIX}session_{session_id}_"
+        else:
+            prefix = f"{PERF_PROFILE_KEY_PREFIX}global_"
+        stale_keys = [k for k in all_keys if k.startswith(prefix)]
+        async with self._lock:
+            for key in stale_keys:
+                await self._storage.delete(key)
         count = 0
         for profile in profiles:
             await self.save(profile)
@@ -398,12 +415,7 @@ class PerformanceProfileService:
                 groups[key] = []
             groups[key].append(record)
 
-        retry_by_chapter: Dict[str, List[Dict[str, Any]]] = {}
-        for job in retry_jobs:
-            chapter_id = job.chapter_id
-            if chapter_id not in retry_by_chapter:
-                retry_by_chapter[chapter_id] = []
-            retry_by_chapter[chapter_id].append(job.model_dump())
+        retry_jobs_data = [job.model_dump() for job in retry_jobs]
 
         profiles: List[PerformanceProfile] = []
         for (model, role, bucket, sess_id), records in groups.items():
@@ -414,7 +426,7 @@ class PerformanceProfileService:
             if token_bucket and bucket != token_bucket:
                 continue
 
-            metrics = self._aggregate_metrics(records, retry_by_chapter)
+            metrics = self._aggregate_metrics(records, retry_jobs_data, role)
             key = PerformanceProfileKey(
                 scope=scope,
                 session_id=sess_id,
@@ -439,7 +451,8 @@ class PerformanceProfileService:
     def _aggregate_metrics(
         self,
         records: List[Dict[str, Any]],
-        retry_by_chapter: Dict[str, List[Dict[str, Any]]],
+        retry_jobs: List[Dict[str, Any]],
+        task_role: str,
     ) -> PerformanceProfileMetrics:
         total = len(records)
         success = sum(1 for r in records if r.get("status") == "success")
@@ -476,20 +489,37 @@ class PerformanceProfileService:
         repair_failed = sum(1 for r in records if r.get("repair_layer") and r.get("status") == "failed")
 
         chapter_ids = set(r.get("chapter_id") for r in records)
+        attempt_ids = set(r.get("id") for r in records)
         retry_queued = 0
         retry_success = 0
         retry_failed = 0
         retry_exhausted = 0
-        for chapter_id in chapter_ids:
-            jobs = retry_by_chapter.get(chapter_id, [])
-            for job in jobs:
+        retry_warnings: List[str] = []
+
+        for job in retry_jobs:
+            original_id = job.get("original_attempt_id", "")
+            if original_id and original_id in attempt_ids:
                 retry_queued += 1
-                if job.get("status") == "success":
+                status = job.get("status", "")
+                if status == "success":
                     retry_success += 1
-                elif job.get("status") == "failed":
+                elif status == "failed":
                     retry_failed += 1
-                elif job.get("status") == "exhausted":
+                elif status == "exhausted":
                     retry_exhausted += 1
+            elif not original_id or original_id not in attempt_ids:
+                job_chapter = job.get("chapter_id", "")
+                if job_chapter in chapter_ids:
+                    retry_queued += 1
+                    status = job.get("status", "")
+                    if status == "success":
+                        retry_success += 1
+                    elif status == "failed":
+                        retry_failed += 1
+                    elif status == "exhausted":
+                        retry_exhausted += 1
+                    if "retry_fallback_by_chapter_id" not in retry_warnings:
+                        retry_warnings.append("retry_fallback_by_chapter_id")
 
         budget_deferred = sum(1 for r in records if r.get("budget_status") == "deferred")
         budget_exhausted = sum(
@@ -531,6 +561,6 @@ class PerformanceProfileService:
             estimated_model_calls_total=est_calls_total,
         )
         metrics.recommendation_hint = recommendation_hints(
-            metrics, metrics.confidence_level
+            metrics, task_role
         )
         return metrics

@@ -305,11 +305,21 @@ class TestPerformanceProfileFields:
 class TestTokenBucket:
     """token_bucket() must classify estimated_tokens into fixed bands."""
 
+    def test_unknown_bucket_for_zero_tokens(self):
+        from novelforge.services.performance_profile import token_bucket
+
+        assert token_bucket(0) == "unknown"
+
+    def test_unknown_bucket_for_negative_tokens(self):
+        from novelforge.services.performance_profile import token_bucket
+
+        assert token_bucket(-1) == "unknown"
+
     def test_small_bucket_for_low_tokens(self):
         from novelforge.services.performance_profile import token_bucket
 
+        assert token_bucket(1) == "small"
         assert token_bucket(1000) == "small"
-        assert token_bucket(0) == "small"
         assert token_bucket(2999) == "small"
 
     def test_medium_bucket_for_mid_tokens(self):
@@ -325,11 +335,6 @@ class TestTokenBucket:
         assert token_bucket(8001) == "large"
         assert token_bucket(50000) == "large"
         assert token_bucket(100000) == "large"
-
-    def test_unknown_bucket_for_missing_tokens(self):
-        from novelforge.services.performance_profile import token_bucket
-
-        assert token_bucket(0) != "unknown"  # 0 is valid, goes to small
 
 
 class TestConfidenceLevel:
