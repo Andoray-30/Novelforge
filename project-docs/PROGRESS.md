@@ -11,6 +11,43 @@
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
   - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
 
+## 2026-06-16 Phase G: Deep Synthesis 设计
+
+### 设计完成
+- 咨询 Oracle 进行架构审查
+- 生成详细设计文档：`project-docs/DEEP_SYNTHESIS_DESIGN.md`
+- 设计覆盖 12 个维度：
+  1. 概述（与 deep_asset_enrichment 的区别）
+  2. 输入边界（只消费结构化资产，不消费真实小说原文）
+  3. 输出 Schema（preview patch，不是直接写库）
+  4. 预算策略（job-level 总预算 + round-level 子预算 + 收敛检测）
+  5. 失败恢复（技术失败可重试，业务失败不可重试）
+  6. AttemptStore 记录（synthesis 专属字段）
+  7. RetryQueue 关系（只重试技术失败）
+  8. PerformanceProfile / ModelRouter 使用（复用 extractor_deep 角色）
+  9. 前端确认流程（preview-then-apply 模式）
+  10. 安全边界（禁止读取/持久化真实小说正文）
+  11. 实现计划（4 个子阶段）
+  12. 验收标准
+
+### 核心设计决策
+- **新任务类型**：引入 `deep_synthesis`，不复用 `deep_asset_enrichment`
+- **输出格式**：preview patch（asset_id + version + field-level patch），不是整段覆盖
+- **预算管理**：job-level 总预算 + round-level 子预算，最多 2-3 轮
+- **收敛检测**：结构化指标（quality_delta, proposed_change_count, user_acceptance_rate），不是模型自我声明
+- **失败恢复**：技术失败走 RetryQueue，业务失败不重试
+- **安全边界**：不读取/持久化真实小说正文，不绕过 BudgetedScheduler / AttemptStore / ModelRouter
+
+### 下一步建议
+- 优先实现 Phase G.1：基础框架（新增任务类型、定义 schema、实现 service、接入基础设施）
+- 然后实现 Phase G.2：多轮收敛（收敛检测、预算管理、质量追踪）
+- 然后实现 Phase G.3：前端集成（类型扩展、Preview 组件、页面集成）
+- 最后实现 Phase G.4：测试与优化
+
+### 修改文件
+- `project-docs/DEEP_SYNTHESIS_DESIGN.md` — Deep Synthesis 设计文档
+- `project-docs/PROGRESS.md` — 添加 Phase G 设计记录
+
 ## 2026-06-16 Phase F.2: 前端 Model Routing 诊断展示
 
 ### 本轮完成
