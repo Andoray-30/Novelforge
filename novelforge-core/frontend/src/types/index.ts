@@ -779,15 +779,18 @@ export interface DeepSynthesisRequest {
   session_id: string;
   scope_type: DeepSynthesisScopeType;
   budget_tier: DeepSynthesisBudgetTier;
-  target_asset_ids?: string[];
+  scope_ids?: string[];
   assets?: DeepSynthesisRequestAsset[];
 }
 
 export interface EvidenceRef {
-  chapter_id?: string;
-  chapter_title?: string;
-  quote?: string;
-  snippet?: string;
+  evidence_id: string;
+  source_type: string;
+  asset_type: DeepSynthesisAssetType;
+  asset_id: string;
+  asset_version: string;
+  field_path: string;
+  summary: string;
 }
 
 export interface ProposedChange {
@@ -806,8 +809,46 @@ export interface ProposedChange {
 
 export interface DeepSynthesisPreview {
   summary: string;
+  proposed_changes: ProposedChange[];
+  conflicts_resolved: Conflict[];
+  new_links: NewLink[];
+  risk_flags: RiskFlag[];
+  confidence_delta: number;
+  evidence_refs: EvidenceRef[];
+  apply_plan: ApplyPlan;
   requires_user_confirmation: boolean;
-  apply_plan: string;
+}
+
+export interface Conflict {
+  conflict_id: string;
+  asset_type: string;
+  asset_ids: string[];
+  conflict_type: 'inconsistent_description' | 'contradictory_traits' | 'timeline_mismatch';
+  description: string;
+  resolution: string;
+  confidence: number;
+}
+
+export interface NewLink {
+  source_asset_id: string;
+  target_asset_id: string;
+  relationship_type: string;
+  description: string;
+  confidence: number;
+}
+
+export interface RiskFlag {
+  risk_type: string;
+  message: string;
+  severity: 'low' | 'medium' | 'high';
+  asset_ids?: string[];
+}
+
+export interface ApplyPlan {
+  description: string;
+  change_count: number;
+  auto_applyable_count: number;
+  requires_confirmation_count: number;
 }
 
 export interface DeepSynthesisBudgetSummary {
@@ -820,7 +861,7 @@ export interface DeepSynthesisBudgetSummary {
 
 export interface DeepSynthesisRoundSummary {
   round_number: number;
-  pass_type: 'generate' | 'verify' | 'resolve_conflict';
+  pass_type: 'generation' | 'validation' | 'conflict_resolution';
   status: 'completed' | 'skipped' | 'stopped' | 'failed';
   query_count: number;
   success_count: number;
@@ -840,9 +881,9 @@ export interface DeepSynthesisConvergenceSummary {
 }
 
 export interface DeepSynthesisQualityTrace {
-  quality_before_preview?: number | null;
+  quality_before?: number | null;
   quality_after_preview?: number | null;
-  quality_delta_preview?: number | null;
+  quality_delta?: number | null;
   score_breakdown_before?: Record<string, number>;
   score_breakdown_after?: Record<string, number>;
 }
@@ -864,10 +905,9 @@ export interface DeepSynthesisResult {
   task_type: string;
   status: string;
   budget_summary: DeepSynthesisBudgetSummary;
-  convergence_summary: DeepSynthesisConvergenceSummary;
-  quality_trace: DeepSynthesisQualityTrace;
+  convergence_summary: DeepSynthesisConvergenceSummary | null;
+  quality_trace: DeepSynthesisQualityTrace | null;
   preview: DeepSynthesisPreview;
-  proposed_changes: ProposedChange[];
   round_summaries: DeepSynthesisRoundSummary[];
   warnings?: DeepSynthesisWarning[];
   error?: string | null;

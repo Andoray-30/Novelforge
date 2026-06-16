@@ -18,9 +18,9 @@ import type { ProposedChange, DeepSynthesisResult } from '@/types';
 describe('Deep Synthesis Utils', () => {
   describe('formatDeepSynthesisBudgetTier', () => {
     it('formats budget tiers to Chinese labels', () => {
-      expect(formatDeepSynthesisBudgetTier('low')).toBe('低预算');
-      expect(formatDeepSynthesisBudgetTier('medium')).toBe('标准预算');
-      expect(formatDeepSynthesisBudgetTier('high')).toBe('高预算');
+      expect(formatDeepSynthesisBudgetTier('low')).toBe('低预算（1 轮）');
+      expect(formatDeepSynthesisBudgetTier('medium')).toBe('标准预算（2 轮）');
+      expect(formatDeepSynthesisBudgetTier('high')).toBe('高预算（3 轮）');
       expect(formatDeepSynthesisBudgetTier('unknown')).toBe('unknown');
     });
   });
@@ -60,9 +60,9 @@ describe('Deep Synthesis Utils', () => {
 
   describe('formatPassType', () => {
     it('formats pass types to Chinese labels', () => {
-      expect(formatPassType('generate')).toBe('生成');
-      expect(formatPassType('verify')).toBe('验证');
-      expect(formatPassType('resolve_conflict')).toBe('冲突消解');
+      expect(formatPassType('generation')).toBe('生成');
+      expect(formatPassType('validation')).toBe('验证');
+      expect(formatPassType('conflict_resolution')).toBe('冲突消解');
       expect(formatPassType('other')).toBe('other');
       expect(formatPassType(null)).toBe('常规步骤');
     });
@@ -147,10 +147,12 @@ describe('Deep Synthesis Utils', () => {
   describe('buildDeepSynthesisSelectionState', () => {
     it('creates initial selection state with undecided', () => {
       const mockResult = {
-        proposed_changes: [
-          { change_id: 'c1' },
-          { change_id: 'c2' }
-        ]
+        preview: {
+          proposed_changes: [
+            { change_id: 'c1' },
+            { change_id: 'c2' }
+          ]
+        }
       } as any as DeepSynthesisResult;
 
       const state = buildDeepSynthesisSelectionState(mockResult);

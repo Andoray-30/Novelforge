@@ -110,9 +110,9 @@ export function DeepSynthesisPreviewPanel({
     }
   };
 
-  const groupedChanges = result ? groupProposedChangesByAssetType(result.proposed_changes) : null;
+  const groupedChanges = result ? groupProposedChangesByAssetType(result.preview.proposed_changes) : null;
 
-  const totalChangesCount = result?.proposed_changes?.length || 0;
+  const totalChangesCount = result?.preview?.proposed_changes?.length || 0;
   const acceptedCount = Object.values(selectionState).filter(v => v === 'accepted').length;
   const rejectedCount = Object.values(selectionState).filter(v => v === 'rejected').length;
   const undecidedCount = totalChangesCount - acceptedCount - rejectedCount;
@@ -252,20 +252,20 @@ export function DeepSynthesisPreviewPanel({
               <div className="p-4 bg-slate-950 border border-slate-800/80 rounded-lg">
                 <span className="block text-[11px] text-slate-500 font-medium">高置信更正项</span>
                 <span className="block text-2xl font-semibold font-mono text-emerald-400 mt-1">
-                  {result.proposed_changes.filter(c => c.confidence >= 0.85).length}
+                  {result.preview.proposed_changes.filter(c => c.confidence >= 0.85).length}
                 </span>
               </div>
               <div className="p-4 bg-slate-950 border border-slate-800/80 rounded-lg">
                 <span className="block text-[11px] text-slate-500 font-medium">未消解矛盾点</span>
                 <span className="block text-2xl font-semibold font-mono text-amber-400 mt-1">
-                  {result.convergence_summary.converged ? 0 : 1}
+                  {result.convergence_summary?.converged ? 0 : 1}
                 </span>
               </div>
               <div className="p-4 bg-slate-950 border border-slate-800/80 rounded-lg">
                 <span className="block text-[11px] text-slate-500 font-medium">精炼后质量变化</span>
                 <span className="block text-2xl font-semibold font-mono text-emerald-400 mt-1 flex items-center gap-1">
-                  {formatQualityDelta(result.quality_trace.quality_after_preview && result.quality_trace.quality_before_preview ? result.quality_trace.quality_after_preview - result.quality_trace.quality_before_preview : null)}
-                  {result.quality_trace.quality_after_preview && result.quality_trace.quality_before_preview && (
+                  {formatQualityDelta(result.quality_trace?.quality_delta ?? null)}
+                  {result.quality_trace?.quality_after_preview && result.quality_trace?.quality_before && (
                     <TrendingUp className="w-4 h-4 text-emerald-400" />
                   )}
                 </span>
@@ -416,16 +416,10 @@ export function DeepSynthesisPreviewPanel({
                                     <span className="block text-[11px] text-slate-500 font-medium">来源证据及线索 (Evidence)</span>
                                     <div className="flex flex-col gap-1.5">
                                       {change.evidence_refs.map((ev, index) => (
-                                        <div key={index} className="text-xs text-slate-400 bg-slate-950 p-2.5 rounded border border-slate-900/80 leading-relaxed">
-                                          {ev.chapter_title && (
-                                            <span className="font-semibold text-slate-300 mr-2 font-mono">[{ev.chapter_title}]</span>
-                                          )}
-                                          {ev.quote && (
-                                            <span className="italic font-normal">“{sanitizeDeepSynthesisDisplayValue(ev.quote)}”</span>
-                                          )}
-                                          {ev.snippet && !ev.quote && (
-                                            <span className="font-normal">{sanitizeDeepSynthesisDisplayValue(ev.snippet)}</span>
-                                          )}
+                                        <div key={ev.evidence_id || index} className="text-xs text-slate-400 bg-slate-950 p-2.5 rounded border border-slate-900/80 leading-relaxed">
+                                          <span className="font-semibold text-slate-300 mr-2 font-mono">[{ev.source_type}]</span>
+                                          <span className="text-slate-500 mr-2 font-mono">{ev.field_path}</span>
+                                          <span className="font-normal">{sanitizeDeepSynthesisDisplayValue(ev.summary)}</span>
                                         </div>
                                       ))}
                                     </div>
@@ -498,24 +492,24 @@ export function DeepSynthesisPreviewPanel({
                 <div className="space-y-3 text-xs">
                   <div className="flex justify-between items-center py-2 border-b border-slate-900">
                     <span className="text-slate-400">是否成功收敛:</span>
-                    <span className={`font-semibold ${result.convergence_summary.converged ? 'text-emerald-400' : 'text-amber-400'}`}>
-                      {result.convergence_summary.converged ? '是 (收敛)' : '否 (达到极值)'}
+                    <span className={`font-semibold ${result.convergence_summary?.converged ? 'text-emerald-400' : 'text-amber-400'}`}>
+                      {result.convergence_summary?.converged ? '是 (收敛)' : '否 (达到极值)'}
                     </span>
                   </div>
                   <div className="flex justify-between items-center py-2 border-b border-slate-900">
                     <span className="text-slate-400">收敛说明:</span>
-                    <span className="font-medium text-slate-200 text-right max-w-[200px] truncate" title={result.convergence_summary.reason}>
-                      {formatConvergenceReason(result.convergence_summary.reason)}
+                    <span className="font-medium text-slate-200 text-right max-w-[200px] truncate" title={result.convergence_summary?.reason ?? ''}>
+                      {formatConvergenceReason(result.convergence_summary?.reason)}
                     </span>
                   </div>
                   <div className="flex justify-between items-center py-2 border-b border-slate-900">
                     <span className="text-slate-400">已执行迭代轮次:</span>
-                    <span className="font-semibold text-slate-200 font-mono">{result.convergence_summary.rounds_completed} 轮</span>
+                    <span className="font-semibold text-slate-200 font-mono">{result.convergence_summary?.rounds_completed ?? 0} 轮</span>
                   </div>
                   <div className="flex justify-between items-center py-2">
                     <span className="text-slate-400">建议继续深度精炼:</span>
-                    <span className={`font-semibold ${result.convergence_summary.should_continue ? 'text-amber-400' : 'text-slate-400'}`}>
-                      {result.convergence_summary.should_continue ? '是' : '否'}
+                    <span className={`font-semibold ${result.convergence_summary?.should_continue ? 'text-amber-400' : 'text-slate-400'}`}>
+                      {result.convergence_summary?.should_continue ? '是' : '否'}
                     </span>
                   </div>
                 </div>
@@ -529,19 +523,19 @@ export function DeepSynthesisPreviewPanel({
                   <div className="flex justify-between items-center py-2 border-b border-slate-900">
                     <span className="text-slate-400">演进前资产评估分:</span>
                     <span className="font-semibold text-slate-200 font-mono">
-                      {result.quality_trace.quality_before_preview?.toFixed(2) || '—'}
+                      {result.quality_trace?.quality_before?.toFixed(2) || '—'}
                     </span>
                   </div>
                   <div className="flex justify-between items-center py-2 border-b border-slate-900">
                     <span className="text-slate-400">深度合成后预期得分:</span>
                     <span className="font-semibold text-emerald-400 font-mono">
-                      {result.quality_trace.quality_after_preview?.toFixed(2) || '—'}
+                      {result.quality_trace?.quality_after_preview?.toFixed(2) || '—'}
                     </span>
                   </div>
                   <div className="flex justify-between items-center py-2">
                     <span className="text-slate-400">预期质量跃升值:</span>
                     <span className="font-semibold text-emerald-400 font-mono">
-                      {formatQualityDelta(result.quality_trace.quality_delta_preview)}
+                      {formatQualityDelta(result.quality_trace?.quality_delta ?? null)}
                     </span>
                   </div>
                 </div>

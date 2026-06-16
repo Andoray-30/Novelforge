@@ -11,6 +11,53 @@
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
   - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
 
+## 2026-06-16 Phase G.3.1: Deep Synthesis Frontend Contract Fix
+
+### 本轮完成
+- **修复 types/index.ts 类型定义，对齐后端契约**：
+  - `DeepSynthesisRequest` 使用 `scope_ids`（替换 `target_asset_ids`）
+  - `DeepSynthesisResult` 移除顶层 `proposed_changes`，移至 `DeepSynthesisPreview`
+  - `DeepSynthesisPreview` 补齐 `proposed_changes` / `conflicts_resolved` / `new_links` / `risk_flags` / `confidence_delta` / `evidence_refs` / `apply_plan`
+  - `DeepSynthesisQualityTrace` 使用 `quality_before` / `quality_after_preview` / `quality_delta`
+  - `DeepSynthesisRoundSummary.pass_type` 改为 `"generation" | "validation" | "conflict_resolution"`
+  - `EvidenceRef` 改为 `evidence_id` / `source_type` / `asset_type` / `asset_id` / `asset_version` / `field_path` / `summary`
+  - 新增 `Conflict`、`NewLink`、`RiskFlag`、`ApplyPlan` 接口
+  - `convergence_summary` 和 `quality_trace` 支持 `null`
+- **修复 deep-synthesis-utils.ts**：
+  - `formatDeepSynthesisBudgetTier`：low=低预算（1 轮）, medium=标准预算（2 轮）, high=高预算（3 轮）
+  - `formatPassType`：generation=生成, validation=验证, conflict_resolution=冲突消解
+  - `buildDeepSynthesisSelectionState` 访问 `preview.proposed_changes`
+- **修复 deep-synthesis-preview.tsx**：
+  - 所有 `result.proposed_changes` 改为 `result.preview.proposed_changes`
+  - `convergence_summary` 和 `quality_trace` 使用可选链 `?.` 处理 null
+  - EvidenceRef 渲染使用新字段 `source_type` / `field_path` / `summary`
+- **重写 deep-synthesis-preview.test.tsx**：
+  - 从 `expect(true)` 改为 7 个真实测试用例
+  - 覆盖：renders preview.summary / renders proposed_changes / accept/reject callbacks / forbidden fields / null convergence_summary / null quality_trace
+- **修复 page.tsx**：`handleAcceptAll` / `handleRejectAll` 使用 `preview.proposed_changes`
+- **基础设施**：安装 `@vitejs/plugin-react` 并配置 vitest 以支持 JSX 组件测试
+
+### 修改文件
+- `novelforge-core/frontend/src/types/index.ts` — 类型定义修复
+- `novelforge-core/frontend/src/app/extract/deep-synthesis-utils.ts` — 工具函数修复
+- `novelforge-core/frontend/src/app/extract/deep-synthesis-utils.test.ts` — 测试更新
+- `novelforge-core/frontend/src/app/extract/deep-synthesis-preview.tsx` — 组件修复
+- `novelforge-core/frontend/src/app/extract/deep-synthesis-preview.test.tsx` — 真实测试用例
+- `novelforge-core/frontend/src/app/extract/page.tsx` — 适配新类型
+- `novelforge-core/frontend/vitest.config.ts` — 添加 JSX 支持
+- `novelforge-core/frontend/package.json` — 添加 @vitejs/plugin-react
+
+### 验证
+- `npx tsc --noEmit --incremental false`：零错误
+- `npm test -- --run`：34 test files passed (176 tests)
+- `npm run build`：Next.js Production Build 成功
+
+### 风险评估
+- **无风险**：类型对齐不改变运行时行为，仅修复编译期契约
+- **无风险**：page.tsx 的修改仅适配新类型路径，逻辑不变
+
+---
+
 ## 2026-06-16 Phase G.3: 前端 Deep Synthesis Preview 组件与人工确认入口
 
 ### 本轮完成

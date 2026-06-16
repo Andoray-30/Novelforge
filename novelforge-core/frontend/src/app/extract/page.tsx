@@ -1249,7 +1249,7 @@ export default function ExtractPage() {
   const handleAcceptAll = () => {
     if (!deepSynthesisResult) return;
     const newState: Record<string, 'accepted' | 'rejected' | 'undecided'> = {};
-    for (const change of deepSynthesisResult.proposed_changes) {
+    for (const change of deepSynthesisResult.preview.proposed_changes) {
       newState[change.change_id] = 'accepted';
     }
     setDeepSynthesisSelectionState(newState);
@@ -1258,7 +1258,7 @@ export default function ExtractPage() {
   const handleRejectAll = () => {
     if (!deepSynthesisResult) return;
     const newState: Record<string, 'accepted' | 'rejected' | 'undecided'> = {};
-    for (const change of deepSynthesisResult.proposed_changes) {
+    for (const change of deepSynthesisResult.preview.proposed_changes) {
       newState[change.change_id] = 'rejected';
     }
     setDeepSynthesisSelectionState(newState);

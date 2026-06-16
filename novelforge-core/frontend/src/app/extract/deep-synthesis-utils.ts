@@ -10,11 +10,11 @@ import {
 export function formatDeepSynthesisBudgetTier(tier: DeepSynthesisBudgetTier | string): string {
   switch (tier) {
     case 'low':
-      return '低预算';
+      return '低预算（1 轮）';
     case 'medium':
-      return '标准预算';
+      return '标准预算（2 轮）';
     case 'high':
-      return '高预算';
+      return '高预算（3 轮）';
     default:
       return tier || '未知';
   }
@@ -64,12 +64,11 @@ export function formatConvergenceReason(reason: string | null | undefined): stri
 export function formatPassType(pass_type: string | null | undefined): string {
   if (!pass_type) return '常规步骤';
   switch (pass_type) {
-    case 'generate':
+    case 'generation':
       return '生成';
-    case 'verify':
+    case 'validation':
       return '验证';
-    case 'resolve_conflict':
-    case 'resolve':
+    case 'conflict_resolution':
       return '冲突消解';
     default:
       return pass_type;
@@ -123,8 +122,8 @@ export function groupProposedChangesByAssetType(changes: ProposedChange[] | null
 
 export function buildDeepSynthesisSelectionState(preview: DeepSynthesisResult | null | undefined): Record<string, 'accepted' | 'rejected' | 'undecided'> {
   const state: Record<string, 'accepted' | 'rejected' | 'undecided'> = {};
-  if (!preview || !Array.isArray(preview.proposed_changes)) return state;
-  for (const change of preview.proposed_changes) {
+  if (!preview || !preview.preview || !Array.isArray(preview.preview.proposed_changes)) return state;
+  for (const change of preview.preview.proposed_changes) {
     state[change.change_id] = 'undecided';
   }
   return state;
