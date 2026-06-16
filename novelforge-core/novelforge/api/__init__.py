@@ -65,6 +65,8 @@ from ..services.ai_scheduler import get_ai_scheduler, AITaskScheduler, TaskPrior
 from ..services.ai_service import AIService
 from ..services.model_health import get_model_health_report, record_model_health_event
 from ..services.model_router import ModelRouter
+from ..services.deep_synthesis import DeepSynthesisService, DeepSynthesisValidationError
+from ..services.deep_synthesis_models import DeepSynthesisRequest
 
 from ..core.config import Config
 from .ai_planning_service import get_ai_planning_service, AIPlanningService
@@ -2532,6 +2534,32 @@ async def rebuild_performance_profile(request: dict):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Performance profile rebuild 失败: {str(e)}",
+        )
+
+
+@app.post("/api/extraction/deep-synthesis/preview", response_model=dict)
+async def create_deep_synthesis_preview(request: DeepSynthesisRequest):
+    try:
+        service = DeepSynthesisService(
+            attempt_store=attempt_store,
+            model_router=getattr(extraction_service, "model_router", None),
+        )
+        result = await service.create_preview(request)
+        return result.model_dump(mode="json")
+    except DeepSynthesisValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Deep Synthesis preview 生成失败: {str(e)}",
         )
 
 
