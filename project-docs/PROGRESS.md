@@ -11,6 +11,31 @@
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
   - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
 
+## 2026-06-15 Agent Delegation Policy / Sisyphus Orchestrator Boundary
+
+### 本轮完成
+- 建立明确的代理职责边界，防止 Sisyphus 在长任务中独自实现代码导致上下文膨胀
+- 更新 AGENTS.md 新增第 12 节：代理调度边界（Agent Delegation Policy）
+- 核心原则：Sisyphus 是 orchestration agent，不是 implementation worker
+- 强制委派条件：修改超过 1 个源码文件、需要测试、上下文过大等场景必须委派
+- 上下文预算规则：80k+ 委派、150k+ 只规划、250k+ 只 handoff、300k+ 停止任务
+- 标准委派流程：Sisyphus 规划 → Worker 实现 → Sisyphus 审查 → 用户汇总
+- Worker Prompt 模板和返回格式规范
+- NovelForge 项目特定边界：AIService、RetryQueue、AttemptStore 等模块职责限制
+
+### 修改文件
+- `AGENTS.md` — 新增第 12 节代理调度边界
+- `project-docs/PROGRESS.md` — 添加代理边界收口记录
+
+### 当前状态
+- Phase F.1 ModelRouter Profile Routing 收口任务已暂停
+- 下次启动时应使用 worker agent 完成剩余代码实现
+- Sisyphus 只做规划、审查、总结
+
+### 下一步建议
+- 使用 worker agent 完成 Phase F.1 剩余代码修复
+- 或进入 Phase G Deep Synthesis（需先完成 F.1）
+
 ## 2026-06-14 Phase F: Profile-aware ModelRouter v1
 
 ### 本轮完成
@@ -58,57 +83,6 @@
 - 开启后可按 medium/high confidence profile 调整候选顺序
 - route decision 能解释为什么选某个模型
 - 无 profile / 低 confidence 时安全 fallback
-
-### 下一步建议
-- 可以进入 Phase F.1 前端路由诊断
-- 可以进入 Phase G Deep Synthesis 实现
-
-## 2026-06-15 Phase F: Profile-aware ModelRouter v1
-
-### 本轮完成
-- 修复 PROGRESS.md 重复的 Phase E.1 记录
-- 添加 profile routing 配置到 Config：
-  - NOVELFORGE_ENABLE_PROFILE_ROUTING=false（默认关闭）
-  - NOVELFORGE_PROFILE_ROUTING_MIN_CONFIDENCE=medium
-  - NOVELFORGE_PROFILE_ROUTING_SCOPE=session
-  - NOVELFORGE_PROFILE_ROUTING_ALLOW_LOW_CONFIDENCE=false
-- 实现 rank_candidates_by_profile() 纯函数：
-  - 按 confidence_level、success_rate、timeout_rate、json_invalid_rate、p95_latency 排序
-  - schema_repair 角色优先 repair_salvage_rate
-  - extractor_deep 对 latency 更容忍
-  - json_invalid_rate 高但 repair_salvage_rate 高时标记 needs_schema_repair
-  - low confidence 不强排序
-- 修改 ModelRouter 接入 PerformanceProfile：
-  - __init__ 新增 profile_store 参数
-  - select_model 在 health ranking 后、probe 前插入 profile ranking
-  - session 无 profile 时 fallback 到 global
-- 扩展 ModelRouteDecision 包含 profile 字段：
-  - profile_rankings、profile_confidence、profile_warnings
-  - to_dict() 包含 profile_order_source、selected_profile_hint、selected_profile_metrics
-- 编写 17 个新测试覆盖 profile routing
-
-### 修改文件
-- `novelforge-core/novelforge/core/config.py` — 添加 profile routing 配置
-- `novelforge-core/novelforge/services/model_router.py` — 接入 PerformanceProfile
-- `novelforge-core/tests/services/test_model_router.py` — 添加 profile routing 测试
-- `project-docs/PROGRESS.md` — 添加 Phase F 记录
-
-### 验证
-- `pytest tests/services/test_model_router.py -v`：27 passed
-- `pytest tests/ -q`：378 passed
-
-### 风险评估
-- **低风险**：默认关闭 profile routing，不改变现有行为
-- **低风险**：profile 不可用时安全 fallback 到 health/probe 逻辑
-- **低风险**：low confidence 不做强决策
-
-### 当前状态
-- ModelRouter 能读取 PerformanceProfile 并生成 profile ranking
-- 默认关闭 profile routing，不改变现有行为
-- 开启后可按 medium/high confidence profile 调整候选顺序
-- route decision 能解释为什么选某个模型
-- MiMo 这类格式不稳但可修复模型能被标记 needs_schema_repair
-- schema_repair 角色可以基于 repair_salvage_rate 排序
 
 ### 下一步建议
 - 可以进入 Phase F.1 前端路由诊断
