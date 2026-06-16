@@ -268,6 +268,24 @@ def test_parse_field_path_blocks_forbidden_segments():
         parse_field_path("profile.__proto__")
 
 
+def test_parse_field_path_blocks_case_insensitive_forbidden_segments():
+    for field in ["Raw_Response_Text", "CHAPTER_CONTENT", "Full_Text"]:
+        with pytest.raises(Exception, match="禁止字段"):
+            parse_field_path(f"profile.{field}")
+
+
+@pytest.mark.asyncio
+async def test_apply_preview_rejects_case_insensitive_forbidden_field_path():
+    manager = FakeContentManager([make_content_item()])
+    service = DeepSynthesisService(content_manager=manager)
+    request = make_apply_request()
+    request.preview.proposed_changes[0].field_path = "profile.Raw_Response_Text"
+
+    result = await service.apply_preview(request)
+
+    assert result.conflicts[0].reason == "forbidden_field_path"
+
+
 def test_apply_field_patch_returns_new_dict():
     data = {"profile": {"summary": "旧摘要"}}
 
@@ -394,6 +412,8 @@ async def test_apply_preview_dry_run_does_not_write():
 
     assert result.status == "dry_run"
     assert result.summary.dry_run is True
+    assert result.summary.applied_count == 0
+    assert result.applied_changes == []
     assert result.skipped_changes[0].reason == "dry_run"
     assert manager.write_calls == []
 

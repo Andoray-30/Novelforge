@@ -2537,6 +2537,26 @@ async def rebuild_performance_profile(request: dict):
         )
 
 
+def _safe_apply_conflict_result(result) -> Dict[str, Any]:
+    """Serialize apply result with truncated conflict expected/actual to avoid leaking user text."""
+    MAX_CONFLICT_VALUE_LEN = 100
+    data = result.model_dump(mode="json")
+    if not data.get("conflicts"):
+        return data
+    truncated_conflicts = []
+    for conflict in data["conflicts"]:
+        safe_conflict = dict(conflict)
+        for field in ("expected", "actual"):
+            raw = safe_conflict.get(field)
+            if raw is not None:
+                serialized = json.dumps(raw, ensure_ascii=False)
+                if len(serialized) > MAX_CONFLICT_VALUE_LEN:
+                    safe_conflict[field] = serialized[:MAX_CONFLICT_VALUE_LEN] + "..."
+        truncated_conflicts.append(safe_conflict)
+    data["conflicts"] = truncated_conflicts
+    return data
+
+
 @app.post("/api/extraction/deep-synthesis/preview", response_model=dict)
 async def create_deep_synthesis_preview(request: DeepSynthesisRequest):
     try:
@@ -2577,12 +2597,12 @@ async def apply_deep_synthesis_preview(request: DeepSynthesisApplyRequest):
             if conflict_reasons & {"version_mismatch", "current_value_mismatch", "missing_asset"}:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail=result.model_dump(mode="json"),
+                    detail=_safe_apply_conflict_result(result),
                 )
             if conflict_reasons & {"forbidden_field_path", "invalid_field_path"}:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=result.model_dump(mode="json"),
+                    detail=_safe_apply_conflict_result(result),
                 )
         return result.model_dump(mode="json")
     except HTTPException:

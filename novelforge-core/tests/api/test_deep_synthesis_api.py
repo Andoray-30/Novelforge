@@ -319,6 +319,31 @@ def test_post_deep_synthesis_apply_dry_run_does_not_write(monkeypatch):
     assert manager.items["char-api"].extracted_data["profile"]["summary"] == "旧摘要"
 
 
+def test_post_deep_synthesis_apply_dry_run_response_has_zero_applied_count(monkeypatch):
+    manager = FakeContentManager([make_content_item()])
+    client, _ = client_with_fake_content(monkeypatch, manager)
+
+    response = client.post("/api/extraction/deep-synthesis/apply", json=apply_payload(dry_run=True))
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "dry_run"
+    assert data["summary"]["applied_count"] == 0
+    assert data["applied_changes"] == []
+
+
+def test_post_deep_synthesis_apply_409_truncates_long_conflict_values(monkeypatch):
+    client, _ = client_with_fake_content(monkeypatch, FakeContentManager([make_content_item(version=2)]))
+
+    response = client.post("/api/extraction/deep-synthesis/apply", json=apply_payload())
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    serialized = json.dumps(detail, ensure_ascii=False)
+    assert "旧摘要旧摘要旧摘要旧摘要旧摘要" not in serialized
+    assert len(serialized) < 5000
+
+
 def test_post_deep_synthesis_apply_500_returns_safe_detail(monkeypatch):
     client, _ = client_with_fake_content(monkeypatch, FakeContentManager([make_content_item()], fail_on_get=True))
     client = TestClient(client.app, raise_server_exceptions=False)

@@ -76,7 +76,7 @@ def parse_field_path(field_path: str) -> List[str]:
         raise FieldPatchError(DeepSynthesisApplySkipReason.invalid_field_path, "字段路径包含空 segment。")
     normalized = [segment.strip() for segment in segments]
     for segment in normalized:
-        if segment in FORBIDDEN_FIELD_PATH_SEGMENTS:
+        if segment.lower() in FORBIDDEN_FIELD_PATH_SEGMENTS:
             raise FieldPatchError(DeepSynthesisApplySkipReason.forbidden_field_path, f"字段路径包含禁止字段: {segment}")
     return normalized
 
@@ -192,16 +192,6 @@ class DeepSynthesisService:
 
             if request.dry_run:
                 skipped.append(self._skipped(change, DeepSynthesisApplySkipReason.dry_run, "dry_run=True，未写入资产。"))
-                applied.append(DeepSynthesisAppliedChange(
-                    change_id=change.change_id,
-                    asset_type=change.asset_type,
-                    asset_id=change.asset_id,
-                    asset_version_before=current_version,
-                    asset_version_after=current_version,
-                    field_path=change.field_path,
-                    previous_value=previous_value,
-                    applied_value=change.proposed_value,
-                ))
                 continue
 
             try:
@@ -825,7 +815,7 @@ class DeepSynthesisService:
         found: set[str] = set()
         if isinstance(value, dict):
             for key, child in value.items():
-                if key in FORBIDDEN_INPUT_FIELDS:
+                if key.lower() in FORBIDDEN_INPUT_FIELDS:
                     found.add(key)
                 found.update(DeepSynthesisService._find_forbidden_fields(child))
         elif isinstance(value, list):
