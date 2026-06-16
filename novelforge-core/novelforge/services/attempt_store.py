@@ -29,6 +29,7 @@ class AttemptRecord(BaseModel):
     """
 
     id: str
+    task_type: str = "chapter_index"
     session_id: str
     chapter_id: str
     chapter_title: str
@@ -63,6 +64,16 @@ class AttemptRecord(BaseModel):
     budget_deferred_reason: Optional[str] = None
     estimated_tokens: int = 0
     estimated_model_calls: int = 0
+
+    scope_type: Optional[str] = None
+    scope_ids_hash: Optional[str] = None
+    round_index: Optional[int] = None
+    pass_type: Optional[str] = None
+    model_role: Optional[str] = None
+    proposed_change_count: int = 0
+    quality_before: Optional[float] = None
+    quality_after_preview: Optional[float] = None
+    budget_summary: Dict[str, Any] = Field(default_factory=dict)
 
 
 class AttemptStats(BaseModel):
@@ -101,6 +112,9 @@ class AttemptStore:
         """Persist an attempt record. Returns the record id."""
         key = f"{ATTEMPT_KEY_PREFIX}{record.id}"
         data = record.model_dump(mode="json")
+        if record.task_type == "deep_synthesis":
+            for field in ("raw_response_preview", "raw_response_hash"):
+                data.pop(field, None)
         async with self._lock:
             await self._storage.save(key, data)
         return record.id
