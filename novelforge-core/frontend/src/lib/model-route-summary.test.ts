@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildProfileRouteSummary,
+  formatProfileConfidence,
+  formatProfileHint,
+  formatProfileWarning,
   getModelProbeStatusLabel,
   getModelRouteSummary,
   normalizeModelRoute,
@@ -86,5 +90,44 @@ describe('model route summary', () => {
       jsonCapable: false,
       extractionRich: false,
     })).toBe('网关超时');
+  });
+});
+
+describe('profile formatting', () => {
+  it('formatProfileConfidence', () => {
+    expect(formatProfileConfidence('high')).toBe('高可信');
+    expect(formatProfileConfidence('medium')).toBe('中可信');
+    expect(formatProfileConfidence('low')).toBe('低可信');
+    expect(formatProfileConfidence(undefined)).toBe('未知');
+  });
+
+  it('formatProfileWarning', () => {
+    expect(formatProfileWarning('fallback_to_global')).toBe('当前会话无画像，已回退到全局画像');
+    expect(formatProfileWarning('profile_lookup_failed')).toBe('读取画像失败，已回退默认逻辑');
+    expect(formatProfileWarning('unknown')).toBe('unknown');
+  });
+
+  it('formatProfileHint', () => {
+    expect(formatProfileHint('needs_schema_repair')).toBe('建议搭配格式修复');
+    expect(formatProfileHint('high_timeout_risk')).toBe('超时风险较高');
+    expect(formatProfileHint('insufficient_data')).toBe('数据不足');
+  });
+
+  it('buildProfileRouteSummary with metrics', () => {
+    const route = {
+      profile_confidence: 'high',
+      selected_profile_hint: 'ok',
+      profile_warnings: ['fallback_to_global'],
+      selected_profile_metrics: { success_rate: 0.95 },
+    };
+    const summary = buildProfileRouteSummary(route);
+    expect(summary).toContain('高可信');
+    expect(summary).toContain('表现正常');
+    expect(summary).toContain('已回退到全局画像');
+  });
+
+  it('buildProfileRouteSummary without data returns null', () => {
+    expect(buildProfileRouteSummary({})).toBeNull();
+    expect(buildProfileRouteSummary(null)).toBeNull();
   });
 });

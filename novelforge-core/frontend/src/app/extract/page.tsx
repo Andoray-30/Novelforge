@@ -22,7 +22,18 @@ import {
 } from 'lucide-react';
 import { chapterIndexRunService, contentService, extractionAttemptService, modelHealthService, retryQueueService, taskService, textProcessingService } from '@/lib/api';
 import { buildAssetQualityDiagnostics, type AssetQualityDiagnosticsResult } from '@/lib/asset-quality-diagnostics';
-import { getModelHealthRankingReasonLabel, getModelProbeStatusLabel, getModelRouteSummary, normalizeModelRoute } from '@/lib/model-route-summary';
+import {
+  formatLatencyMs,
+  formatProfileConfidence,
+  formatProfileHint,
+  formatProfileRankingReason,
+  formatProfileWarning,
+  formatRate,
+  getModelHealthRankingReasonLabel,
+  getModelProbeStatusLabel,
+  getModelRouteSummary,
+  normalizeModelRoute,
+} from '@/lib/model-route-summary';
 import { buildPersistedModelHealthSummary, buildRecentModelHealthSummary } from './model-health-summary';
 import { getNovelImportStageLabel, parseNovelImportTaskResult } from '@/lib/task-events';
 import { buildRecoverySummaryCards, RECOVERY_STATUS_LABELS } from './extraction-recovery-utils';
@@ -1610,6 +1621,86 @@ export default function ExtractPage() {
                           ))}
                         </div>
                       </div>
+                    ) : null}
+                    {modelRouteSummary.profileRankings.length > 0 ? (
+                      <div className="mt-4 rounded-xl border border-[var(--nf-border)] bg-[var(--nf-panel-soft)] p-3">
+                        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                          <p className="text-xs font-bold text-[var(--nf-text)]">画像排序（PerformanceProfile）</p>
+                          <span className="text-xs text-[var(--nf-text-subtle)]">{modelRouteSummary.profileRankings.length} 个候选</span>
+                        </div>
+
+                        <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                          {modelRouteSummary.profileConfidence ? (
+                            <span className="nf-chip border-[color-mix(in_srgb,var(--nf-accent)_35%,transparent)] text-[var(--nf-accent)]">
+                              可信度：{formatProfileConfidence(modelRouteSummary.profileConfidence)}
+                            </span>
+                          ) : null}
+                          {modelRouteSummary.selectedProfileHint ? (
+                            <span className="nf-chip border-[color-mix(in_srgb,var(--nf-success)_30%,transparent)] text-[var(--nf-success)]">
+                              {formatProfileHint(modelRouteSummary.selectedProfileHint)}
+                            </span>
+                          ) : null}
+                          {modelRouteSummary.profileOrderSource ? (
+                            <span className="nf-chip text-[var(--nf-text-muted)]">
+                              排序来源：{modelRouteSummary.profileOrderSource}
+                            </span>
+                          ) : null}
+                        </div>
+
+                        {modelRouteSummary.selectedProfileMetrics ? (
+                          <div className="mt-3 grid gap-2 sm:grid-cols-4">
+                            {[
+                              ['成功率', formatRate(modelRouteSummary.selectedProfileMetrics.success_rate)],
+                              ['P95 延迟', formatLatencyMs(modelRouteSummary.selectedProfileMetrics.p95_latency_ms)],
+                              ['超时率', formatRate(modelRouteSummary.selectedProfileMetrics.timeout_rate)],
+                              ['修复挽救率', formatRate(modelRouteSummary.selectedProfileMetrics.repair_salvage_rate)],
+                            ].map(([label, value]) => (
+                              <div key={label} className="rounded-lg border border-[var(--nf-border)] bg-[var(--nf-surface)] px-3 py-2">
+                                <p className="text-xs text-[var(--nf-text-subtle)]">{label}</p>
+                                <p className="mt-1 text-sm font-bold text-[var(--nf-text)]">{value}</p>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+
+                        {modelRouteSummary.profileWarnings.length > 0 ? (
+                          <div className="mt-3 space-y-1">
+                            {modelRouteSummary.profileWarnings.map((warning) => (
+                              <div key={warning} className="rounded-lg border border-[color-mix(in_srgb,var(--nf-warning)_28%,transparent)] bg-[color-mix(in_srgb,var(--nf-warning)_8%,transparent)] px-3 py-2 text-xs leading-5 text-[var(--nf-warning)]">
+                                {formatProfileWarning(warning)}
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+
+                        <details className="mt-3 text-xs">
+                          <summary className="cursor-pointer text-[var(--nf-text-subtle)] transition-colors hover:text-[var(--nf-text-muted)]">
+                            查看画像排序详情（{modelRouteSummary.profileRankings.length} 个候选）
+                          </summary>
+                          <div className="mt-2 space-y-2">
+                            {modelRouteSummary.profileRankings.map((ranking) => (
+                              <div key={`${ranking.model}-${ranking.original_index}`} className="rounded-lg border border-[var(--nf-border)] bg-[var(--nf-surface)] px-3 py-2 text-xs leading-5">
+                                <div className="flex items-start justify-between gap-3">
+                                  <p className="break-all font-semibold text-[var(--nf-text)]">{ranking.model}</p>
+                                  <span className="shrink-0 text-[var(--nf-text-subtle)]">分数：{ranking.score}</span>
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[var(--nf-text-muted)]">
+                                  <span className="text-[var(--nf-accent)]">{formatProfileConfidence(ranking.confidence_level)}</span>
+                                  {ranking.success_rate !== undefined ? <span>成功率 {formatRate(ranking.success_rate)}</span> : null}
+                                  {ranking.p95_latency_ms !== undefined ? <span>延迟 {formatLatencyMs(ranking.p95_latency_ms)}</span> : null}
+                                  {ranking.timeout_rate !== undefined && ranking.timeout_rate > 0 ? <span className="text-[var(--nf-danger)]">超时 {formatRate(ranking.timeout_rate)}</span> : null}
+                                </div>
+                                {ranking.recommendation_hint ? (
+                                  <p className="mt-1 text-[var(--nf-text-muted)]">{formatProfileHint(ranking.recommendation_hint)}</p>
+                                ) : null}
+                                <p className="mt-1 text-[var(--nf-text-subtle)]">{formatProfileRankingReason(ranking.reason)}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      </div>
+                    ) : modelRouteSummary.profileOrderSource ? (
+                      <p className="mt-3 text-xs leading-5 text-[var(--nf-text-subtle)]">暂无历史画像排序数据</p>
                     ) : null}
                     {modelRouteSummary.probeResults.length > 0 ? (
                       <div className="mt-4 grid gap-2 md:grid-cols-2">

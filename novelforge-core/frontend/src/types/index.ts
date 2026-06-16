@@ -425,7 +425,38 @@ export interface ModelRouteDecision {
   probe_results?: ModelProbeResult[];
   original_candidates?: string[];
   candidate_order_source?: string;
+  profile_order_source?: string;
+  profile_rankings?: ProfileRankingItem[];
+  profile_confidence?: string;
+  profile_warnings?: string[];
+  selected_profile_hint?: string;
+  selected_profile_metrics?: SelectedProfileMetrics;
   health_rankings?: Array<Record<string, unknown>>;
+}
+
+export interface ProfileRankingItem {
+  model: string;
+  score: number;
+  reason: string;
+  original_index: number;
+  confidence_level: string;
+  success_rate?: number;
+  p95_latency_ms?: number;
+  timeout_rate?: number;
+  json_invalid_rate?: number;
+  repair_salvage_rate?: number;
+  retry_salvage_rate?: number;
+  recommendation_hint?: string;
+  hint_flags?: string[];
+}
+
+export interface SelectedProfileMetrics {
+  success_rate?: number;
+  p95_latency_ms?: number;
+  timeout_rate?: number;
+  repair_salvage_rate?: number;
+  confidence_level?: string;
+  recommendation_hint?: string;
 }
 
 export interface ImportAnalysisDiagnostics {

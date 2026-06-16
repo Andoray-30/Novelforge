@@ -11,6 +11,38 @@
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
   - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
 
+## 2026-06-16 Phase F.2: 前端 Model Routing 诊断展示
+
+### 本轮完成
+- 补齐前端 `ModelRouteDecision` 的 profile routing 诊断字段类型，包括 `profile_rankings`、`profile_confidence`、`profile_warnings` 和 `selected_profile_metrics`。
+- 新增 profile routing 中文格式化工具：可信度、画像 warning、推荐 hint、排序原因、比例和延迟展示。
+- 在导入页模型路由诊断中新增 PerformanceProfile 区块：
+  - 展示 profile confidence、selected profile hint 和 profile order source
+  - 展示 selected profile metrics：成功率、P95 延迟、超时率、修复挽救率
+  - 展示 profile warnings 的中文说明
+  - 使用折叠列表展示 profile rankings 候选详情
+  - 无 profile 排序数据但有来源时显示空态提示
+- 保持诊断 UI 只渲染白名单摘要字段，不展示 `raw_response_text`、`raw_response_preview`、`chapter_content` 或 provider 原始长 body。
+
+### 修改文件
+- `novelforge-core/frontend/src/types/index.ts` — 扩展 profile routing 前端类型
+- `novelforge-core/frontend/src/lib/model-route-summary.ts` — 新增 profile routing 规范化和格式化函数
+- `novelforge-core/frontend/src/lib/model-route-summary.test.ts` — 补充 profile formatting 单元测试
+- `novelforge-core/frontend/src/app/extract/page.tsx` — 新增 profile routing 诊断展示区块
+- `project-docs/PROGRESS.md` — 添加 Phase F.2 前端展示记录
+
+### 验证
+- `npm test -- --run`：32 个测试文件、153 个测试通过。
+- `npx tsc --noEmit --incremental false`：通过。
+- `npm run build`：通过，`/extract` 页面完成生产构建。
+- `git diff --check`：通过，仅出现 Windows 行尾转换 warning。
+- Playwright 浏览器 QA：可打开登录页；`/extract` 受管理员密码保护，未在无凭据环境中进入真实诊断页面。
+
+### 风险评估
+- **低风险**：仅前端展示和类型补齐，不修改后端路由策略。
+- **低风险**：profile routing 默认仍由后端配置控制，前端不默认开启任何路由能力。
+- **低风险**：诊断区块继续使用现有 `--nf-*` 设计 token 和卡片结构，不引入图表库或大规模 UI 重构。
+
 ## 2026-06-16 Phase F.1: ModelRouter Profile Routing 收口
 
 ### 本轮完成

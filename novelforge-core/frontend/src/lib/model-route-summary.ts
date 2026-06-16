@@ -1,4 +1,4 @@
-import type { ModelProbeResult, ModelRouteDecision, NovelImportTaskResult } from '@/types';
+import type { ModelProbeResult, ModelRouteDecision, NovelImportTaskResult, ProfileRankingItem, SelectedProfileMetrics } from '@/types';
 
 export type ModelRouteProbeSummary = {
   model: string;
@@ -36,6 +36,12 @@ export type ModelRouteSummary = {
   candidates: string[];
   originalCandidates: string[];
   candidateOrderSource: string | null;
+  profileOrderSource: string | null;
+  profileRankings: ProfileRankingItem[];
+  profileConfidence: string | null;
+  profileWarnings: string[];
+  selectedProfileHint: string | null;
+  selectedProfileMetrics: SelectedProfileMetrics | null;
   probeResults: ModelRouteProbeSummary[];
   healthRankings: ModelHealthRankingSummary[];
 };
@@ -91,6 +97,45 @@ function asStringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
     : [];
+}
+
+function normalizeProfileRanking(value: unknown): ProfileRankingItem | null {
+  const payload = asRecord(value);
+  if (!payload) return null;
+  const model = asString(payload.model);
+  const score = asNumber(payload.score);
+  const reason = asString(payload.reason);
+  const originalIndex = asNumber(payload.original_index);
+  const confidenceLevel = asString(payload.confidence_level);
+  if (!model || score === null || !reason || originalIndex === null || !confidenceLevel) return null;
+  return {
+    model,
+    score,
+    reason,
+    original_index: originalIndex,
+    confidence_level: confidenceLevel,
+    success_rate: asNumber(payload.success_rate) ?? undefined,
+    p95_latency_ms: asNumber(payload.p95_latency_ms) ?? undefined,
+    timeout_rate: asNumber(payload.timeout_rate) ?? undefined,
+    json_invalid_rate: asNumber(payload.json_invalid_rate) ?? undefined,
+    repair_salvage_rate: asNumber(payload.repair_salvage_rate) ?? undefined,
+    retry_salvage_rate: asNumber(payload.retry_salvage_rate) ?? undefined,
+    recommendation_hint: asString(payload.recommendation_hint) ?? undefined,
+    hint_flags: asStringArray(payload.hint_flags),
+  };
+}
+
+function normalizeSelectedProfileMetrics(value: unknown): SelectedProfileMetrics | null {
+  const payload = asRecord(value);
+  if (!payload) return null;
+  return {
+    success_rate: asNumber(payload.success_rate) ?? undefined,
+    p95_latency_ms: asNumber(payload.p95_latency_ms) ?? undefined,
+    timeout_rate: asNumber(payload.timeout_rate) ?? undefined,
+    repair_salvage_rate: asNumber(payload.repair_salvage_rate) ?? undefined,
+    confidence_level: asString(payload.confidence_level) ?? undefined,
+    recommendation_hint: asString(payload.recommendation_hint) ?? undefined,
+  };
 }
 
 function errorCountsToList(value: unknown): Array<{ type: string; label: string; count: number }> {
@@ -158,6 +203,14 @@ export function normalizeModelRoute(value: unknown): ModelRouteSummary | null {
   const candidates = asStringArray(payload.candidates);
   const originalCandidates = asStringArray(payload.original_candidates);
   const candidateOrderSource = asString(payload.candidate_order_source);
+  const profileOrderSource = asString(payload.profile_order_source);
+  const profileRankings = Array.isArray(payload.profile_rankings)
+    ? payload.profile_rankings.map(normalizeProfileRanking).filter((item): item is ProfileRankingItem => item !== null)
+    : [];
+  const profileConfidence = asString(payload.profile_confidence);
+  const profileWarnings = asStringArray(payload.profile_warnings);
+  const selectedProfileHint = asString(payload.selected_profile_hint);
+  const selectedProfileMetrics = normalizeSelectedProfileMetrics(payload.selected_profile_metrics);
   const probeResults = Array.isArray(payload.probe_results)
     ? payload.probe_results.map(normalizeProbe).filter((item): item is ModelRouteProbeSummary => item !== null)
     : [];
@@ -173,6 +226,12 @@ export function normalizeModelRoute(value: unknown): ModelRouteSummary | null {
     candidates,
     originalCandidates,
     candidateOrderSource,
+    profileOrderSource,
+    profileRankings,
+    profileConfidence,
+    profileWarnings,
+    selectedProfileHint,
+    selectedProfileMetrics,
     probeResults,
     healthRankings,
   };
@@ -190,6 +249,84 @@ export function getModelErrorTypeLabel(errorType: string | null | undefined): st
 export function getModelHealthRankingReasonLabel(reason: string | null | undefined): string | null {
   if (!reason) return null;
   return HEALTH_RANKING_REASON_LABELS[reason] || reason;
+}
+
+export function formatProfileConfidence(confidence: string | undefined): string {
+  switch (confidence) {
+    case 'high': return '高可信';
+    case 'medium': return '中可信';
+    case 'low': return '低可信';
+    default: return confidence || '未知';
+  }
+}
+
+export function formatProfileWarning(warning: string): string {
+  switch (warning) {
+    case 'fallback_to_global': return '当前会话无画像，已回退到全局画像';
+    case 'session_scope_missing_session_id': return '缺少 session_id，无法读取会话画像';
+    case 'invalid_profile_scope_fallback': return '画像作用域配置无效，已安全回退';
+    case 'profile_lookup_failed': return '读取画像失败，已回退默认逻辑';
+    default: return warning || '未知画像警告';
+  }
+}
+
+export function formatProfileHint(hint: string | undefined): string {
+  switch (hint) {
+    case 'good_for_extractor_fast': return '适合快速提取';
+    case 'needs_schema_repair': return '建议搭配格式修复';
+    case 'unstable_format': return '输出格式不稳定';
+    case 'high_timeout_risk': return '超时风险较高';
+    case 'high_latency': return '延迟偏高';
+    case 'insufficient_data': return '数据不足';
+    case 'avoid_for_long_context': return '不建议用于长上下文';
+    case 'ok': return '表现正常';
+    default: return hint || '';
+  }
+}
+
+export function formatProfileRankingReason(reason: string): string {
+  const parts = reason.split(',');
+  return parts.map((part) => {
+    switch (part.trim()) {
+      case 'high_success_rate': return '高成功率';
+      case 'high_latency': return '延迟偏高';
+      case 'high_timeout_rate': return '超时率高';
+      case 'repairable_format': return '可修复格式';
+      case 'high_repair_salvage': return '修复挽救率高';
+      case 'needs_schema_repair': return '需格式修复';
+      case 'low_confidence': return '低可信度';
+      case 'no_profile': return '无画像数据';
+      case 'neutral': return '中性';
+      default: return part.trim();
+    }
+  }).join('，');
+}
+
+export function formatRate(value: number | undefined): string {
+  if (value === undefined || value === null) return '-';
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+export function formatLatencyMs(ms: number | undefined): string {
+  if (ms === undefined || ms === null) return '-';
+  return `${Math.round(ms)}ms`;
+}
+
+export function buildProfileRouteSummary(modelRoute: ModelRouteDecision | null | undefined): string | null {
+  if (!modelRoute?.profile_rankings?.length && !modelRoute?.selected_profile_metrics) {
+    return null;
+  }
+  const parts: string[] = [];
+  if (modelRoute.profile_confidence) {
+    parts.push(`画像可信度：${formatProfileConfidence(modelRoute.profile_confidence)}`);
+  }
+  if (modelRoute.selected_profile_hint) {
+    parts.push(`画像建议：${formatProfileHint(modelRoute.selected_profile_hint)}`);
+  }
+  if (modelRoute.profile_warnings?.length) {
+    parts.push(`警告：${modelRoute.profile_warnings.map(formatProfileWarning).join('；')}`);
+  }
+  return parts.join(' | ') || null;
 }
 
 export function getModelProbeStatusLabel(probe: ModelRouteProbeSummary): string {
