@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import copy
 import time
 import uuid
 from typing import Any, Callable, Dict, List, Optional
@@ -9,6 +10,12 @@ from .attempt_store import AttemptRecord
 from .budgeted_scheduler import BudgetedScheduler, BudgetedWorkItem, BudgetPolicy
 from .deep_synthesis_models import (
     ApplyPlan,
+    DeepSynthesisAppliedChange,
+    DeepSynthesisApplyConflict,
+    DeepSynthesisApplyRequest,
+    DeepSynthesisApplyResult,
+    DeepSynthesisApplySkipReason,
+    DeepSynthesisApplySummary,
     DeepSynthesisBudgetSummary,
     DeepSynthesisBudgetTier,
     DeepSynthesisConvergenceSummary,
@@ -45,6 +52,60 @@ class DeepSynthesisValidationError(ValueError):
     pass
 
 
+class DeepSynthesisConflictError(ValueError):
+    pass
+
+
+class FieldPatchError(ValueError):
+    def __init__(self, reason: DeepSynthesisApplySkipReason, message: str):
+        super().__init__(message)
+        self.reason = reason
+
+
+MISSING = object()
+
+
+FORBIDDEN_FIELD_PATH_SEGMENTS = FORBIDDEN_INPUT_FIELDS | {"__proto__", "constructor", "prototype"}
+
+
+def parse_field_path(field_path: str) -> List[str]:
+    if not isinstance(field_path, str) or not field_path.strip():
+        raise FieldPatchError(DeepSynthesisApplySkipReason.invalid_field_path, "字段路径不能为空。")
+    segments = field_path.strip().split(".")
+    if any(not segment.strip() for segment in segments):
+        raise FieldPatchError(DeepSynthesisApplySkipReason.invalid_field_path, "字段路径包含空 segment。")
+    normalized = [segment.strip() for segment in segments]
+    for segment in normalized:
+        if segment in FORBIDDEN_FIELD_PATH_SEGMENTS:
+            raise FieldPatchError(DeepSynthesisApplySkipReason.forbidden_field_path, f"字段路径包含禁止字段: {segment}")
+    return normalized
+
+
+def get_field_value(asset_data: Dict[str, Any], field_path: str) -> Any:
+    current: Any = asset_data
+    for segment in parse_field_path(field_path):
+        if not isinstance(current, dict):
+            raise FieldPatchError(DeepSynthesisApplySkipReason.invalid_field_path, "字段路径中间节点不是对象。")
+        if segment not in current:
+            return MISSING
+        current = current[segment]
+    return current
+
+
+def apply_field_patch(asset_data: Dict[str, Any], field_path: str, proposed_value: Any) -> Dict[str, Any]:
+    patched = copy.deepcopy(asset_data)
+    current: Any = patched
+    segments = parse_field_path(field_path)
+    for segment in segments[:-1]:
+        if segment not in current:
+            current[segment] = {}
+        if not isinstance(current[segment], dict):
+            raise FieldPatchError(DeepSynthesisApplySkipReason.invalid_field_path, "字段路径中间节点不是对象。")
+        current = current[segment]
+    current[segments[-1]] = copy.deepcopy(proposed_value)
+    return patched
+
+
 class DeepSynthesisService:
     def __init__(
         self,
@@ -53,13 +114,152 @@ class DeepSynthesisService:
         budgeted_scheduler_factory: Optional[Callable[[BudgetPolicy], BudgetedScheduler]] = None,
         model_router: Optional[Any] = None,
         schema_repairer: Optional[Any] = None,
+        content_manager: Optional[Any] = None,
         clock: Optional[Callable[[], float]] = None,
     ):
         self.attempt_store = attempt_store
         self.budgeted_scheduler_factory = budgeted_scheduler_factory or (lambda policy: BudgetedScheduler(policy=policy))
         self.model_router = model_router
         self.schema_repairer = schema_repairer
+        self.content_manager = content_manager
         self.clock = clock or time.perf_counter
+
+    async def apply_preview(self, request: DeepSynthesisApplyRequest) -> DeepSynthesisApplyResult:
+        started = self.clock()
+        self._validate_apply_request(request)
+        accepted = set(request.accepted_change_ids)
+        rejected = set(request.rejected_change_ids)
+        applied: List[DeepSynthesisAppliedChange] = []
+        skipped = []
+        conflicts: List[DeepSynthesisApplyConflict] = []
+        seen_change_ids: set[str] = set()
+        processed_content: Dict[str, Any] = {}
+        base_versions: Dict[str, str] = {}
+
+        for change in request.preview.proposed_changes:
+            if change.change_id in seen_change_ids:
+                skipped.append(self._skipped(change, DeepSynthesisApplySkipReason.duplicate_change_id, "重复 change_id 已跳过。"))
+                continue
+            seen_change_ids.add(change.change_id)
+            if change.change_id in rejected:
+                skipped.append(self._skipped(change, DeepSynthesisApplySkipReason.rejected_by_user, "用户已拒绝该变更。"))
+                continue
+            if change.change_id not in accepted:
+                skipped.append(self._skipped(change, DeepSynthesisApplySkipReason.undecided, "用户未确认该变更。"))
+                continue
+            if self.content_manager is None:
+                conflicts.append(self._conflict(change, DeepSynthesisApplySkipReason.missing_asset, None, None, "ContentManager 未配置。"))
+                continue
+            try:
+                parse_field_path(change.field_path)
+            except FieldPatchError as exc:
+                conflicts.append(self._conflict(change, exc.reason, None, None, str(exc)))
+                continue
+
+            content_item = processed_content.get(change.asset_id)
+            if content_item is None:
+                content_item = await self.content_manager.get_content(change.asset_id)
+                if content_item is None:
+                    conflicts.append(self._conflict(change, DeepSynthesisApplySkipReason.missing_asset, change.asset_id, None, "资产不存在。"))
+                    continue
+                processed_content[change.asset_id] = content_item
+
+            current_version = base_versions.setdefault(change.asset_id, self._asset_version(content_item))
+            expected_version = request.expected_asset_versions.get(change.asset_id)
+            if expected_version is not None and not self._version_matches(expected_version, current_version):
+                conflicts.append(self._conflict(change, DeepSynthesisApplySkipReason.version_mismatch, expected_version, current_version, "expected_asset_versions 与当前资产版本不一致。"))
+                continue
+            if not self._version_matches(change.asset_version, current_version):
+                conflicts.append(self._conflict(change, DeepSynthesisApplySkipReason.version_mismatch, change.asset_version, current_version, "ProposedChange asset_version 与当前资产版本不一致。"))
+                continue
+
+            asset_data = copy.deepcopy(content_item.extracted_data or {})
+            try:
+                current_value = get_field_value(asset_data, change.field_path)
+            except FieldPatchError as exc:
+                conflicts.append(self._conflict(change, exc.reason, change.current_value, None, str(exc)))
+                continue
+            if change.current_value is None:
+                if current_value is not MISSING and current_value is not None:
+                    conflicts.append(self._conflict(change, DeepSynthesisApplySkipReason.current_value_mismatch, None, current_value, "当前字段已有非空值。"))
+                    continue
+                previous_value = None
+            elif current_value is MISSING or current_value != change.current_value:
+                conflicts.append(self._conflict(change, DeepSynthesisApplySkipReason.current_value_mismatch, change.current_value, None if current_value is MISSING else current_value, "当前字段值与 preview 不一致。"))
+                continue
+            else:
+                previous_value = current_value
+
+            if request.dry_run:
+                skipped.append(self._skipped(change, DeepSynthesisApplySkipReason.dry_run, "dry_run=True，未写入资产。"))
+                applied.append(DeepSynthesisAppliedChange(
+                    change_id=change.change_id,
+                    asset_type=change.asset_type,
+                    asset_id=change.asset_id,
+                    asset_version_before=current_version,
+                    asset_version_after=current_version,
+                    field_path=change.field_path,
+                    previous_value=previous_value,
+                    applied_value=change.proposed_value,
+                ))
+                continue
+
+            try:
+                patched_data = apply_field_patch(asset_data, change.field_path, change.proposed_value)
+            except FieldPatchError as exc:
+                conflicts.append(self._conflict(change, exc.reason, change.current_value, current_value, str(exc)))
+                continue
+            patched_item = content_item.model_copy(deep=True)
+            patched_item.extracted_data = patched_data
+            updated = await self.content_manager.update_content(change.asset_id, patched_item)
+            if not updated:
+                conflicts.append(self._conflict(change, DeepSynthesisApplySkipReason.missing_asset, change.asset_id, None, "资产写入失败或不存在。"))
+                continue
+            refreshed = await self.content_manager.get_content(change.asset_id)
+            if refreshed is not None:
+                processed_content[change.asset_id] = refreshed
+                asset_version_after = self._asset_version(refreshed)
+            else:
+                asset_version_after = self._next_asset_version(current_version)
+            applied.append(DeepSynthesisAppliedChange(
+                change_id=change.change_id,
+                asset_type=change.asset_type,
+                asset_id=change.asset_id,
+                asset_version_before=current_version,
+                asset_version_after=asset_version_after,
+                field_path=change.field_path,
+                previous_value=previous_value,
+                applied_value=change.proposed_value,
+            ))
+
+        summary = DeepSynthesisApplySummary(
+            accepted_count=len(accepted),
+            rejected_count=len(rejected),
+            undecided_count=sum(1 for change in request.preview.proposed_changes if change.change_id not in accepted and change.change_id not in rejected),
+            applied_count=len(applied),
+            skipped_count=len(skipped),
+            conflict_count=len(conflicts),
+            failed_count=0,
+            dry_run=request.dry_run,
+            all_or_nothing=False,
+        )
+        status = self._apply_status(summary)
+        result = DeepSynthesisApplyResult(
+            status=status,
+            summary=summary,
+            applied_changes=applied,
+            skipped_changes=skipped,
+            conflicts=conflicts,
+            warnings=[],
+            attempt_id=None,
+        )
+        result.attempt_id = await self.record_apply_attempt(request, result, self._latency_ms(started), None if status in {"success", "dry_run"} else status)
+        return result
+
+    def _validate_apply_request(self, request: DeepSynthesisApplyRequest) -> None:
+        found = sorted(self._find_forbidden_fields(request.model_dump(mode="json")))
+        if found:
+            raise DeepSynthesisValidationError(f"Deep Synthesis apply input contains forbidden fields: {', '.join(found)}")
 
     async def create_preview(self, request: DeepSynthesisRequest) -> DeepSynthesisResult:
         started = self.clock()
@@ -269,6 +469,77 @@ class DeepSynthesisService:
             user_acceptance_rate=user_feedback.user_acceptance_rate,
             pass_type=first_round.pass_type if first_round else "generation",
             budget_summary=budget_summary.model_dump(mode="json"),
+        )
+        await self.attempt_store.record(record)
+        return attempt_id
+
+    async def record_apply_attempt(
+        self,
+        request: DeepSynthesisApplyRequest,
+        result: DeepSynthesisApplyResult,
+        latency_ms: int,
+        error_type: Optional[str],
+    ) -> Optional[str]:
+        if self.attempt_store is None:
+            return None
+        attempt_id = str(uuid.uuid4())[:20]
+        record = AttemptRecord(
+            id=attempt_id,
+            task_type="deep_synthesis_apply",
+            session_id=request.session_id,
+            chapter_id=hashlib.sha256(request.session_id.encode("utf-8")).hexdigest()[:20],
+            chapter_title="deep_synthesis_apply",
+            chapter_order=0,
+            attempt_number=1,
+            status="success" if result.status in {"success", "dry_run"} else "failed",
+            model_used="",
+            timeout=0.0,
+            max_tokens=0,
+            latency_ms=latency_ms,
+            error_type=error_type,
+            error_message=None,
+            raw_response_hash=None,
+            raw_response_chars=0,
+            parsed_candidate_counts={
+                "accepted_count": result.summary.accepted_count,
+                "rejected_count": result.summary.rejected_count,
+                "applied_count": result.summary.applied_count,
+                "skipped_count": result.summary.skipped_count,
+                "conflict_count": result.summary.conflict_count,
+                "dry_run": int(result.summary.dry_run),
+            },
+            retry_count=0,
+            needs_retry=False,
+            deadline_remaining_ms=None,
+            budget_phase="apply",
+            budget_status="skipped" if request.dry_run else "accepted",
+            budget_deferred_reason=None,
+            estimated_tokens=0,
+            estimated_model_calls=0,
+            scope_type="apply",
+            scope_ids_hash=hashlib.sha256(request.session_id.encode("utf-8")).hexdigest()[:20],
+            round_index=0,
+            model_role=None,
+            proposed_change_count=len(request.preview.proposed_changes),
+            high_confidence_change_count=0,
+            unresolved_conflict_count=result.summary.conflict_count,
+            convergence_reason=result.status,
+            quality_before=None,
+            quality_after_preview=None,
+            user_acceptance_rate=self.compute_user_acceptance_rate(request.accepted_change_ids, request.rejected_change_ids),
+            pass_type="generation",
+            budget_summary={
+                "task_type": "deep_synthesis_apply",
+                "applied_count": result.summary.applied_count,
+                "skipped_count": result.summary.skipped_count,
+                "conflict_count": result.summary.conflict_count,
+                "dry_run": result.summary.dry_run,
+                "accepted_count": result.summary.accepted_count,
+                "rejected_count": result.summary.rejected_count,
+                "user_acceptance_rate": self.compute_user_acceptance_rate(request.accepted_change_ids, request.rejected_change_ids),
+                "status": result.status,
+                "error_type": error_type,
+            },
         )
         await self.attempt_store.record(record)
         return attempt_id
@@ -561,6 +832,56 @@ class DeepSynthesisService:
             for item in value:
                 found.update(DeepSynthesisService._find_forbidden_fields(item))
         return found
+
+    @staticmethod
+    def _asset_version(content_item: Any) -> str:
+        return f"v{content_item.metadata.version}"
+
+    @staticmethod
+    def _version_matches(expected: str, actual: str) -> bool:
+        return str(expected) == actual or str(expected).lstrip("v") == actual.lstrip("v")
+
+    @staticmethod
+    def _next_asset_version(version: str) -> str:
+        try:
+            return f"v{int(version.lstrip('v')) + 1}"
+        except ValueError:
+            return version
+
+    @staticmethod
+    def _skipped(change: ProposedChange, reason: DeepSynthesisApplySkipReason, message: str):
+        from .deep_synthesis_models import DeepSynthesisSkippedChange
+        return DeepSynthesisSkippedChange(
+            change_id=change.change_id,
+            asset_type=change.asset_type,
+            asset_id=change.asset_id,
+            field_path=change.field_path,
+            reason=reason,
+            message=message,
+        )
+
+    @staticmethod
+    def _conflict(change: ProposedChange, reason: DeepSynthesisApplySkipReason, expected: Any, actual: Any, message: str) -> DeepSynthesisApplyConflict:
+        return DeepSynthesisApplyConflict(
+            change_id=change.change_id,
+            asset_type=change.asset_type,
+            asset_id=change.asset_id,
+            field_path=change.field_path,
+            reason=reason,
+            expected=expected,
+            actual=actual,
+            message=message,
+        )
+
+    @staticmethod
+    def _apply_status(summary: DeepSynthesisApplySummary) -> str:
+        if summary.dry_run:
+            return "dry_run"
+        if summary.conflict_count > 0 and summary.applied_count == 0:
+            return "failed"
+        if summary.applied_count > 0 and summary.conflict_count > 0:
+            return "partial"
+        return "success"
 
     @staticmethod
     def _empty_preview(summary: str) -> DeepSynthesisPreview:

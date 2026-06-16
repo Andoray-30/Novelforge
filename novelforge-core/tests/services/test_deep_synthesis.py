@@ -1,12 +1,20 @@
 import json
+import copy
 from types import SimpleNamespace
 
 import pytest
 
 from novelforge.services.attempt_store import AttemptStore
 from novelforge.services.budgeted_scheduler import BudgetedScheduler, BudgetPolicy
-from novelforge.services.deep_synthesis import DeepSynthesisService, DeepSynthesisValidationError
-from novelforge.services.deep_synthesis_models import DeepSynthesisRequest
+from novelforge.services.deep_synthesis import (
+    DeepSynthesisService,
+    DeepSynthesisValidationError,
+    apply_field_patch,
+    get_field_value,
+    parse_field_path,
+)
+from novelforge.services.deep_synthesis_models import DeepSynthesisApplyRequest, DeepSynthesisRequest
+from novelforge.content.models import ContentItem, ContentMetadata, ContentStatus, ContentType
 
 
 class MemoryStorage:
@@ -22,6 +30,38 @@ class MemoryStorage:
 
     async def list_keys(self, storage_type=None):
         return list(self.data.keys())
+
+
+def make_content_item(*, content_id="char-1", version=1, extracted_data=None):
+    return ContentItem(
+        metadata=ContentMetadata(
+            id=content_id,
+            title="林墨",
+            type=ContentType.CHARACTER,
+            status=ContentStatus.DRAFT,
+            version=version,
+        ),
+        content="",
+        extracted_data=copy.deepcopy(extracted_data or {"profile": {"summary": "旧摘要", "traits": ["沉默"]}}),
+    )
+
+
+class FakeContentManager:
+    def __init__(self, items=None):
+        self.items = {item.metadata.id: item for item in (items or [])}
+        self.write_calls = []
+
+    async def get_content(self, content_id):
+        return self.items.get(content_id)
+
+    async def update_content(self, content_id, content_item):
+        existing = self.items.get(content_id)
+        if existing is None:
+            return False
+        content_item.metadata.version = existing.metadata.version + 1
+        self.items[content_id] = content_item
+        self.write_calls.append((content_id, content_item))
+        return True
 
 
 class FakeRouter:
@@ -90,6 +130,25 @@ def make_request_with_conflicts(**overrides):
         }
     ]
     return DeepSynthesisRequest.model_validate(payload)
+
+
+def make_apply_request(**overrides):
+    preview = DeepSynthesisService(model_router=FakeRouter()).sanitize_preview(
+        DeepSynthesisService(model_router=FakeRouter())._build_preview_from_structured_assets(make_request())
+    ).model_dump(mode="json")
+    preview["proposed_changes"][0]["field_path"] = "profile.summary"
+    preview["proposed_changes"][0]["current_value"] = "旧摘要"
+    preview["proposed_changes"][0]["proposed_value"] = "新摘要"
+    payload = {
+        "session_id": "session-deep",
+        "preview": preview,
+        "accepted_change_ids": ["char-1:1"],
+        "rejected_change_ids": [],
+        "expected_asset_versions": {"char-1": "v1"},
+        "dry_run": False,
+    }
+    payload.update(overrides)
+    return DeepSynthesisApplyRequest.model_validate(payload)
 
 
 @pytest.mark.asyncio
@@ -202,6 +261,234 @@ async def test_attempt_store_records_deep_synthesis_attempt():
     assert record.task_type == "deep_synthesis"
     assert record.model_role == "extractor_deep"
     assert record.proposed_change_count == 1
+
+
+def test_parse_field_path_blocks_forbidden_segments():
+    with pytest.raises(Exception):
+        parse_field_path("profile.__proto__")
+
+
+def test_apply_field_patch_returns_new_dict():
+    data = {"profile": {"summary": "旧摘要"}}
+
+    patched = apply_field_patch(data, "profile.summary", "新摘要")
+
+    assert patched["profile"]["summary"] == "新摘要"
+    assert data["profile"]["summary"] == "旧摘要"
+
+
+def test_get_field_value_reads_nested_value():
+    assert get_field_value({"profile": {"traits": ["沉默"]}}, "profile.traits") == ["沉默"]
+
+
+@pytest.mark.asyncio
+async def test_apply_preview_applies_accepted_change():
+    manager = FakeContentManager([make_content_item()])
+    service = DeepSynthesisService(content_manager=manager)
+
+    result = await service.apply_preview(make_apply_request())
+
+    assert result.status == "success"
+    assert result.summary.applied_count == 1
+    assert manager.write_calls
+    assert manager.items["char-1"].extracted_data["profile"]["summary"] == "新摘要"
+
+
+@pytest.mark.asyncio
+async def test_apply_preview_skips_rejected_and_undecided_changes():
+    manager = FakeContentManager([make_content_item()])
+    service = DeepSynthesisService(content_manager=manager)
+    request = make_apply_request(
+        accepted_change_ids=[],
+        rejected_change_ids=["char-1:1"],
+    )
+
+    result = await service.apply_preview(request)
+
+    assert result.summary.skipped_count == 1
+    assert result.skipped_changes[0].reason == "rejected_by_user"
+    assert manager.write_calls == []
+
+
+@pytest.mark.asyncio
+async def test_apply_preview_skips_duplicate_change_id():
+    manager = FakeContentManager([make_content_item()])
+    service = DeepSynthesisService(content_manager=manager)
+    request = make_apply_request()
+    request.preview.proposed_changes.append(request.preview.proposed_changes[0].model_copy(deep=True))
+
+    result = await service.apply_preview(request)
+
+    assert any(item.reason == "duplicate_change_id" for item in result.skipped_changes)
+
+
+@pytest.mark.asyncio
+async def test_apply_preview_rejects_forbidden_field_path():
+    manager = FakeContentManager([make_content_item()])
+    service = DeepSynthesisService(content_manager=manager)
+    request = make_apply_request()
+    request.preview.proposed_changes[0].field_path = "profile.raw_response_text"
+
+    result = await service.apply_preview(request)
+
+    assert result.conflicts[0].reason == "forbidden_field_path"
+    assert manager.write_calls == []
+
+
+@pytest.mark.asyncio
+async def test_apply_preview_invalid_field_path_is_conflict():
+    manager = FakeContentManager([make_content_item()])
+    service = DeepSynthesisService(content_manager=manager)
+    request = make_apply_request()
+    request.preview.proposed_changes[0].field_path = "profile..summary"
+
+    result = await service.apply_preview(request)
+
+    assert result.conflicts[0].reason == "invalid_field_path"
+    assert manager.write_calls == []
+
+
+@pytest.mark.asyncio
+async def test_apply_preview_version_mismatch_returns_conflict_and_does_not_write():
+    manager = FakeContentManager([make_content_item(version=2)])
+    service = DeepSynthesisService(content_manager=manager)
+
+    result = await service.apply_preview(make_apply_request(expected_asset_versions={"char-1": "v1"}))
+
+    assert result.conflicts[0].reason == "version_mismatch"
+    assert manager.write_calls == []
+
+
+@pytest.mark.asyncio
+async def test_apply_preview_current_value_mismatch_returns_conflict_and_does_not_write():
+    manager = FakeContentManager([make_content_item()])
+    service = DeepSynthesisService(content_manager=manager)
+    request = make_apply_request()
+    request.preview.proposed_changes[0].current_value = "不同值"
+
+    result = await service.apply_preview(request)
+
+    assert result.conflicts[0].reason == "current_value_mismatch"
+    assert manager.write_calls == []
+
+
+@pytest.mark.asyncio
+async def test_apply_preview_current_value_none_only_writes_missing_field():
+    manager = FakeContentManager([make_content_item(extracted_data={"profile": {}})])
+    service = DeepSynthesisService(content_manager=manager)
+    request = make_apply_request()
+    request.preview.proposed_changes[0].current_value = None
+
+    result = await service.apply_preview(request)
+
+    assert result.status == "success"
+    assert manager.items["char-1"].extracted_data["profile"]["summary"] == "新摘要"
+
+
+@pytest.mark.asyncio
+async def test_apply_preview_dry_run_does_not_write():
+    manager = FakeContentManager([make_content_item()])
+    service = DeepSynthesisService(content_manager=manager)
+
+    result = await service.apply_preview(make_apply_request(dry_run=True))
+
+    assert result.status == "dry_run"
+    assert result.summary.dry_run is True
+    assert result.skipped_changes[0].reason == "dry_run"
+    assert manager.write_calls == []
+
+
+@pytest.mark.asyncio
+async def test_apply_preview_nested_field_path_patch_works():
+    manager = FakeContentManager([make_content_item(extracted_data={"profile": {"traits": ["沉默"]}})])
+    service = DeepSynthesisService(content_manager=manager)
+    request = make_apply_request()
+    request.preview.proposed_changes[0].field_path = "profile.traits"
+    request.preview.proposed_changes[0].current_value = ["沉默"]
+    request.preview.proposed_changes[0].proposed_value = ["沉默", "警觉"]
+
+    result = await service.apply_preview(request)
+
+    assert result.applied_changes[0].field_path == "profile.traits"
+    assert manager.items["char-1"].extracted_data["profile"]["traits"] == ["沉默", "警觉"]
+
+
+@pytest.mark.asyncio
+async def test_apply_preview_multiple_accepted_changes_updates_only_accepted_fields():
+    manager = FakeContentManager([make_content_item(extracted_data={"profile": {"summary": "旧摘要", "traits": ["沉默"]}, "status": "初始"})])
+    service = DeepSynthesisService(content_manager=manager)
+    request = make_apply_request()
+    request.preview.proposed_changes[0].proposed_value = "新摘要"
+    request.preview.proposed_changes.append(request.preview.proposed_changes[0].model_copy(deep=True))
+    request.preview.proposed_changes[1].change_id = "char-1:2"
+    request.preview.proposed_changes[1].field_path = "status"
+    request.preview.proposed_changes[1].current_value = "初始"
+    request.preview.proposed_changes[1].proposed_value = "更新"
+    request.accepted_change_ids = ["char-1:1", "char-1:2"]
+
+    result = await service.apply_preview(request)
+
+    assert result.summary.applied_count == 2
+    assert manager.items["char-1"].extracted_data["profile"]["summary"] == "新摘要"
+    assert manager.items["char-1"].extracted_data["status"] == "更新"
+
+
+@pytest.mark.asyncio
+async def test_apply_preview_conflict_plus_applied_gives_partial_status():
+    manager = FakeContentManager([make_content_item()])
+    service = DeepSynthesisService(content_manager=manager)
+    request = make_apply_request()
+    request.preview.proposed_changes.append(request.preview.proposed_changes[0].model_copy(deep=True))
+    request.preview.proposed_changes[1].change_id = "char-1:2"
+    request.preview.proposed_changes[1].current_value = "不匹配"
+    request.accepted_change_ids = ["char-1:1", "char-1:2"]
+
+    result = await service.apply_preview(request)
+
+    assert result.status == "partial"
+
+
+@pytest.mark.asyncio
+async def test_apply_preview_no_accepted_changes_returns_success_no_op():
+    manager = FakeContentManager([make_content_item()])
+    service = DeepSynthesisService(content_manager=manager)
+
+    result = await service.apply_preview(make_apply_request(accepted_change_ids=[]))
+
+    assert result.status == "success"
+    assert result.summary.applied_count == 0
+    assert manager.write_calls == []
+
+
+@pytest.mark.asyncio
+async def test_apply_preview_result_serialization_contains_no_forbidden_fields():
+    manager = FakeContentManager([make_content_item()])
+    service = DeepSynthesisService(content_manager=manager)
+
+    result = await service.apply_preview(make_apply_request())
+    serialized = json.dumps(result.model_dump(mode="json"), ensure_ascii=False)
+
+    assert "chapter_content" not in serialized
+    assert "raw_response_text" not in serialized
+    assert "raw_response_preview" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_apply_attempt_metadata_does_not_store_raw_text():
+    storage = MemoryStorage()
+    store = AttemptStore(storage)
+    manager = FakeContentManager([make_content_item()])
+    service = DeepSynthesisService(attempt_store=store, content_manager=manager)
+
+    result = await service.apply_preview(make_apply_request())
+    persisted = next(iter(storage.data.values()))
+    serialized = json.dumps(persisted, ensure_ascii=False)
+
+    assert result.attempt_id
+    assert persisted["task_type"] == "deep_synthesis_apply"
+    assert "raw_response_text" not in serialized
+    assert "raw_response_preview" not in serialized
+    assert "chapter_content" not in serialized
 
 
 @pytest.mark.asyncio

@@ -116,7 +116,7 @@ class AttemptStore:
         """Persist an attempt record. Returns the record id."""
         key = f"{ATTEMPT_KEY_PREFIX}{record.id}"
         data = record.model_dump(mode="json")
-        if record.task_type == "deep_synthesis":
+        if record.task_type in {"deep_synthesis", "deep_synthesis_apply"}:
             for field in ("raw_response_preview", "raw_response_hash"):
                 data.pop(field, None)
         async with self._lock:

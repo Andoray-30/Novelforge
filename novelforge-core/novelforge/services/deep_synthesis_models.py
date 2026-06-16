@@ -218,6 +218,102 @@ class DeepSynthesisUserFeedback(BaseModel):
     user_acceptance_rate: Optional[float] = None
 
 
+class DeepSynthesisApplyStatus(str, Enum):
+    applied = "applied"
+    skipped = "skipped"
+    conflict = "conflict"
+    failed = "failed"
+
+
+class DeepSynthesisApplySkipReason(str, Enum):
+    rejected_by_user = "rejected_by_user"
+    undecided = "undecided"
+    duplicate_change_id = "duplicate_change_id"
+    unsupported_asset_type = "unsupported_asset_type"
+    missing_asset = "missing_asset"
+    invalid_field_path = "invalid_field_path"
+    forbidden_field_path = "forbidden_field_path"
+    version_mismatch = "version_mismatch"
+    current_value_mismatch = "current_value_mismatch"
+    dry_run = "dry_run"
+
+
+class DeepSynthesisApplyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str = Field(..., min_length=1)
+    preview: DeepSynthesisPreview
+    accepted_change_ids: List[str] = Field(default_factory=list)
+    rejected_change_ids: List[str] = Field(default_factory=list)
+    expected_asset_versions: Dict[str, str] = Field(default_factory=dict)
+    dry_run: bool = False
+    idempotency_key: Optional[str] = None
+
+
+class DeepSynthesisAppliedChange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    change_id: str
+    asset_type: DeepSynthesisAssetType
+    asset_id: str
+    asset_version_before: str
+    asset_version_after: str
+    field_path: str
+    previous_value: Any = None
+    applied_value: Any = None
+
+
+class DeepSynthesisSkippedChange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    change_id: str
+    asset_type: DeepSynthesisAssetType
+    asset_id: str
+    field_path: str
+    reason: DeepSynthesisApplySkipReason
+    message: str
+
+
+class DeepSynthesisApplyConflict(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    change_id: str
+    asset_type: DeepSynthesisAssetType
+    asset_id: str
+    field_path: str
+    reason: DeepSynthesisApplySkipReason
+    expected: Any = None
+    actual: Any = None
+    message: str
+
+
+class DeepSynthesisApplySummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    accepted_count: int = 0
+    rejected_count: int = 0
+    undecided_count: int = 0
+    applied_count: int = 0
+    skipped_count: int = 0
+    conflict_count: int = 0
+    failed_count: int = 0
+    dry_run: bool = False
+    all_or_nothing: bool = False
+
+
+class DeepSynthesisApplyResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["success", "partial", "failed", "dry_run"]
+    summary: DeepSynthesisApplySummary
+    applied_changes: List[DeepSynthesisAppliedChange] = Field(default_factory=list)
+    skipped_changes: List[DeepSynthesisSkippedChange] = Field(default_factory=list)
+    conflicts: List[DeepSynthesisApplyConflict] = Field(default_factory=list)
+    warnings: List[DeepSynthesisWarning] = Field(default_factory=list)
+    attempt_id: Optional[str] = None
+    task_type: str = "deep_synthesis_apply"
+
+
 class DeepSynthesisResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
