@@ -2557,9 +2557,10 @@ async def create_deep_synthesis_preview(request: DeepSynthesisRequest):
             detail=str(exc),
         )
     except Exception as e:
+        logger.exception("Deep Synthesis preview 内部异常")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Deep Synthesis preview 生成失败: {str(e)}",
+            detail="Deep Synthesis preview 生成失败",
         )
 
 

@@ -37,6 +37,11 @@ class MemoryStorage:
         return list(self.data.keys())
 
 
+class FailingStorage(MemoryStorage):
+    async def save(self, key, value, storage_type=None):
+        raise RuntimeError("provider_error_body: secret chapter_content leaked")
+
+
 def payload(**overrides):
     data = {
         "session_id": "api-session-deep",
@@ -136,3 +141,40 @@ def test_post_deep_synthesis_preview_response_excludes_forbidden_fields(monkeypa
     assert "chapter_content" not in serialized
     assert "raw_response_text" not in serialized
     assert "raw_response_preview" not in serialized
+
+
+def test_post_deep_synthesis_preview_500_returns_safe_detail(monkeypatch):
+    import novelforge.api as api_module
+
+    router = FakeRouter()
+    monkeypatch.setattr(api_module.extraction_service, "model_router", router)
+    monkeypatch.setattr(api_module, "attempt_store", AttemptStore(FailingStorage()))
+    client = TestClient(api_module.app, raise_server_exceptions=False)
+
+    response = client.post("/api/extraction/deep-synthesis/preview", json=payload())
+
+    assert response.status_code == 500
+    detail = response.json()["detail"]
+    assert detail == "Deep Synthesis preview 生成失败"
+    assert "provider_error_body" not in detail
+    assert "chapter_content" not in detail
+    assert "secret" not in detail
+
+
+def test_post_deep_synthesis_preview_forbidden_field_does_not_echo_value(monkeypatch):
+    client, _ = client_with_fake_router(monkeypatch)
+    request = payload(assets=[{
+        "asset_type": "character",
+        "asset_id": "char-api",
+        "asset_version": "v1",
+        "data": {"chapter_content": "secret novel text here"},
+    }])
+
+    response = client.post("/api/extraction/deep-synthesis/preview", json=request)
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    # field names are allowed
+    assert "chapter_content" in detail
+    # field values must not be echoed
+    assert "secret novel text here" not in detail

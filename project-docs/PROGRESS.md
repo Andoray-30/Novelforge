@@ -11,6 +11,36 @@
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
   - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
 
+## 2026-06-16 Phase G.1.1: Worktree Hygiene + Deep Synthesis API Safety
+
+### 工作树状态
+- 工作树存在大量既有改动（100+ 文件），均为本轮之前的外部改动。
+- 本轮只修改允许范围内文件：`api/__init__.py`、`test_deep_synthesis_api.py`、`PROGRESS.md`。
+- 建议用户在适当时机统一处理既有改动。
+
+### 本轮完成
+- 修复 `POST /api/extraction/deep-synthesis/preview` 500 错误泄露：
+  - 原 `except Exception as e` 将 `str(e)` 直接返回前端，可泄露 provider 原始错误、raw text、chapter_content。
+  - 改为固定安全信息 `detail="Deep Synthesis preview 生成失败"`，不包含 `str(e)`。
+  - 500 异常通过 `logger.exception` 记录日志（截断/脱敏由 logger 配置控制）。
+- 验证 validation error（`DeepSynthesisValidationError`）行为：
+  - 只回显字段名（如 `"raw_response_text"`），不回显字段值（如 `"secret text"`）。
+  - 当前行为已符合安全要求，无需额外修改。
+- 新增 2 个 API 安全测试：
+  - `test_post_deep_synthesis_preview_500_returns_safe_detail`：模拟内部异常，验证返回安全 detail，不包含 `provider_error_body`、`chapter_content`、`secret`。
+  - `test_post_deep_synthesis_preview_forbidden_field_does_not_echo_value`：验证 forbidden field 返回 400 时，detail 包含字段名但不包含字段值。
+
+### 修改文件
+- `novelforge-core/novelforge/api/__init__.py` — 修复 500 handler 安全信息。
+- `novelforge-core/tests/api/test_deep_synthesis_api.py` — 新增安全测试。
+- `project-docs/PROGRESS.md` — 添加 Phase G.1.1 记录。
+
+### 验证
+- `pytest tests/services/test_deep_synthesis.py -v`：17 passed。
+- `pytest tests/api/test_deep_synthesis_api.py -v`：7 passed（原 5 + 新增 2）。
+- `pytest tests/ -q`：416 passed。
+- `git diff --check`：通过，仅出现既有 Windows LF → CRLF warning。
+
 ## 2026-06-16 Phase G.1: Deep Synthesis 基础框架
 
 ### 本轮完成
@@ -42,7 +72,7 @@
 
 ### 验证
 - `pytest tests/services/test_deep_synthesis.py -v`：17 passed。
-- `pytest tests/api/test_deep_synthesis_api.py -v`：5 passed。
+- `pytest tests/api/test_deep_synthesis_api.py -v`：7 passed（Phase G.1.1 新增 2 个安全测试）。
 - `pytest tests/ -q`：414 passed。
 - `git diff --check`：通过，仅出现既有 Windows LF → CRLF warning。
 - `git status --short`：工作树存在大量本轮外的既有改动；本轮只修改上述允许范围文件。
