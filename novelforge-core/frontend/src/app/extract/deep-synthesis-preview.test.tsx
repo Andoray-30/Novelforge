@@ -4,38 +4,19 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { DeepSynthesisPreviewPanel } from './deep-synthesis-preview';
 import type { DeepSynthesisResult, DeepSynthesisAssetType } from '@/types';
 
-function makeMockResult(overrides?: Partial<DeepSynthesisResult>): DeepSynthesisResult {
+function buildDeepSynthesisResultFixture(overrides?: Partial<DeepSynthesisResult>): DeepSynthesisResult {
   return {
-    attempt_id: 'att-12345678-abcd',
-    session_id: 'ses-test',
-    task_type: 'deep_synthesis',
     status: 'completed',
-    budget_summary: {
-      budget_tier: 'medium',
-      max_rounds: 2,
-      max_parallel_queries: 4,
-    },
-    convergence_summary: {
-      converged: true,
-      reason: 'quality_target reached',
-      rounds_completed: 2,
-      quality_before: 0.72,
-      quality_after: 0.85,
-      should_continue: false,
-    },
-    quality_trace: {
-      quality_before: 0.72,
-      quality_after_preview: 0.85,
-      quality_delta: 0.13,
-    },
+    task_type: 'deep_synthesis',
+    attempt_id: 'att-12345678-abcd',
     preview: {
       summary: '本次综合发现 3 项角色设定冲突并已自动消解',
       proposed_changes: [
         {
           change_id: 'ch-1',
-          asset_type: 'character',
+          asset_type: 'character' as DeepSynthesisAssetType,
           asset_id: 'char-001',
-          asset_name: '张三',
+          asset_version: 'v2',
           field_path: 'personality.traits',
           current_value: '冷酷无情',
           proposed_value: '外冷内热，对亲近之人温柔',
@@ -56,9 +37,9 @@ function makeMockResult(overrides?: Partial<DeepSynthesisResult>): DeepSynthesis
         },
         {
           change_id: 'ch-2',
-          asset_type: 'world_fact',
+          asset_type: 'world_fact' as DeepSynthesisAssetType,
           asset_id: 'world-001',
-          asset_name: '黑石镇',
+          asset_version: 'v1',
           field_path: 'description',
           current_value: null,
           proposed_value: '盛产黑曜石的矿业小镇',
@@ -74,26 +55,68 @@ function makeMockResult(overrides?: Partial<DeepSynthesisResult>): DeepSynthesis
       confidence_delta: 0.13,
       evidence_refs: [],
       apply_plan: {
-        description: '应用 2 项变更',
-        change_count: 2,
-        auto_applyable_count: 1,
-        requires_confirmation_count: 1,
+        requires_user_confirmation: true,
+        apply_mode: 'preview_patch',
+        patch_strategy: 'field_level',
+        asset_write_policy: 'confirm_before_apply',
       },
       requires_user_confirmation: true,
     },
+    budget_summary: {
+      budget_tier: 'medium',
+      max_model_calls: 10,
+      max_estimated_tokens: 50000,
+      max_rounds: 2,
+      model_calls_used: 4,
+      estimated_tokens_used: 18000,
+      remaining_model_calls: 6,
+      remaining_estimated_tokens: 32000,
+      exhausted: false,
+    },
+    convergence_summary: {
+      converged: true,
+      reason: 'quality_target reached',
+      rounds_completed: 2,
+      quality_before: 0.72,
+      quality_after: 0.85,
+      total_quality_delta: 0.13,
+      total_proposed_change_count: 5,
+      total_high_confidence_change_count: 3,
+      unresolved_conflict_count: 0,
+      user_acceptance_rate: 0.8,
+      should_continue: false,
+    },
+    quality_trace: {
+      quality_before: 0.72,
+      quality_after_preview: 0.85,
+      quality_delta: 0.13,
+      proposed_change_count: 5,
+      high_confidence_change_count: 3,
+      unresolved_conflict_count: 0,
+    },
+    user_feedback: {
+      accepted_change_ids: [],
+      rejected_change_ids: [],
+      user_acceptance_rate: null,
+    },
+    warnings: [],
     round_summaries: [
       {
-        round_number: 1,
+        round_index: 0,
         pass_type: 'generation',
-        status: 'completed',
-        query_count: 3,
-        success_count: 3,
-        failed_count: 0,
-        novel_ideas_discovered: 2,
-        conflicts_resolved: 1,
-        quality_delta_percent: 0.08,
+        status: 'success',
+        proposed_change_count: 5,
+        high_confidence_change_count: 3,
+        unresolved_conflict_count: 1,
+        quality_before: 0.72,
+        quality_after: 0.78,
+        quality_delta: 0.06,
+        model_calls_used: 2,
+        estimated_tokens_used: 9000,
+        warnings: [],
       },
     ],
+    model_route: null,
     ...overrides,
   };
 }
@@ -115,64 +138,87 @@ const defaultProps = {
 };
 
 describe('DeepSynthesisPreviewPanel', () => {
-  it('renders preview.summary', () => {
-    const result = makeMockResult();
-    render(React.createElement(DeepSynthesisPreviewPanel, { result, ...defaultProps }));
+  it('renders empty state when no result', () => {
+    render(React.createElement(DeepSynthesisPreviewPanel, { result: null, ...defaultProps }));
+    expect(screen.getByText(/无可用的深度合成预览数据/)).toBeTruthy();
+  });
 
+  it('renders preview.summary from result.preview.summary', () => {
+    const result = buildDeepSynthesisResultFixture();
+    render(React.createElement(DeepSynthesisPreviewPanel, { result, ...defaultProps }));
     expect(screen.getByText(/本次综合发现 3 项角色设定冲突并已自动消解/)).toBeTruthy();
   });
 
-  it('renders proposed_changes with asset names and field paths', () => {
-    const result = makeMockResult();
+  it('renders proposed_changes from result.preview.proposed_changes', () => {
+    const result = buildDeepSynthesisResultFixture();
     render(React.createElement(DeepSynthesisPreviewPanel, { result, ...defaultProps }));
-
-    expect(screen.getByText('张三')).toBeTruthy();
-    expect(screen.getByText('黑石镇')).toBeTruthy();
+    expect(screen.getByText('char-001')).toBeTruthy();
+    expect(screen.getByText('world-001')).toBeTruthy();
   });
 
-  it('fires onAcceptChange when accept button is clicked', () => {
-    const onAcceptChange = vi.fn();
-    const result = makeMockResult();
-    render(React.createElement(DeepSynthesisPreviewPanel, { result, ...defaultProps, onAcceptChange }));
+  it('renders field-level current/proposed values', () => {
+    const result = buildDeepSynthesisResultFixture();
+    render(React.createElement(DeepSynthesisPreviewPanel, { result, ...defaultProps }));
+    expect(screen.getByText(/冷酷无情/)).toBeTruthy();
+    expect(screen.getByText(/外冷内热，对亲近之人温柔/)).toBeTruthy();
+    expect(screen.getByText(/盛产黑曜石的矿业小镇/)).toBeTruthy();
+  });
 
+  it('renders evidence summary, not quote/snippet/chapter_title', () => {
+    const result = buildDeepSynthesisResultFixture();
+    render(React.createElement(DeepSynthesisPreviewPanel, { result, ...defaultProps }));
+    expect(screen.getByText(/第三章中张三主动帮助受伤的旅人/)).toBeTruthy();
+    const body = document.body.textContent || '';
+    expect(body).not.toContain('chapter_title');
+    expect(body).not.toContain('quote');
+    expect(body).not.toContain('snippet');
+  });
+
+  it('accept button calls onAcceptChange with change_id', () => {
+    const onAcceptChange = vi.fn();
+    const result = buildDeepSynthesisResultFixture();
+    render(React.createElement(DeepSynthesisPreviewPanel, { result, ...defaultProps, onAcceptChange }));
     const acceptButtons = screen.getAllByText('接受更正');
     fireEvent.click(acceptButtons[0]);
     expect(onAcceptChange).toHaveBeenCalledWith('ch-1');
   });
 
-  it('fires onRejectChange when reject button is clicked', () => {
+  it('reject button calls onRejectChange with change_id', () => {
     const onRejectChange = vi.fn();
-    const result = makeMockResult();
+    const result = buildDeepSynthesisResultFixture();
     render(React.createElement(DeepSynthesisPreviewPanel, { result, ...defaultProps, onRejectChange }));
-
     const rejectButtons = screen.getAllByText('拒绝');
     fireEvent.click(rejectButtons[0]);
     expect(onRejectChange).toHaveBeenCalledWith('ch-1');
   });
 
-  it('does not render forbidden fields (chapter_content, raw_response_text)', () => {
-    const result = makeMockResult();
+  it('handles null convergence_summary and null quality_trace without crash', () => {
+    const result = buildDeepSynthesisResultFixture({
+      convergence_summary: null,
+      quality_trace: null,
+    });
     render(React.createElement(DeepSynthesisPreviewPanel, { result, ...defaultProps }));
+    expect(screen.getByText(/提炼演进摘要/)).toBeTruthy();
+    expect(screen.getByText('0 轮')).toBeTruthy();
+    const dashes = screen.getAllByText('—');
+    expect(dashes.length).toBeGreaterThan(0);
+  });
 
+  it('does not render forbidden field values', () => {
+    const result = buildDeepSynthesisResultFixture();
+    render(React.createElement(DeepSynthesisPreviewPanel, { result, ...defaultProps }));
     const body = document.body.textContent || '';
     expect(body).not.toContain('chapter_content');
     expect(body).not.toContain('raw_response_text');
     expect(body).not.toContain('raw_response_preview');
+    expect(body).not.toContain('chapter_title');
   });
 
-  it('handles null convergence_summary without crashing', () => {
-    const result = makeMockResult({ convergence_summary: null });
-    render(React.createElement(DeepSynthesisPreviewPanel, { result, ...defaultProps }));
-
-    expect(screen.getByText(/提炼演进摘要/)).toBeTruthy();
-    expect(screen.getByText('0 轮')).toBeTruthy();
-  });
-
-  it('handles null quality_trace without crashing', () => {
-    const result = makeMockResult({ quality_trace: null });
-    render(React.createElement(DeepSynthesisPreviewPanel, { result, ...defaultProps }));
-
-    const dashes = screen.getAllByText('—');
-    expect(dashes.length).toBeGreaterThan(0);
+  it('budget selector shows low=1, medium=2, high=3', () => {
+    render(React.createElement(DeepSynthesisPreviewPanel, { result: buildDeepSynthesisResultFixture(), ...defaultProps }));
+    const body = document.body.textContent || '';
+    expect(body).toContain('低预算演进（最多 1 轮）');
+    expect(body).toContain('标准预算演进（最多 2 轮）');
+    expect(body).toContain('高预算演进（最多 3 轮）');
   });
 });

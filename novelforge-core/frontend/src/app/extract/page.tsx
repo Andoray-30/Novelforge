@@ -1214,6 +1214,9 @@ export default function ExtractPage() {
       const res = await deepSynthesisService.createPreview({
         session_id: sessionId,
         scope_type: deepSynthesisScopeType,
+        scope_ids: [],
+        assets: [],
+        conflicts: [],
         budget_tier: deepSynthesisBudgetTier
       });
       setDeepSynthesisResult(res);

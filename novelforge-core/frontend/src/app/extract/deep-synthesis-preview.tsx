@@ -140,8 +140,12 @@ export function DeepSynthesisPreviewPanel({
 
         {result && (
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 font-mono bg-slate-950 px-3 py-2 rounded-lg border border-slate-800">
-            <span>Attempt: {result.attempt_id.slice(0, 8)}</span>
-            <span className="text-slate-600">|</span>
+            {result.attempt_id && (
+              <>
+                <span>Attempt: {result.attempt_id.slice(0, 8)}</span>
+                <span className="text-slate-600">|</span>
+              </>
+            )}
             <span>Task: {result.task_type}</span>
           </div>
         )}
@@ -183,9 +187,9 @@ export function DeepSynthesisPreviewPanel({
               disabled={loading}
               className="w-full h-10 px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 disabled:opacity-50 appearance-none cursor-pointer"
             >
-              <option value="low">低预算演进 (1轮, 快速探测)</option>
-              <option value="medium">标准预算演进 (最多3轮, 自动消解)</option>
-              <option value="high">高预算极智演进 (最多5轮, 极限消解)</option>
+              <option value="low">低预算演进（最多 1 轮）</option>
+              <option value="medium">标准预算演进（最多 2 轮）</option>
+              <option value="high">高预算演进（最多 3 轮）</option>
             </select>
             <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
               <ChevronDown className="w-4 h-4" />
@@ -368,7 +372,7 @@ export function DeepSynthesisPreviewPanel({
                               <div className="space-y-4 flex-1">
                                 <div className="flex flex-wrap items-center gap-2">
                                   <span className="text-sm font-semibold text-slate-200 bg-slate-900 px-2.5 py-1 rounded border border-slate-800">
-                                    {change.asset_name}
+                                    {change.asset_id}
                                   </span>
                                   <span className="text-xs text-slate-400 bg-slate-950 px-2 py-1 rounded border border-slate-800 font-mono">
                                     字段: {change.field_path}
@@ -393,7 +397,7 @@ export function DeepSynthesisPreviewPanel({
                                   <div>
                                     <span className="block text-[11px] text-slate-500 font-medium mb-1">当前存量数据 (Current)</span>
                                     <div className="text-xs text-slate-400 bg-slate-900/50 p-2.5 rounded border border-slate-800 font-normal break-words leading-relaxed min-h-[40px]">
-                                      {sanitizeDeepSynthesisDisplayValue(change.current_value)}
+                                      {sanitizeDeepSynthesisDisplayValue(change.current_value == null ? null : String(change.current_value))}
                                     </div>
                                   </div>
                                   <div>
@@ -401,7 +405,7 @@ export function DeepSynthesisPreviewPanel({
                                       提炼更正数据 (Proposed) <ArrowRight className="w-3 h-3 text-emerald-400" />
                                     </span>
                                     <div className="text-xs text-emerald-300 bg-emerald-950/10 p-2.5 rounded border border-emerald-500/10 font-normal break-words leading-relaxed min-h-[40px]">
-                                      {sanitizeDeepSynthesisDisplayValue(change.proposed_value)}
+                                      {sanitizeDeepSynthesisDisplayValue(change.proposed_value == null ? null : String(change.proposed_value))}
                                     </div>
                                   </div>
                                 </div>
@@ -549,19 +553,13 @@ export function DeepSynthesisPreviewPanel({
                 <div className="flex flex-col gap-2">
                   {result.warnings.map((warn, index) => (
                     <div
-                      key={index}
-                      className={`p-3.5 border rounded-lg text-xs flex items-start gap-2.5 ${
-                        warn.severity === 'high'
-                          ? 'bg-red-900/10 border-red-500/20 text-red-400'
-                          : warn.severity === 'medium'
-                          ? 'bg-amber-500/10 border-amber-500/20 text-amber-400'
-                          : 'bg-blue-500/10 border-blue-500/20 text-blue-400'
-                      }`}
+                      key={warn.warning_id || index}
+                      className="p-3.5 border rounded-lg text-xs flex items-start gap-2.5 bg-amber-500/10 border-amber-500/20 text-amber-400"
                     >
                       <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
                       <div>
                         <span className="font-semibold font-mono text-[10px] uppercase tracking-wider block mb-1">
-                          类型: {warn.warning_type}
+                          代码: {warn.code}
                         </span>
                         <p className="font-normal leading-relaxed">{warn.message}</p>
                       </div>
@@ -576,23 +574,23 @@ export function DeepSynthesisPreviewPanel({
               <h3 className="text-sm font-semibold text-slate-200">深度合成详细执行日志 (Round summaries)</h3>
               <div className="flex flex-col gap-3">
                 {result.round_summaries.map((round) => {
-                  const isCollapsed = collapsedRounds[round.round_number] ?? true;
+                  const isCollapsed = collapsedRounds[round.round_index] ?? true;
 
                   return (
-                    <div key={round.round_number} className="border border-slate-800 rounded-lg bg-slate-950/30 overflow-hidden">
+                    <div key={round.round_index} className="border border-slate-800 rounded-lg bg-slate-950/30 overflow-hidden">
                       <button
-                        onClick={() => toggleRoundCollapse(round.round_number)}
+                        onClick={() => toggleRoundCollapse(round.round_index)}
                         className="w-full px-4 py-3 bg-slate-950 flex items-center justify-between hover:bg-slate-900/80 cursor-pointer transition-colors text-left"
                       >
                         <div className="flex items-center gap-3">
                           <span className="text-xs font-semibold text-slate-200 bg-slate-900 px-2 py-0.5 rounded font-mono">
-                            Round {round.round_number}
+                            Round {round.round_index}
                           </span>
                           <span className="text-xs text-slate-400">
                             步骤: {formatPassType(round.pass_type)}
                           </span>
                           <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
-                            round.status === 'completed'
+                            round.status === 'success'
                               ? 'bg-emerald-500/10 text-emerald-400'
                               : 'bg-rose-500/10 text-rose-400'
                           }`}>
@@ -605,21 +603,21 @@ export function DeepSynthesisPreviewPanel({
                       {!isCollapsed && (
                         <div className="p-4 border-t border-slate-800 bg-slate-950/10 grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
                           <div>
-                            <span className="block text-slate-500">并发查询数:</span>
-                            <span className="font-semibold text-slate-300 font-mono">{round.query_count}</span>
+                            <span className="block text-slate-500">更正项数:</span>
+                            <span className="font-semibold text-slate-300 font-mono">{round.proposed_change_count}</span>
                           </div>
                           <div>
-                            <span className="block text-slate-500">发现全新小说要素:</span>
-                            <span className="font-semibold text-emerald-400 font-mono">+{round.novel_ideas_discovered}</span>
+                            <span className="block text-slate-500">高置信更正:</span>
+                            <span className="font-semibold text-emerald-400 font-mono">{round.high_confidence_change_count}</span>
                           </div>
                           <div>
-                            <span className="block text-slate-500">自动消解冲突数:</span>
-                            <span className="font-semibold text-emerald-400 font-mono">+{round.conflicts_resolved}</span>
+                            <span className="block text-slate-500">未消解冲突:</span>
+                            <span className="font-semibold text-amber-400 font-mono">{round.unresolved_conflict_count}</span>
                           </div>
                           <div>
-                            <span className="block text-slate-500">单轮质量演进率:</span>
+                            <span className="block text-slate-500">质量变化:</span>
                             <span className="font-semibold text-emerald-400 font-mono">
-                              {formatPercent(round.quality_delta_percent)}
+                              {formatQualityDelta(round.quality_delta)}
                             </span>
                           </div>
                         </div>

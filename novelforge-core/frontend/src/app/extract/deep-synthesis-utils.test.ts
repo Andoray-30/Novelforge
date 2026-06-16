@@ -18,9 +18,9 @@ import type { ProposedChange, DeepSynthesisResult } from '@/types';
 describe('Deep Synthesis Utils', () => {
   describe('formatDeepSynthesisBudgetTier', () => {
     it('formats budget tiers to Chinese labels', () => {
-      expect(formatDeepSynthesisBudgetTier('low')).toBe('低预算（1 轮）');
-      expect(formatDeepSynthesisBudgetTier('medium')).toBe('标准预算（2 轮）');
-      expect(formatDeepSynthesisBudgetTier('high')).toBe('高预算（3 轮）');
+      expect(formatDeepSynthesisBudgetTier('low')).toBe('低预算演进（最多 1 轮）');
+      expect(formatDeepSynthesisBudgetTier('medium')).toBe('标准预算演进（最多 2 轮）');
+      expect(formatDeepSynthesisBudgetTier('high')).toBe('高预算演进（最多 3 轮）');
       expect(formatDeepSynthesisBudgetTier('unknown')).toBe('unknown');
     });
   });
@@ -69,8 +69,8 @@ describe('Deep Synthesis Utils', () => {
   });
 
   describe('formatRoundStatus', () => {
-    it('formats round statuses', () => {
-      expect(formatRoundStatus('completed')).toBe('成功');
+    it('formats round statuses using backend literal values', () => {
+      expect(formatRoundStatus('success')).toBe('成功');
       expect(formatRoundStatus('skipped')).toBe('跳过');
       expect(formatRoundStatus('stopped')).toBe('已停止');
       expect(formatRoundStatus('failed')).toBe('失败');
@@ -105,13 +105,13 @@ describe('Deep Synthesis Utils', () => {
       expect(grouped.world_fact).toEqual([]);
     });
 
-    it('groups changes correctly by asset_type', () => {
+    it('groups changes correctly by asset_type without relying on asset_name', () => {
       const changes: ProposedChange[] = [
         {
           change_id: '1',
           asset_type: 'character',
           asset_id: 'c1',
-          asset_name: '张三',
+          asset_version: 'v1',
           field_path: 'personality',
           current_value: '冷酷',
           proposed_value: '外冷内热',
@@ -124,7 +124,7 @@ describe('Deep Synthesis Utils', () => {
           change_id: '2',
           asset_type: 'world_fact',
           asset_id: 'w1',
-          asset_name: '黑石镇',
+          asset_version: 'v1',
           field_path: 'description',
           current_value: null,
           proposed_value: '盛产黑曜石',
@@ -190,11 +190,12 @@ describe('Deep Synthesis Utils', () => {
       expect(sanitized.endsWith('...')).toBe(true);
     });
 
-    it('redacts forbidden fields', () => {
-      const text = 'Here is the chapter_content and raw_response_text of the novel.';
+    it('redacts forbidden fields including chapter_id, chapter_title, quote, snippet', () => {
+      const text = 'Here is the chapter_content and raw_response_text and chapter_title and quote and snippet of the novel.';
       const sanitized = sanitizeDeepSynthesisDisplayValue(text);
       expect(sanitized).not.toContain('chapter_content');
       expect(sanitized).not.toContain('raw_response_text');
+      expect(sanitized).not.toContain('chapter_title');
       expect(sanitized).toContain('[REDACTED_FIELD]');
     });
 

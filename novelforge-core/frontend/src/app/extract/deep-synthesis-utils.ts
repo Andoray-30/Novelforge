@@ -10,11 +10,11 @@ import {
 export function formatDeepSynthesisBudgetTier(tier: DeepSynthesisBudgetTier | string): string {
   switch (tier) {
     case 'low':
-      return '低预算（1 轮）';
+      return '低预算演进（最多 1 轮）';
     case 'medium':
-      return '标准预算（2 轮）';
+      return '标准预算演进（最多 2 轮）';
     case 'high':
-      return '高预算（3 轮）';
+      return '高预算演进（最多 3 轮）';
     default:
       return tier || '未知';
   }
@@ -78,7 +78,7 @@ export function formatPassType(pass_type: string | null | undefined): string {
 export function formatRoundStatus(status: string | null | undefined): string {
   if (!status) return '未知';
   switch (status) {
-    case 'completed':
+    case 'success':
       return '成功';
     case 'skipped':
       return '跳过';
@@ -151,7 +151,11 @@ export function sanitizeDeepSynthesisDisplayValue(value: string | null | undefin
     /raw_response_preview/i,
     /provider_error_body/i,
     /full_text/i,
-    /original_text/i
+    /original_text/i,
+    /chapter_id/i,
+    /chapter_title/i,
+    /\bquote\b/i,
+    /snippet/i
   ];
   
   let cleaned = String(value);

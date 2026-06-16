@@ -764,6 +764,8 @@ export interface RetryExtractionAttemptResponse {
   status: string;
 }
 
+// === Deep Synthesis Types (aligned with backend deep_synthesis_models.py) ===
+
 export type DeepSynthesisBudgetTier = 'low' | 'medium' | 'high';
 export type DeepSynthesisScopeType = 'character' | 'relationship' | 'event' | 'world_fact' | 'full';
 export type DeepSynthesisAssetType = 'character' | 'relationship' | 'event' | 'world_fact';
@@ -772,39 +774,44 @@ export type RiskLevel = 'low' | 'medium' | 'high';
 export interface DeepSynthesisRequestAsset {
   asset_type: DeepSynthesisAssetType;
   asset_id: string;
-  name?: string;
+  asset_version: string;
+  data?: Record<string, unknown>;
 }
 
 export interface DeepSynthesisRequest {
   session_id: string;
   scope_type: DeepSynthesisScopeType;
+  scope_ids: string[];
+  assets: DeepSynthesisRequestAsset[];
+  quality_summary?: Record<string, unknown> | null;
+  conflicts: Conflict[];
   budget_tier: DeepSynthesisBudgetTier;
-  scope_ids?: string[];
-  assets?: DeepSynthesisRequestAsset[];
+  accepted_change_ids?: string[];
+  rejected_change_ids?: string[];
 }
 
 export interface EvidenceRef {
   evidence_id: string;
   source_type: string;
-  asset_type: DeepSynthesisAssetType;
-  asset_id: string;
-  asset_version: string;
-  field_path: string;
-  summary: string;
+  asset_type?: DeepSynthesisAssetType | null;
+  asset_id?: string | null;
+  asset_version?: string | null;
+  field_path?: string | null;
+  summary?: string | null;
 }
 
 export interface ProposedChange {
   change_id: string;
   asset_type: DeepSynthesisAssetType;
   asset_id: string;
-  asset_name: string;
+  asset_version: string;
   field_path: string;
-  current_value: string | null;
-  proposed_value: string;
+  current_value: unknown;
+  proposed_value: unknown;
   confidence: number;
-  risk_level: RiskLevel;
   reason: string;
   evidence_refs: EvidenceRef[];
+  risk_level: RiskLevel;
 }
 
 export interface DeepSynthesisPreview {
@@ -821,7 +828,7 @@ export interface DeepSynthesisPreview {
 
 export interface Conflict {
   conflict_id: string;
-  asset_type: string;
+  asset_type: DeepSynthesisAssetType;
   asset_ids: string[];
   conflict_type: 'inconsistent_description' | 'contradictory_traits' | 'timeline_mismatch';
   description: string;
@@ -830,45 +837,58 @@ export interface Conflict {
 }
 
 export interface NewLink {
+  link_id: string;
+  source_asset_type: DeepSynthesisAssetType;
   source_asset_id: string;
+  target_asset_type: DeepSynthesisAssetType;
   target_asset_id: string;
-  relationship_type: string;
-  description: string;
+  relation_type: string;
   confidence: number;
+  evidence_refs: EvidenceRef[];
 }
 
 export interface RiskFlag {
-  risk_type: string;
+  risk_id: string;
+  severity: RiskLevel;
   message: string;
-  severity: 'low' | 'medium' | 'high';
-  asset_ids?: string[];
+  affected_asset_ids: string[];
+  evidence_refs: EvidenceRef[];
 }
 
 export interface ApplyPlan {
-  description: string;
-  change_count: number;
-  auto_applyable_count: number;
-  requires_confirmation_count: number;
+  requires_user_confirmation: boolean;
+  apply_mode: string;
+  patch_strategy: string;
+  asset_write_policy: string;
 }
 
 export interface DeepSynthesisBudgetSummary {
   budget_tier: DeepSynthesisBudgetTier;
+  max_model_calls: number;
+  max_estimated_tokens: number;
   max_rounds: number;
-  max_parallel_queries: number;
-  estimated_cost_usd?: number;
-  tokens_consumed?: number;
+  model_calls_used: number;
+  estimated_tokens_used: number;
+  remaining_model_calls: number;
+  remaining_estimated_tokens: number;
+  exhausted: boolean;
+  reason?: string | null;
 }
 
 export interface DeepSynthesisRoundSummary {
-  round_number: number;
+  round_index: number;
   pass_type: 'generation' | 'validation' | 'conflict_resolution';
-  status: 'completed' | 'skipped' | 'stopped' | 'failed';
-  query_count: number;
-  success_count: number;
-  failed_count: number;
-  novel_ideas_discovered: number;
-  conflicts_resolved: number;
-  quality_delta_percent?: number | null;
+  status: 'success' | 'skipped' | 'stopped' | 'failed';
+  proposed_change_count: number;
+  high_confidence_change_count: number;
+  unresolved_conflict_count: number;
+  quality_before?: number | null;
+  quality_after?: number | null;
+  quality_delta: number;
+  model_calls_used: number;
+  estimated_tokens_used: number;
+  stop_reason?: string | null;
+  warnings: DeepSynthesisWarning[];
 }
 
 export interface DeepSynthesisConvergenceSummary {
@@ -877,38 +897,46 @@ export interface DeepSynthesisConvergenceSummary {
   rounds_completed: number;
   quality_before?: number | null;
   quality_after?: number | null;
+  total_quality_delta: number;
+  total_proposed_change_count: number;
+  total_high_confidence_change_count: number;
+  unresolved_conflict_count: number;
+  user_acceptance_rate?: number | null;
   should_continue: boolean;
 }
 
 export interface DeepSynthesisQualityTrace {
   quality_before?: number | null;
   quality_after_preview?: number | null;
-  quality_delta?: number | null;
-  score_breakdown_before?: Record<string, number>;
-  score_breakdown_after?: Record<string, number>;
+  quality_delta: number;
+  proposed_change_count: number;
+  high_confidence_change_count: number;
+  unresolved_conflict_count: number;
 }
 
 export interface DeepSynthesisUserFeedback {
   accepted_change_ids: string[];
   rejected_change_ids: string[];
+  user_acceptance_rate?: number | null;
 }
 
 export interface DeepSynthesisWarning {
-  warning_type: string;
+  warning_id: string;
+  code: string;
   message: string;
-  severity: 'high' | 'medium' | 'low';
+  details?: Record<string, unknown> | null;
 }
 
 export interface DeepSynthesisResult {
-  attempt_id: string;
-  session_id: string;
-  task_type: string;
   status: string;
-  budget_summary: DeepSynthesisBudgetSummary;
-  convergence_summary: DeepSynthesisConvergenceSummary | null;
-  quality_trace: DeepSynthesisQualityTrace | null;
   preview: DeepSynthesisPreview;
+  budget_summary: DeepSynthesisBudgetSummary;
+  model_route?: Record<string, unknown> | null;
+  warnings: DeepSynthesisWarning[];
+  attempt_id?: string | null;
   round_summaries: DeepSynthesisRoundSummary[];
-  warnings?: DeepSynthesisWarning[];
-  error?: string | null;
+  convergence_summary?: DeepSynthesisConvergenceSummary | null;
+  quality_trace?: DeepSynthesisQualityTrace | null;
+  user_feedback?: DeepSynthesisUserFeedback | null;
+  task_type: string;
 }
