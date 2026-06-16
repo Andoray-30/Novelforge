@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -165,6 +165,59 @@ class DeepSynthesisWarning(BaseModel):
     details: Optional[Dict[str, Any]] = None
 
 
+class DeepSynthesisRoundSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    round_index: int = Field(..., ge=0)
+    pass_type: Literal["generation", "validation", "conflict_resolution"]
+    status: Literal["success", "skipped", "stopped", "failed"]
+    proposed_change_count: int = Field(default=0, ge=0)
+    high_confidence_change_count: int = Field(default=0, ge=0)
+    unresolved_conflict_count: int = Field(default=0, ge=0)
+    quality_before: Optional[float] = None
+    quality_after: Optional[float] = None
+    quality_delta: float = 0.0
+    model_calls_used: int = Field(default=0, ge=0)
+    estimated_tokens_used: int = Field(default=0, ge=0)
+    stop_reason: Optional[str] = None
+    warnings: List[DeepSynthesisWarning] = Field(default_factory=list)
+
+
+class DeepSynthesisConvergenceSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    converged: bool
+    reason: str = Field(..., min_length=1)
+    rounds_completed: int = Field(..., ge=0)
+    quality_before: Optional[float] = None
+    quality_after: Optional[float] = None
+    total_quality_delta: float = 0.0
+    total_proposed_change_count: int = Field(default=0, ge=0)
+    total_high_confidence_change_count: int = Field(default=0, ge=0)
+    unresolved_conflict_count: int = Field(default=0, ge=0)
+    user_acceptance_rate: Optional[float] = None
+    should_continue: bool = False
+
+
+class DeepSynthesisQualityTrace(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    quality_before: Optional[float] = None
+    quality_after_preview: Optional[float] = None
+    quality_delta: float = 0.0
+    proposed_change_count: int = Field(default=0, ge=0)
+    high_confidence_change_count: int = Field(default=0, ge=0)
+    unresolved_conflict_count: int = Field(default=0, ge=0)
+
+
+class DeepSynthesisUserFeedback(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    accepted_change_ids: List[str] = Field(default_factory=list)
+    rejected_change_ids: List[str] = Field(default_factory=list)
+    user_acceptance_rate: Optional[float] = None
+
+
 class DeepSynthesisResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -174,6 +227,10 @@ class DeepSynthesisResult(BaseModel):
     model_route: Optional[Dict[str, Any]] = None
     warnings: List[DeepSynthesisWarning] = Field(default_factory=list)
     attempt_id: Optional[str] = None
+    round_summaries: List[DeepSynthesisRoundSummary] = Field(default_factory=list)
+    convergence_summary: Optional[DeepSynthesisConvergenceSummary] = None
+    quality_trace: Optional[DeepSynthesisQualityTrace] = None
+    user_feedback: Optional[DeepSynthesisUserFeedback] = None
     task_type: str = "deep_synthesis"
 
 
@@ -187,6 +244,8 @@ class DeepSynthesisRequest(BaseModel):
     quality_summary: Optional[Dict[str, Any]] = None
     conflicts: List[Conflict] = Field(default_factory=list)
     budget_tier: DeepSynthesisBudgetTier = DeepSynthesisBudgetTier.medium
+    accepted_change_ids: List[str] = Field(default_factory=list)
+    rejected_change_ids: List[str] = Field(default_factory=list)
 
     @property
     def scope(self) -> DeepSynthesisScope:

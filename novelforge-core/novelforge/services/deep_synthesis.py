@@ -11,10 +11,14 @@ from .deep_synthesis_models import (
     ApplyPlan,
     DeepSynthesisBudgetSummary,
     DeepSynthesisBudgetTier,
+    DeepSynthesisConvergenceSummary,
     DeepSynthesisPreview,
+    DeepSynthesisQualityTrace,
     DeepSynthesisRequest,
     DeepSynthesisRequestAsset,
     DeepSynthesisResult,
+    DeepSynthesisRoundSummary,
+    DeepSynthesisUserFeedback,
     DeepSynthesisWarning,
     EvidenceRef,
     ProposedChange,
@@ -32,6 +36,9 @@ FORBIDDEN_INPUT_FIELDS = {
 }
 
 SYNTHESIS_MODEL_ROLE = "extractor_deep"
+QUALITY_DELTA_THRESHOLD = 0.05
+ROUND_PHASES = ("first_pass", "repair", "retry")
+ROUND_PASS_TYPES = ("generation", "validation", "conflict_resolution")
 
 
 class DeepSynthesisValidationError(ValueError):
@@ -60,19 +67,29 @@ class DeepSynthesisService:
 
         budget_policy = self.estimate_budget(request)
         scheduler = self.budgeted_scheduler_factory(budget_policy)
-        work_items = self.build_work_items(request)
-        plan = scheduler.plan(work_items)
+        first_round_plan = scheduler.plan([self._round_work_item(request, 0)])
         budget_summary = self._budget_summary(request.budget_tier, budget_policy, scheduler)
         warnings: List[DeepSynthesisWarning] = []
         model_route = None
         status = "success"
 
-        if plan.deferred and not plan.accepted:
+        if first_round_plan.deferred and not first_round_plan.accepted:
             status = "failed"
             budget_summary.exhausted = True
             budget_summary.reason = "budget_exhausted"
             warnings.append(self._warning("budget_exhausted", "预算不足，未生成 Deep Synthesis preview。"))
             preview = self._empty_preview("预算不足，未生成建议变更。")
+            quality_trace = self.compute_quality_trace(request, preview)
+            user_feedback = self._user_feedback(request)
+            round_summaries = [self._round_summary(
+                round_index=0,
+                status="failed",
+                quality_trace=quality_trace,
+                budget_summary=budget_summary,
+                stop_reason="budget_exhausted",
+                warnings=warnings,
+            )]
+            convergence_summary = self.build_convergence_summary(round_summaries, quality_trace, user_feedback)
             attempt_id = await self.record_attempt(
                 request=request,
                 result_status=status,
@@ -81,6 +98,10 @@ class DeepSynthesisService:
                 model_route=model_route,
                 latency_ms=self._latency_ms(started),
                 error_type="budget_exhausted",
+                quality_trace=quality_trace,
+                user_feedback=user_feedback,
+                convergence_summary=convergence_summary,
+                round_summaries=round_summaries,
             )
             return DeepSynthesisResult(
                 status=status,
@@ -89,6 +110,10 @@ class DeepSynthesisService:
                 model_route=model_route,
                 warnings=warnings,
                 attempt_id=attempt_id,
+                round_summaries=round_summaries,
+                convergence_summary=convergence_summary,
+                quality_trace=quality_trace,
+                user_feedback=user_feedback,
             )
 
         if not request.assets:
@@ -101,6 +126,20 @@ class DeepSynthesisService:
                 warnings.append(route_warning)
             preview = self.sanitize_preview(self._build_preview_from_structured_assets(request))
 
+        quality_trace = self.compute_quality_trace(request, preview)
+        user_feedback = self._user_feedback(request)
+        round_summaries = self._build_round_summaries(
+            request=request,
+            scheduler=scheduler,
+            budget_policy=budget_policy,
+            first_round_accepted=bool(first_round_plan.accepted),
+            quality_trace=quality_trace,
+            user_feedback=user_feedback,
+            warnings=warnings,
+        )
+        budget_summary = self._budget_summary(request.budget_tier, budget_policy, scheduler)
+        convergence_summary = self.build_convergence_summary(round_summaries, quality_trace, user_feedback)
+
         attempt_id = await self.record_attempt(
             request=request,
             result_status=status,
@@ -109,6 +148,10 @@ class DeepSynthesisService:
             model_route=model_route,
             latency_ms=self._latency_ms(started),
             error_type=None if status in {"success", "no_actionable_assets"} else status,
+            quality_trace=quality_trace,
+            user_feedback=user_feedback,
+            convergence_summary=convergence_summary,
+            round_summaries=round_summaries,
         )
         return DeepSynthesisResult(
             status=status,
@@ -117,6 +160,10 @@ class DeepSynthesisService:
             model_route=model_route,
             warnings=warnings,
             attempt_id=attempt_id,
+            round_summaries=round_summaries,
+            convergence_summary=convergence_summary,
+            quality_trace=quality_trace,
+            user_feedback=user_feedback,
         )
 
     def validate_structured_input(self, request: DeepSynthesisRequest) -> None:
@@ -133,24 +180,33 @@ class DeepSynthesisService:
         max_model_calls, max_estimated_tokens, _ = mapping[request.budget_tier]
         return BudgetPolicy(
             max_model_calls=max_model_calls,
-            max_retry_attempts=0,
-            max_repair_attempts=0,
+            max_retry_attempts=1,
+            max_repair_attempts=1,
             max_wall_clock_seconds=600.0,
             max_estimated_tokens=max_estimated_tokens,
             enabled=True,
         )
 
     def build_work_items(self, request: DeepSynthesisRequest) -> List[BudgetedWorkItem]:
-        return [
-            BudgetedWorkItem(
-                chapter_id=self._scope_ids_hash(request),
-                chapter_title=f"deep_synthesis:{request.scope.scope_type.value}",
-                chapter_order=0,
-                phase="first_pass",
-                estimated_model_calls=1 if request.assets else 0,
-                estimated_tokens=min(self._budget_limit_for_tier(request.budget_tier), max(0, len(request.assets) * 1000)),
-            )
-        ]
+        return [self._round_work_item(request, round_index) for round_index in range(self._max_rounds_for_tier(request.budget_tier))]
+
+    def _round_work_item(self, request: DeepSynthesisRequest, round_index: int) -> BudgetedWorkItem:
+        phases = list(ROUND_PHASES)
+        phase = phases[min(round_index, len(phases) - 1)]
+        if round_index == 0:
+            estimated_model_calls = 1 if request.assets else 0
+            estimated_tokens = min(self._budget_limit_for_tier(request.budget_tier), max(0, len(request.assets) * 1000))
+        else:
+            estimated_model_calls = 1
+            estimated_tokens = min(self._budget_limit_for_tier(request.budget_tier), max(500, len(request.assets) * 500))
+        return BudgetedWorkItem(
+            chapter_id=f"{self._scope_ids_hash(request)}:{round_index}",
+            chapter_title=f"deep_synthesis:{request.scope.scope_type.value}:{round_index}",
+            chapter_order=round_index,
+            phase=phase,
+            estimated_model_calls=estimated_model_calls,
+            estimated_tokens=estimated_tokens,
+        )
 
     async def record_attempt(
         self,
@@ -162,6 +218,10 @@ class DeepSynthesisService:
         model_route: Optional[Dict[str, Any]],
         latency_ms: int,
         error_type: Optional[str],
+        quality_trace: DeepSynthesisQualityTrace,
+        user_feedback: DeepSynthesisUserFeedback,
+        convergence_summary: DeepSynthesisConvergenceSummary,
+        round_summaries: List[DeepSynthesisRoundSummary],
     ) -> Optional[str]:
         if self.attempt_store is None:
             return None
@@ -169,8 +229,7 @@ class DeepSynthesisService:
         selected_model = ""
         if isinstance(model_route, dict):
             selected_model = str(model_route.get("selected_model") or "")
-        quality_before = self._quality_score(request.quality_summary)
-        quality_after = quality_before if quality_before is not None else None
+        first_round = round_summaries[0] if round_summaries else None
         record = AttemptRecord(
             id=attempt_id,
             task_type="deep_synthesis",
@@ -200,11 +259,15 @@ class DeepSynthesisService:
             scope_type=request.scope.scope_type.value,
             scope_ids_hash=self._scope_ids_hash(request),
             round_index=0,
-            pass_type="generation",
             model_role=SYNTHESIS_MODEL_ROLE,
-            proposed_change_count=len(preview.proposed_changes),
-            quality_before=quality_before,
-            quality_after_preview=quality_after,
+            proposed_change_count=quality_trace.proposed_change_count,
+            high_confidence_change_count=quality_trace.high_confidence_change_count,
+            unresolved_conflict_count=quality_trace.unresolved_conflict_count,
+            convergence_reason=convergence_summary.reason,
+            quality_before=quality_trace.quality_before,
+            quality_after_preview=quality_trace.quality_after_preview,
+            user_acceptance_rate=user_feedback.user_acceptance_rate,
+            pass_type=first_round.pass_type if first_round else "generation",
             budget_summary=budget_summary.model_dump(mode="json"),
         )
         await self.attempt_store.record(record)
@@ -212,6 +275,195 @@ class DeepSynthesisService:
 
     def sanitize_preview(self, preview: DeepSynthesisPreview) -> DeepSynthesisPreview:
         return DeepSynthesisPreview.model_validate(preview.model_dump(mode="json"))
+
+    def compute_quality_trace(
+        self,
+        request: DeepSynthesisRequest,
+        preview: DeepSynthesisPreview,
+    ) -> DeepSynthesisQualityTrace:
+        quality_before = self._quality_score(request.quality_summary)
+        proposed_change_count = len(preview.proposed_changes)
+        high_confidence_change_count = sum(1 for change in preview.proposed_changes if change.confidence >= 0.75)
+        unresolved_conflict_count = max(0, len(request.conflicts) - len(preview.conflicts_resolved))
+        quality_after = None
+        if quality_before is not None:
+            estimated_delta = min(0.3, high_confidence_change_count * 0.06 + len(preview.conflicts_resolved) * 0.04)
+            quality_after = min(1.0, quality_before + estimated_delta)
+        quality_delta = round(quality_after - quality_before, 6) if quality_before is not None and quality_after is not None else 0.0
+        return DeepSynthesisQualityTrace(
+            quality_before=quality_before,
+            quality_after_preview=quality_after,
+            quality_delta=quality_delta,
+            proposed_change_count=proposed_change_count,
+            high_confidence_change_count=high_confidence_change_count,
+            unresolved_conflict_count=unresolved_conflict_count,
+        )
+
+    @staticmethod
+    def compute_user_acceptance_rate(accepted_change_ids: List[str], rejected_change_ids: List[str]) -> Optional[float]:
+        total = len(accepted_change_ids) + len(rejected_change_ids)
+        if total == 0:
+            return None
+        return len(accepted_change_ids) / total
+
+    def should_stop_synthesis(
+        self,
+        *,
+        round_index: int,
+        max_rounds: int,
+        quality_delta: float,
+        proposed_change_count: int,
+        high_confidence_change_count: int,
+        unresolved_conflict_count: int,
+        previous_unresolved_conflict_count: Optional[int],
+        user_acceptance_rate: Optional[float],
+        budget_summary: DeepSynthesisBudgetSummary,
+        quality_delta_threshold: float = QUALITY_DELTA_THRESHOLD,
+    ) -> tuple[bool, str]:
+        if round_index >= max_rounds:
+            return True, "round_limit"
+        if budget_summary.exhausted or budget_summary.remaining_model_calls <= 0:
+            return True, "budget_exhausted"
+        if proposed_change_count == 0:
+            return True, "no_actionable_changes"
+        if high_confidence_change_count == 0:
+            return True, "no_high_confidence_changes"
+        if quality_delta < quality_delta_threshold:
+            return True, "quality_plateau"
+        if previous_unresolved_conflict_count is not None and previous_unresolved_conflict_count > 0 and unresolved_conflict_count >= previous_unresolved_conflict_count:
+            return True, "unresolved_conflicts_not_decreasing"
+        if user_acceptance_rate is not None and user_acceptance_rate < 0.2:
+            return True, "low_user_acceptance"
+        return False, "continue"
+
+    def build_convergence_summary(
+        self,
+        round_summaries: List[DeepSynthesisRoundSummary],
+        quality_trace: DeepSynthesisQualityTrace,
+        user_feedback: DeepSynthesisUserFeedback,
+    ) -> DeepSynthesisConvergenceSummary:
+        last_round = round_summaries[-1] if round_summaries else None
+        reason = last_round.stop_reason if last_round and last_round.stop_reason else "continue"
+        should_continue = reason == "continue"
+        return DeepSynthesisConvergenceSummary(
+            converged=not should_continue,
+            reason=reason,
+            rounds_completed=len([round_summary for round_summary in round_summaries if round_summary.status in {"success", "stopped"}]),
+            quality_before=quality_trace.quality_before,
+            quality_after=quality_trace.quality_after_preview,
+            total_quality_delta=quality_trace.quality_delta,
+            total_proposed_change_count=sum(round_summary.proposed_change_count for round_summary in round_summaries),
+            total_high_confidence_change_count=sum(round_summary.high_confidence_change_count for round_summary in round_summaries),
+            unresolved_conflict_count=quality_trace.unresolved_conflict_count,
+            user_acceptance_rate=user_feedback.user_acceptance_rate,
+            should_continue=should_continue,
+        )
+
+    def _build_round_summaries(
+        self,
+        *,
+        request: DeepSynthesisRequest,
+        scheduler: BudgetedScheduler,
+        budget_policy: BudgetPolicy,
+        first_round_accepted: bool,
+        quality_trace: DeepSynthesisQualityTrace,
+        user_feedback: DeepSynthesisUserFeedback,
+        warnings: List[DeepSynthesisWarning],
+    ) -> List[DeepSynthesisRoundSummary]:
+        round_summaries: List[DeepSynthesisRoundSummary] = []
+        max_rounds = self._max_rounds_for_tier(request.budget_tier)
+        previous_unresolved_conflict_count: Optional[int] = None
+        if not first_round_accepted:
+            return round_summaries
+
+        for round_index in range(max_rounds):
+            if round_index > 0:
+                if not self._previous_round_allows_next(round_summaries[-1]):
+                    break
+                plan = scheduler.plan([self._round_work_item(request, round_index)])
+                if plan.deferred and not plan.accepted:
+                    budget_summary = self._budget_summary(request.budget_tier, budget_policy, scheduler)
+                    budget_summary.exhausted = True
+                    budget_summary.reason = "budget_exhausted"
+                    round_summaries.append(self._round_summary(
+                        round_index=round_index,
+                        status="failed",
+                        quality_trace=quality_trace,
+                        budget_summary=budget_summary,
+                        stop_reason="budget_exhausted",
+                        warnings=[],
+                    ))
+                    break
+
+            budget_summary = self._budget_summary(request.budget_tier, budget_policy, scheduler)
+            should_stop, stop_reason = self.should_stop_synthesis(
+                round_index=round_index + 1,
+                max_rounds=max_rounds,
+                quality_delta=quality_trace.quality_delta,
+                proposed_change_count=quality_trace.proposed_change_count,
+                high_confidence_change_count=quality_trace.high_confidence_change_count,
+                unresolved_conflict_count=quality_trace.unresolved_conflict_count,
+                previous_unresolved_conflict_count=previous_unresolved_conflict_count,
+                user_acceptance_rate=user_feedback.user_acceptance_rate,
+                budget_summary=budget_summary,
+            )
+            round_summaries.append(self._round_summary(
+                round_index=round_index,
+                status="success",
+                quality_trace=quality_trace,
+                budget_summary=budget_summary,
+                stop_reason=stop_reason if should_stop else None,
+                warnings=warnings if round_index == 0 else [],
+            ))
+            if should_stop:
+                break
+            previous_unresolved_conflict_count = quality_trace.unresolved_conflict_count
+        return round_summaries
+
+    def _round_summary(
+        self,
+        *,
+        round_index: int,
+        status: str,
+        quality_trace: DeepSynthesisQualityTrace,
+        budget_summary: DeepSynthesisBudgetSummary,
+        stop_reason: Optional[str],
+        warnings: List[DeepSynthesisWarning],
+    ) -> DeepSynthesisRoundSummary:
+        return DeepSynthesisRoundSummary(
+            round_index=round_index,
+            pass_type=ROUND_PASS_TYPES[min(round_index, len(ROUND_PASS_TYPES) - 1)],
+            status=status,
+            proposed_change_count=quality_trace.proposed_change_count,
+            high_confidence_change_count=quality_trace.high_confidence_change_count,
+            unresolved_conflict_count=quality_trace.unresolved_conflict_count,
+            quality_before=quality_trace.quality_before,
+            quality_after=quality_trace.quality_after_preview,
+            quality_delta=quality_trace.quality_delta,
+            model_calls_used=budget_summary.model_calls_used,
+            estimated_tokens_used=budget_summary.estimated_tokens_used,
+            stop_reason=stop_reason,
+            warnings=warnings,
+        )
+
+    @staticmethod
+    def _previous_round_allows_next(round_summary: DeepSynthesisRoundSummary) -> bool:
+        return (
+            round_summary.status == "success"
+            and round_summary.proposed_change_count > 0
+            and round_summary.high_confidence_change_count > 0
+            and round_summary.quality_delta >= QUALITY_DELTA_THRESHOLD
+            and round_summary.stop_reason is None
+        )
+
+    def _user_feedback(self, request: DeepSynthesisRequest) -> DeepSynthesisUserFeedback:
+        accepted_change_ids = list(request.accepted_change_ids)
+        rejected_change_ids = list(request.rejected_change_ids)
+        return DeepSynthesisUserFeedback(
+            accepted_change_ids=accepted_change_ids,
+            rejected_change_ids=rejected_change_ids,
+            user_acceptance_rate=self.compute_user_acceptance_rate(accepted_change_ids, rejected_change_ids),
+        )
 
     async def _select_model_route(self, request: DeepSynthesisRequest) -> tuple[Optional[Dict[str, Any]], Optional[DeepSynthesisWarning]]:
         if self.model_router is None:

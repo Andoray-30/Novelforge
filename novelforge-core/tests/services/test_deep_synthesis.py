@@ -76,6 +76,22 @@ def make_request(**overrides):
     return DeepSynthesisRequest.model_validate(payload)
 
 
+def make_request_with_conflicts(**overrides):
+    payload = make_request(**overrides).model_dump(mode="json")
+    payload["conflicts"] = [
+        {
+            "conflict_id": "conflict-1",
+            "asset_type": "character",
+            "asset_ids": ["char-1", "char-2"],
+            "conflict_type": "inconsistent_description",
+            "description": "描述冲突",
+            "resolution": "合并",
+            "confidence": 0.8,
+        }
+    ]
+    return DeepSynthesisRequest.model_validate(payload)
+
+
 @pytest.mark.asyncio
 async def test_create_preview_accepts_structured_assets():
     service = DeepSynthesisService(model_router=FakeRouter())
@@ -250,3 +266,253 @@ async def test_budget_exhausted_returns_warning_and_skips_router():
     assert result.budget_summary.exhausted is True
     assert any(warning.code == "budget_exhausted" for warning in result.warnings)
     assert router.calls == []
+
+
+def test_compute_quality_trace_uses_quality_summary_score():
+    service = DeepSynthesisService(model_router=FakeRouter())
+    trace = service.compute_quality_trace(make_request(), service.sanitize_preview(service._build_preview_from_structured_assets(make_request())))
+
+    assert trace.quality_before == 0.7
+
+
+def test_quality_delta_increases_with_high_confidence_changes():
+    service = DeepSynthesisService(model_router=FakeRouter())
+    request = make_request()
+    preview = service.sanitize_preview(service._build_preview_from_structured_assets(request))
+
+    trace = service.compute_quality_trace(request, preview)
+
+    assert trace.quality_delta > 0
+
+
+def test_high_confidence_change_count_counts_confidence_threshold():
+    service = DeepSynthesisService(model_router=FakeRouter())
+    request = make_request()
+    preview = service.sanitize_preview(service._build_preview_from_structured_assets(request))
+
+    trace = service.compute_quality_trace(request, preview)
+
+    assert trace.high_confidence_change_count == 1
+
+
+def test_unresolved_conflict_count_is_non_negative():
+    service = DeepSynthesisService(model_router=FakeRouter())
+    request = make_request_with_conflicts()
+    preview = service.sanitize_preview(service._build_preview_from_structured_assets(request))
+
+    trace = service.compute_quality_trace(request, preview)
+
+    assert trace.unresolved_conflict_count >= 0
+
+
+def test_should_stop_when_max_rounds_reached():
+    service = DeepSynthesisService(model_router=FakeRouter())
+    request = make_request()
+    policy = service.estimate_budget(request)
+    budget_summary = service._budget_summary(request.budget_tier, policy, BudgetedScheduler(policy))
+
+    should_stop, reason = service.should_stop_synthesis(
+        round_index=1,
+        max_rounds=1,
+        quality_delta=0.1,
+        proposed_change_count=1,
+        high_confidence_change_count=1,
+        unresolved_conflict_count=0,
+        previous_unresolved_conflict_count=1,
+        user_acceptance_rate=None,
+        budget_summary=budget_summary,
+    )
+
+    assert should_stop is True
+    assert reason == "round_limit"
+
+
+def test_should_stop_when_quality_delta_below_threshold():
+    service = DeepSynthesisService(model_router=FakeRouter())
+    request = make_request()
+    policy = service.estimate_budget(request)
+    budget_summary = service._budget_summary(request.budget_tier, policy, BudgetedScheduler(policy))
+
+    should_stop, reason = service.should_stop_synthesis(
+        round_index=0,
+        max_rounds=2,
+        quality_delta=0.01,
+        proposed_change_count=1,
+        high_confidence_change_count=1,
+        unresolved_conflict_count=0,
+        previous_unresolved_conflict_count=None,
+        user_acceptance_rate=None,
+        budget_summary=budget_summary,
+    )
+
+    assert should_stop is True
+    assert reason == "quality_plateau"
+
+
+def test_should_stop_when_no_proposed_changes():
+    service = DeepSynthesisService(model_router=FakeRouter())
+    request = make_request()
+    policy = service.estimate_budget(request)
+    budget_summary = service._budget_summary(request.budget_tier, policy, BudgetedScheduler(policy))
+
+    should_stop, reason = service.should_stop_synthesis(
+        round_index=0,
+        max_rounds=2,
+        quality_delta=0.2,
+        proposed_change_count=0,
+        high_confidence_change_count=0,
+        unresolved_conflict_count=0,
+        previous_unresolved_conflict_count=None,
+        user_acceptance_rate=None,
+        budget_summary=budget_summary,
+    )
+
+    assert should_stop is True
+    assert reason == "no_actionable_changes"
+
+
+def test_should_stop_when_no_high_confidence_changes():
+    service = DeepSynthesisService(model_router=FakeRouter())
+    request = make_request()
+    policy = service.estimate_budget(request)
+    budget_summary = service._budget_summary(request.budget_tier, policy, BudgetedScheduler(policy))
+
+    should_stop, reason = service.should_stop_synthesis(
+        round_index=0,
+        max_rounds=2,
+        quality_delta=0.2,
+        proposed_change_count=1,
+        high_confidence_change_count=0,
+        unresolved_conflict_count=0,
+        previous_unresolved_conflict_count=None,
+        user_acceptance_rate=None,
+        budget_summary=budget_summary,
+    )
+
+    assert should_stop is True
+    assert reason == "no_high_confidence_changes"
+
+
+def test_should_stop_when_unresolved_conflicts_do_not_decrease():
+    service = DeepSynthesisService(model_router=FakeRouter())
+    request = make_request_with_conflicts()
+    policy = service.estimate_budget(request)
+    budget_summary = service._budget_summary(request.budget_tier, policy, BudgetedScheduler(policy))
+
+    should_stop, reason = service.should_stop_synthesis(
+        round_index=1,
+        max_rounds=3,
+        quality_delta=0.2,
+        proposed_change_count=1,
+        high_confidence_change_count=1,
+        unresolved_conflict_count=1,
+        previous_unresolved_conflict_count=1,
+        user_acceptance_rate=None,
+        budget_summary=budget_summary,
+    )
+
+    assert should_stop is True
+    assert reason == "unresolved_conflicts_not_decreasing"
+
+
+def test_should_stop_when_user_acceptance_rate_low():
+    service = DeepSynthesisService(model_router=FakeRouter())
+    request = make_request()
+    policy = service.estimate_budget(request)
+    budget_summary = service._budget_summary(request.budget_tier, policy, BudgetedScheduler(policy))
+
+    should_stop, reason = service.should_stop_synthesis(
+        round_index=1,
+        max_rounds=3,
+        quality_delta=0.2,
+        proposed_change_count=1,
+        high_confidence_change_count=1,
+        unresolved_conflict_count=0,
+        previous_unresolved_conflict_count=1,
+        user_acceptance_rate=0.1,
+        budget_summary=budget_summary,
+    )
+
+    assert should_stop is True
+    assert reason == "low_user_acceptance"
+
+
+def test_budget_tier_controls_max_rounds():
+    service = DeepSynthesisService(model_router=FakeRouter())
+
+    assert service._max_rounds_for_tier("low") == 1
+    assert service._max_rounds_for_tier("medium") == 2
+    assert service._max_rounds_for_tier("high") == 3
+
+
+@pytest.mark.asyncio
+async def test_round_summaries_exist_in_result():
+    service = DeepSynthesisService(model_router=FakeRouter())
+
+    result = await service.create_preview(make_request())
+
+    assert result.round_summaries
+
+
+@pytest.mark.asyncio
+async def test_convergence_summary_exists_in_result():
+    service = DeepSynthesisService(model_router=FakeRouter())
+
+    result = await service.create_preview(make_request())
+
+    assert result.convergence_summary is not None
+
+
+def test_user_acceptance_rate_computed_from_ids():
+    rate = DeepSynthesisService.compute_user_acceptance_rate(["a", "b"], ["c", "d", "e", "f"])
+
+    assert rate == 0.3333333333333333
+
+
+@pytest.mark.asyncio
+async def test_empty_assets_convergence_reason_no_actionable_changes():
+    service = DeepSynthesisService(model_router=FakeRouter())
+
+    result = await service.create_preview(make_request(assets=[]))
+
+    assert result.convergence_summary.reason == "no_actionable_changes"
+
+
+@pytest.mark.asyncio
+async def test_budget_exhausted_convergence_reason_budget_exhausted():
+    router = FakeRouter()
+    service = DeepSynthesisService(
+        model_router=router,
+        budgeted_scheduler_factory=lambda policy: BudgetedScheduler(BudgetPolicy(max_model_calls=0, max_estimated_tokens=0)),
+    )
+
+    result = await service.create_preview(make_request())
+
+    assert result.convergence_summary.reason == "budget_exhausted"
+
+
+@pytest.mark.asyncio
+async def test_attempt_store_records_convergence_reason_and_quality_metrics():
+    storage = MemoryStorage()
+    store = AttemptStore(storage)
+    service = DeepSynthesisService(attempt_store=store, model_router=FakeRouter())
+
+    result = await service.create_preview(make_request())
+    record = await store.get(result.attempt_id)
+
+    assert record is not None
+    assert record.convergence_reason == result.convergence_summary.reason
+    assert record.high_confidence_change_count == result.quality_trace.high_confidence_change_count
+    assert record.unresolved_conflict_count == result.quality_trace.unresolved_conflict_count
+
+
+@pytest.mark.asyncio
+async def test_result_serialization_does_not_contain_forbidden_fields():
+    service = DeepSynthesisService(model_router=FakeRouter())
+
+    result = await service.create_preview(make_request())
+    serialized = json.dumps(result.model_dump(mode="json"), ensure_ascii=False)
+
+    assert "chapter_content" not in serialized
+    assert "raw_response_text" not in serialized
+    assert "raw_response_preview" not in serialized

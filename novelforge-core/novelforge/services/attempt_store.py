@@ -71,8 +71,12 @@ class AttemptRecord(BaseModel):
     pass_type: Optional[str] = None
     model_role: Optional[str] = None
     proposed_change_count: int = 0
+    high_confidence_change_count: int = 0
+    unresolved_conflict_count: int = 0
+    convergence_reason: Optional[str] = None
     quality_before: Optional[float] = None
     quality_after_preview: Optional[float] = None
+    user_acceptance_rate: Optional[float] = None
     budget_summary: Dict[str, Any] = Field(default_factory=dict)
 
 
