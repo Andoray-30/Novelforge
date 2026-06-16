@@ -11,6 +11,73 @@
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
   - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
 
+## 2026-06-16 Phase G.2: Deep Synthesis 多轮收敛与质量追踪
+
+### 本轮完成
+- 扩展 Deep Synthesis schema：
+  - DeepSynthesisRoundSummary：轮次摘要，包含 round_index、pass_type、status、proposed_change_count、high_confidence_change_count、unresolved_conflict_count、quality_before/after/delta、model_calls_used、estimated_tokens_used、stop_reason、warnings
+  - DeepSynthesisConvergenceSummary：收敛摘要，包含 converged、reason、rounds_completed、quality_before/after、total_quality_delta、total_proposed_change_count、total_high_confidence_change_count、unresolved_conflict_count、user_acceptance_rate、should_continue
+  - DeepSynthesisQualityTrace：质量追踪，包含 quality_before/after_preview/delta、proposed_change_count、high_confidence_change_count、unresolved_conflict_count
+  - DeepSynthesisUserFeedback：用户反馈，包含 accepted_change_ids、rejected_change_ids、user_acceptance_rate
+- 实现收敛检测逻辑：
+  - should_stop_synthesis()：基于结构化指标判断是否停止，不使用模型自我声明
+  - build_convergence_summary()：构建收敛摘要
+  - 停止条件：max_rounds、budget exhausted、quality_delta < threshold、no proposed changes、no high confidence changes、unresolved conflicts 不下降、user_acceptance_rate < 0.2
+- 实现 round-level 预算管理：
+  - low budget max_rounds=1
+  - medium budget max_rounds=2
+  - high budget max_rounds=3
+  - 每轮 phase 映射：round 0=first_pass, round 1=repair, round 2=retry
+  - 只有前一轮有收益时才允许下一轮
+- 实现质量评分变化追踪：
+  - compute_quality_trace()：从 request.quality_summary 提取 quality_before
+  - quality_after_preview：deterministic heuristic，由 high confidence changes / conflict resolution 数量计算
+  - quality_delta = quality_after - quality_before
+  - high_confidence_change_count：confidence >= 0.75
+  - unresolved_conflict_count：request.conflicts - preview.conflicts_resolved，不能为负数
+- 实现用户采纳率反馈：
+  - compute_user_acceptance_rate()：accepted / (accepted + rejected)
+  - 支持 optional accepted_change_ids / rejected_change_ids
+  - 用户反馈只包含 change_id 列表，不包含原文
+- 扩展 AttemptStore metadata：
+  - round_index、proposed_change_count、high_confidence_change_count、unresolved_conflict_count
+  - convergence_reason、quality_before、quality_after_preview、user_acceptance_rate、budget_summary
+  - 不保存 raw response / chapter content / provider error
+- 编写 25 个新增测试（35 service tests + 7 API tests = 42 total）
+
+### 修改文件
+- `novelforge-core/novelforge/services/deep_synthesis.py` — 收敛追踪核心逻辑
+- `novelforge-core/novelforge/services/deep_synthesis_models.py` — 模型定义扩展
+- `novelforge-core/novelforge/services/attempt_store.py` — attempt store 小改
+- `novelforge-core/tests/services/test_deep_synthesis.py` — 测试覆盖
+- `project-docs/PROGRESS.md` — 添加 Phase G.2 记录
+
+### 验证
+- `pytest tests/services/test_deep_synthesis.py -v`：35 passed
+- `pytest tests/api/test_deep_synthesis_api.py -v`：7 passed
+- `pytest tests/ -q`：434 passed
+
+### 风险评估
+- **低风险**：收敛检测基于结构化指标，不使用模型自我声明
+- **低风险**：round-level 预算不绕过 BudgetedScheduler
+- **低风险**：不保存 raw_response_text / chapter_content
+
+### 安全边界
+- 未实现 apply patch
+- 未实现前端 Preview UI
+- 未调用真实 provider
+- 不保存 raw_response_text / raw_response_preview / chapter_content
+
+### 当前状态
+- Deep Synthesis 后端多轮收敛与质量追踪已完成
+- 支持 round_summaries / convergence_summary / quality_trace / user_feedback
+- 收敛检测基于结构化指标，不使用模型自我声明
+
+### 下一步建议
+- Phase G.3：前端 Deep Synthesis Preview 组件与人工确认入口
+
+---
+
 ## 2026-06-16 Phase G.1.1: Worktree Hygiene + Deep Synthesis API Safety
 
 ### 工作树状态
