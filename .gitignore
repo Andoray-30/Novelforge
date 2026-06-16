@@ -94,6 +94,9 @@ Desktop.ini
 # -----------------------------------------------------------
 # 工具内部目录
 # -----------------------------------------------------------
+.omo/
+.opencode-todos/
+.opencode/
 .sisyphus/
 .git_backup/
 .claude/
@@ -102,6 +105,13 @@ Desktop.ini
 .copilot/
 .qwen/
 .codex-tmp/
+
+# -----------------------------------------------------------
+# Agent / AI 工具生成文件
+# -----------------------------------------------------------
+opencode-todos.json
+OPENCODE_PROJECT_CONTEXT.md
+AGENTS.local.md
 
 # -----------------------------------------------------------
 # Node.js（前端 node_modules 由 novelforge-core/.gitignore 处理，
