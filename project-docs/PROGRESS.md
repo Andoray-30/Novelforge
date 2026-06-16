@@ -11,6 +11,46 @@
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
   - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
 
+## 2026-06-16 Phase F.1: ModelRouter Profile Routing 收口
+
+### 本轮完成
+- 确认 `Config` 中 profile routing 相关字段未重复定义，并保持默认值：
+  - `NOVELFORGE_ENABLE_PROFILE_ROUTING=false`
+  - `NOVELFORGE_PROFILE_ROUTING_MIN_CONFIDENCE=medium`
+  - `NOVELFORGE_PROFILE_ROUTING_SCOPE=session`
+  - `NOVELFORGE_PROFILE_ROUTING_ALLOW_LOW_CONFIDENCE=false`
+- 修复 low confidence profile routing 语义：
+  - `allow_low_confidence=false` 时只输出 profile diagnostics，不改变候选顺序
+  - `allow_low_confidence=true` 时允许 low confidence profile 参与排序
+  - low confidence 排序仍在 cooldown / health / probe 之后受现有保护约束
+- 收口 `profile_routing_scope`：
+  - `global` scope 无 `session_id` 可读取 global profile
+  - `session` scope 缺失 `session_id` 不崩溃并记录 warning
+  - session profile 缺失时 fallback global 并记录 `fallback_to_global`
+  - 非法 scope 安全 fallback 并记录 `invalid_profile_scope_fallback`
+- 稳定同一 model 多 token bucket profile 选择：
+  - role 匹配后按 confidence、known token bucket、source_attempt_count、generated_at 和 deterministic tie-break 排序
+- 保持 route decision 脱敏，不返回 `raw_response_text`、`raw_response_preview`、`chapter_content`
+
+### 修改文件
+- `novelforge-core/novelforge/services/model_router.py` — 收口 profile routing 排序、scope fallback 和 deterministic profile 选择
+- `novelforge-core/tests/services/test_model_router.py` — 补充 Config、low confidence、scope fallback、cooldown、deterministic 和脱敏回归测试
+- `project-docs/PROGRESS.md` — 添加 Phase F.1 收口记录
+
+### 验证
+- `pytest tests/services/test_model_router.py -v`：41 passed（通过 `.venv\Scripts\python.exe -m pytest` 执行）
+- `pytest tests/ -q`：392 passed（通过 `.venv\Scripts\python.exe -m pytest` 执行）
+- `git diff --check`：通过（仅 Git 行尾转换 warning）
+
+### 风险评估
+- **低风险**：profile routing 默认仍关闭
+- **低风险**：low confidence 只有显式允许时才影响排序
+- **低风险**：profile routing 不绕过 cooldown、health ranking 或 probe
+
+### 当前状态
+- Phase F.1 后端 profile routing 行为已完成代码收口
+- 未调用真实 provider，未执行真实长篇 smoke
+
 ## 2026-06-15 Agent Delegation Policy / Sisyphus Orchestrator Boundary
 
 ### 本轮完成

@@ -66,10 +66,6 @@ class Config:
         self.profile_routing_min_confidence: str = os.getenv("NOVELFORGE_PROFILE_ROUTING_MIN_CONFIDENCE", "medium")
         self.profile_routing_scope: str = os.getenv("NOVELFORGE_PROFILE_ROUTING_SCOPE", "session")
         self.profile_routing_allow_low_confidence: bool = os.getenv("NOVELFORGE_PROFILE_ROUTING_ALLOW_LOW_CONFIDENCE", "false").lower() == "true"
-        self.enable_profile_routing: bool = os.getenv("NOVELFORGE_ENABLE_PROFILE_ROUTING", "false").lower() == "true"
-        self.profile_routing_min_confidence: str = os.getenv("NOVELFORGE_PROFILE_ROUTING_MIN_CONFIDENCE", "medium")
-        self.profile_routing_scope: str = os.getenv("NOVELFORGE_PROFILE_ROUTING_SCOPE", "session")
-        self.profile_routing_allow_low_confidence: bool = os.getenv("NOVELFORGE_PROFILE_ROUTING_ALLOW_LOW_CONFIDENCE", "false").lower() == "true"
         self.model_pools: dict[str, list[str]] = {
             "extractor_fast": self._model_pool_from_env(
                 "NOVELFORGE_EXTRACTOR_FAST_MODELS",

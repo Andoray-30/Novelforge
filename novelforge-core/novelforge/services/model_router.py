@@ -32,6 +32,7 @@ def rank_candidates_by_profile(
     candidates: List[str],
     profiles: Dict[str, Dict[str, Any]],
     token_bucket: Optional[str] = None,
+    allow_low_confidence: bool = False,
 ) -> Tuple[List[str], List[Dict[str, Any]]]:
     if not profiles:
         return candidates, []
@@ -59,7 +60,7 @@ def rank_candidates_by_profile(
         budget_deferred_count = profile.get("budget_deferred_count", 0)
         budget_exhausted_count = profile.get("budget_exhausted_count", 0)
 
-        if confidence == "low":
+        if confidence == "low" and not allow_low_confidence:
             rankings.append({
                 "model": model,
                 "score": 0,
@@ -302,6 +303,7 @@ class ModelRouter:
         probe: bool = True,
         session_id: Optional[str] = None,
         parent_id: Optional[str] = None,
+        token_bucket: Optional[str] = None,
     ) -> ModelRouteDecision:
         candidates = self.candidates_for_role(role)
         original_candidates = list(candidates)
@@ -319,31 +321,42 @@ class ModelRouter:
         profile_warnings: List[str] = []
 
         enable_profile = getattr(self.config, "enable_profile_routing", False)
-        if enable_profile and self.profile_store and session_id:
+        if enable_profile and self.profile_store:
             try:
                 scope = getattr(self.config, "profile_routing_scope", "session")
+                if scope not in ("session", "global"):
+                    profile_warnings.append("invalid_profile_scope_fallback")
+                    scope = "session"
+
                 min_confidence = getattr(self.config, "profile_routing_min_confidence", "medium")
                 allow_low = getattr(self.config, "profile_routing_allow_low_confidence", False)
 
-                if scope == "session":
+                profiles_list: List[Any] = []
+                if scope == "session" and session_id:
                     profiles_list = await self.profile_store.list_by_scope("session", session_id)
+                    if not profiles_list:
+                        profiles_list = await self.profile_store.list_by_scope("global", "")
+                        if profiles_list:
+                            profile_warnings.append("fallback_to_global")
+                elif scope == "session" and not session_id:
+                    profile_warnings.append("session_scope_missing_session_id")
                 else:
                     profiles_list = await self.profile_store.list_by_scope("global", "")
 
-                if not profiles_list and scope == "session":
-                    profiles_list = await self.profile_store.list_by_scope("global", "")
-                    if profiles_list:
-                        profile_warnings.append("fallback_to_global")
-
                 profiles_by_model: Dict[str, Any] = {}
                 for p in profiles_list:
-                    if p.key.task_role == role:
+                    if p.key.task_role == role and (token_bucket is None or p.key.token_bucket == token_bucket):
                         model = p.key.model_used
-                        if model not in profiles_by_model or p.key.scope == "session":
+                        existing = profiles_by_model.get(model)
+                        if existing is None:
                             profiles_by_model[model] = p
+                        else:
+                            if self._is_better_profile(p, existing):
+                                profiles_by_model[model] = p
 
                 if profiles_by_model:
                     can_use = False
+                    profiles_metrics = {model: p.metrics.model_dump() for model, p in profiles_by_model.items()}
                     for p in profiles_by_model.values():
                         cl = p.metrics.confidence_level
                         if cl == "high":
@@ -354,14 +367,19 @@ class ModelRouter:
                             if profile_confidence != "high":
                                 profile_confidence = "medium"
                         elif cl == "low" and allow_low:
+                            can_use = True
                             if profile_confidence == "low":
                                 profile_confidence = "low"
 
+                    ranked_candidates, profile_rankings = rank_candidates_by_profile(
+                        role,
+                        candidates,
+                        profiles_metrics,
+                        token_bucket=token_bucket,
+                        allow_low_confidence=allow_low,
+                    )
                     if can_use:
-                        profiles_metrics = {model: p.metrics.model_dump() for model, p in profiles_by_model.items()}
-                        candidates, profile_rankings = rank_candidates_by_profile(
-                            role, candidates, profiles_metrics
-                        )
+                        candidates = ranked_candidates
                         profile_order_source = "performance_profile"
             except Exception:
                 profile_warnings.append("profile_lookup_failed")
@@ -566,6 +584,21 @@ class ModelRouter:
             "chapter_world_facts",
         )
         return any(isinstance(payload.get(field), list) and len(payload[field]) > 0 for field in fields)
+
+    @staticmethod
+    def _is_better_profile(candidate: Any, current: Any) -> bool:
+        return ModelRouter._profile_sort_key(candidate) > ModelRouter._profile_sort_key(current)
+
+    @staticmethod
+    def _profile_sort_key(profile: Any) -> Tuple[int, int, int, str, str, str, str]:
+        confidence_rank = {"high": 3, "medium": 2, "low": 1}.get(profile.metrics.confidence_level, 0)
+        bucket = str(profile.key.token_bucket or "unknown")
+        bucket_known = 0 if bucket == "unknown" else 1
+        source_attempt_count = int(getattr(profile, "source_attempt_count", 0) or 0)
+        generated_at = str(getattr(profile, "generated_at", "") or "")
+        model_used = str(getattr(profile.key, "model_used", "") or "")
+        serialized = json.dumps(profile.model_dump(mode="json"), sort_keys=True) if hasattr(profile, "model_dump") else repr(profile)
+        return (confidence_rank, bucket_known, source_attempt_count, generated_at, bucket, model_used, serialized)
 
     @staticmethod
     def _dedupe(values: List[str]) -> List[str]:

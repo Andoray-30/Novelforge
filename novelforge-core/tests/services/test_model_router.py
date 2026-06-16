@@ -6,6 +6,13 @@ from novelforge.core.config import Config
 from novelforge.extractors.chapter_index_extractor import ChapterIndexMergeResult, ImportAnalysisDiagnostics
 from novelforge.services.extraction_service import ExtractionService
 from novelforge.services.model_router import ModelRouter
+from novelforge.services.performance_profile import (
+    PerformanceProfile,
+    PerformanceProfileKey,
+    PerformanceProfileMetrics,
+    PerformanceProfileStore,
+)
+from novelforge.storage.memory_storage import MemoryStorage
 
 
 class FakeConfig:
@@ -55,6 +62,46 @@ class FakeStorage:
 
     async def list_keys(self, storage_type=None):  # noqa: ANN001
         return list(self.data.keys())
+
+
+def make_profile(
+    *,
+    scope="session",
+    session_id="test",
+    model="model-a",
+    role="extractor_fast",
+    token_bucket="medium",
+    total_attempts=20,
+    success_count=18,
+    timeout_count=0,
+    p95_latency_ms=5000,
+    source_attempt_count=None,
+    generated_at="2026-06-01T10:00:00",
+):
+    return PerformanceProfile(
+        key=PerformanceProfileKey(
+            scope=scope,
+            session_id=session_id,
+            model_used=model,
+            task_role=role,
+            token_bucket=token_bucket,
+        ),
+        metrics=PerformanceProfileMetrics(
+            total_attempts=total_attempts,
+            success_count=success_count,
+            timeout_count=timeout_count,
+            p95_latency_ms=p95_latency_ms,
+        ),
+        source_attempt_count=source_attempt_count if source_attempt_count is not None else total_attempts,
+        generated_at=generated_at,
+    )
+
+
+async def make_profile_store(*profiles):
+    profile_store = PerformanceProfileStore(MemoryStorage())
+    for profile in profiles:
+        await profile_store.save(profile)
+    return profile_store
 
 
 @pytest.mark.asyncio
@@ -574,3 +621,257 @@ async def test_model_router_decision_includes_profile_fields():
     assert "profile_rankings" in data or decision.profile_rankings == []
     assert "profile_confidence" in data or decision.profile_confidence is None
     assert "profile_warnings" in data or decision.profile_warnings == []
+
+
+def test_config_profile_routing_defaults(monkeypatch):
+    monkeypatch.delenv("NOVELFORGE_ENABLE_PROFILE_ROUTING", raising=False)
+    monkeypatch.delenv("NOVELFORGE_PROFILE_ROUTING_MIN_CONFIDENCE", raising=False)
+    monkeypatch.delenv("NOVELFORGE_PROFILE_ROUTING_SCOPE", raising=False)
+    monkeypatch.delenv("NOVELFORGE_PROFILE_ROUTING_ALLOW_LOW_CONFIDENCE", raising=False)
+
+    config = Config()
+
+    assert config.enable_profile_routing is False
+    assert config.profile_routing_min_confidence == "medium"
+    assert config.profile_routing_scope == "session"
+    assert config.profile_routing_allow_low_confidence is False
+
+
+def test_config_profile_routing_env_override_required_values(monkeypatch):
+    monkeypatch.setenv("NOVELFORGE_ENABLE_PROFILE_ROUTING", "true")
+    monkeypatch.setenv("NOVELFORGE_PROFILE_ROUTING_ALLOW_LOW_CONFIDENCE", "true")
+    monkeypatch.setenv("NOVELFORGE_PROFILE_ROUTING_SCOPE", "global")
+
+    config = Config()
+
+    assert config.enable_profile_routing is True
+    assert config.profile_routing_allow_low_confidence is True
+    assert config.profile_routing_scope == "global"
+
+
+@pytest.mark.asyncio
+async def test_model_router_low_confidence_disallowed_preserves_candidate_order():
+    class ProfileConfig(FakeConfig):
+        model_pools = {"extractor_fast": ["model-a", "model-b"]}
+        enable_profile_routing = True
+        profile_routing_scope = "session"
+        profile_routing_min_confidence = "medium"
+        profile_routing_allow_low_confidence = False
+
+    profile_store = await make_profile_store(
+        make_profile(model="model-b", total_attempts=2, success_count=2, p95_latency_ms=1000)
+    )
+    service = FakeRoutedAIService({"model-a": "ok", "model-b": "ok"}, real_client=False)
+    router = ModelRouter(service, ProfileConfig(), profile_store=profile_store)
+
+    decision = await router.select_model("extractor_fast", probe=False, session_id="test")
+
+    assert decision.selected_model == "model-a"
+    assert decision.candidates == ["model-a", "model-b"]
+    low_ranking = next(r for r in decision.profile_rankings if r["model"] == "model-b")
+    assert low_ranking["reason"] == "low_confidence"
+    assert decision.profile_confidence == "low"
+
+
+@pytest.mark.asyncio
+async def test_model_router_low_confidence_allowed_can_reorder_candidates():
+    class ProfileConfig(FakeConfig):
+        model_pools = {"extractor_fast": ["model-a", "model-b"]}
+        enable_profile_routing = True
+        profile_routing_scope = "session"
+        profile_routing_min_confidence = "medium"
+        profile_routing_allow_low_confidence = True
+
+    profile_store = await make_profile_store(
+        make_profile(model="model-a", total_attempts=2, success_count=1, timeout_count=1, p95_latency_ms=9000),
+        make_profile(model="model-b", total_attempts=2, success_count=2, timeout_count=0, p95_latency_ms=1000),
+    )
+    service = FakeRoutedAIService({"model-a": "ok", "model-b": "ok"}, real_client=False)
+    router = ModelRouter(service, ProfileConfig(), profile_store=profile_store)
+
+    decision = await router.select_model("extractor_fast", probe=False, session_id="test")
+
+    assert decision.selected_model == "model-b"
+    assert decision.candidates[0] == "model-b"
+    assert decision.profile_rankings[0]["confidence_level"] == "low"
+    assert decision.profile_confidence == "low"
+
+
+@pytest.mark.asyncio
+async def test_model_router_low_confidence_allowed_does_not_bypass_cooldown():
+    class ProfileConfig(FakeConfig):
+        model_pools = {"extractor_fast": ["model-a", "model-b"]}
+        enable_profile_routing = True
+        profile_routing_scope = "session"
+        profile_routing_allow_low_confidence = True
+
+    profile_store = await make_profile_store(
+        make_profile(model="model-a", total_attempts=2, success_count=1, timeout_count=1, p95_latency_ms=9000),
+        make_profile(model="model-b", total_attempts=2, success_count=2, timeout_count=0, p95_latency_ms=1000),
+    )
+    service = FakeRoutedAIService({"model-a": "ok", "model-b": "ok"}, real_client=False)
+    router = ModelRouter(service, ProfileConfig(), profile_store=profile_store)
+    router.mark_cooldown("model-b")
+
+    decision = await router.select_model("extractor_fast", probe=False, session_id="test")
+
+    assert decision.candidates[0] == "model-b"
+    assert decision.selected_model == "model-a"
+
+
+@pytest.mark.asyncio
+async def test_model_router_global_scope_uses_global_profiles_without_session_id():
+    class ProfileConfig(FakeConfig):
+        model_pools = {"extractor_fast": ["model-a", "model-b"]}
+        enable_profile_routing = True
+        profile_routing_scope = "global"
+        profile_routing_min_confidence = "medium"
+        profile_routing_allow_low_confidence = False
+
+    profile_store = await make_profile_store(
+        make_profile(scope="global", session_id="", model="model-b", total_attempts=20, success_count=19),
+        make_profile(scope="global", session_id="", model="model-a", total_attempts=20, success_count=10),
+    )
+    service = FakeRoutedAIService({"model-a": "ok", "model-b": "ok"}, real_client=False)
+    router = ModelRouter(service, ProfileConfig(), profile_store=profile_store)
+
+    decision = await router.select_model("extractor_fast", probe=False)
+
+    assert decision.selected_model == "model-b"
+    assert decision.profile_warnings == []
+
+
+@pytest.mark.asyncio
+async def test_model_router_session_scope_without_session_id_warns_and_preserves_order():
+    class ProfileConfig(FakeConfig):
+        model_pools = {"extractor_fast": ["model-a", "model-b"]}
+        enable_profile_routing = True
+        profile_routing_scope = "session"
+
+    profile_store = await make_profile_store(
+        make_profile(scope="global", session_id="", model="model-b", total_attempts=20, success_count=19)
+    )
+    service = FakeRoutedAIService({"model-a": "ok", "model-b": "ok"}, real_client=False)
+    router = ModelRouter(service, ProfileConfig(), profile_store=profile_store)
+
+    decision = await router.select_model("extractor_fast", probe=False)
+
+    assert decision.selected_model == "model-a"
+    assert "session_scope_missing_session_id" in decision.profile_warnings
+
+
+@pytest.mark.asyncio
+async def test_model_router_session_scope_falls_back_to_global_when_session_profile_missing():
+    class ProfileConfig(FakeConfig):
+        model_pools = {"extractor_fast": ["model-a", "model-b"]}
+        enable_profile_routing = True
+        profile_routing_scope = "session"
+        profile_routing_min_confidence = "medium"
+
+    profile_store = await make_profile_store(
+        make_profile(scope="global", session_id="", model="model-b", total_attempts=20, success_count=19),
+        make_profile(scope="global", session_id="", model="model-a", total_attempts=20, success_count=10),
+    )
+    service = FakeRoutedAIService({"model-a": "ok", "model-b": "ok"}, real_client=False)
+    router = ModelRouter(service, ProfileConfig(), profile_store=profile_store)
+
+    decision = await router.select_model("extractor_fast", probe=False, session_id="missing-session")
+
+    assert decision.selected_model == "model-b"
+    assert "fallback_to_global" in decision.profile_warnings
+
+
+@pytest.mark.asyncio
+async def test_model_router_invalid_profile_scope_warns_and_falls_back_safely():
+    class ProfileConfig(FakeConfig):
+        model_pools = {"extractor_fast": ["model-a", "model-b"]}
+        enable_profile_routing = True
+        profile_routing_scope = "invalid"
+
+    profile_store = await make_profile_store(
+        make_profile(scope="global", session_id="", model="model-b", total_attempts=20, success_count=19)
+    )
+    service = FakeRoutedAIService({"model-a": "ok", "model-b": "ok"}, real_client=False)
+    router = ModelRouter(service, ProfileConfig(), profile_store=profile_store)
+
+    decision = await router.select_model("extractor_fast", probe=False, session_id="test")
+
+    assert decision.selected_model == "model-b"
+    assert "invalid_profile_scope_fallback" in decision.profile_warnings
+    assert "fallback_to_global" in decision.profile_warnings
+
+
+def test_model_router_same_model_prefers_known_bucket_over_unknown():
+    unknown_profile = make_profile(model="model-a", token_bucket="unknown", total_attempts=20, success_count=10)
+    medium_profile = make_profile(model="model-a", token_bucket="medium", total_attempts=20, success_count=18)
+
+    assert ModelRouter._is_better_profile(medium_profile, unknown_profile) is True
+    assert ModelRouter._is_better_profile(unknown_profile, medium_profile) is False
+
+
+def test_model_router_same_model_prefers_high_confidence_over_low():
+    low_profile = make_profile(model="model-a", total_attempts=2, success_count=2)
+    high_profile = make_profile(model="model-a", total_attempts=35, success_count=30)
+
+    assert ModelRouter._is_better_profile(high_profile, low_profile) is True
+    assert ModelRouter._is_better_profile(low_profile, high_profile) is False
+
+
+def test_model_router_profile_choice_is_deterministic_for_exact_priority_ties():
+    profile_a = make_profile(
+        model="model-a",
+        token_bucket="medium",
+        total_attempts=20,
+        success_count=12,
+        generated_at="2026-06-01T10:00:00",
+    )
+    profile_b = make_profile(
+        model="model-a",
+        token_bucket="medium",
+        total_attempts=20,
+        success_count=18,
+        generated_at="2026-06-01T10:00:00",
+    )
+
+    first = max([profile_a, profile_b], key=ModelRouter._profile_sort_key)
+    second = max([profile_b, profile_a], key=ModelRouter._profile_sort_key)
+
+    assert first == second
+
+
+def test_model_route_decision_does_not_expose_raw_or_chapter_content_fields():
+    from novelforge.services.model_router import ModelRouteDecision
+
+    decision = ModelRouteDecision(
+        role="extractor_fast",
+        selected_model="model-a",
+        reason="probe_skipped",
+        candidates=["model-a"],
+        profile_rankings=[{"model": "model-a", "score": 80, "confidence_level": "low"}],
+        profile_confidence="low",
+    )
+
+    data = decision.to_dict()
+
+    assert "raw_response_text" not in data
+    assert "raw_response_preview" not in data
+    assert "chapter_content" not in data
+
+
+@pytest.mark.asyncio
+async def test_model_router_profile_lookup_failure_falls_back_with_warning():
+    class BrokenProfileStore:
+        async def list_by_scope(self, scope, session_id=""):
+            raise RuntimeError("profile store unavailable")
+
+    class ProfileConfig(FakeConfig):
+        model_pools = {"extractor_fast": ["model-a", "model-b"]}
+        enable_profile_routing = True
+
+    service = FakeRoutedAIService({"model-a": "ok", "model-b": "ok"}, real_client=False)
+    router = ModelRouter(service, ProfileConfig(), profile_store=BrokenProfileStore())
+
+    decision = await router.select_model("extractor_fast", probe=False, session_id="test")
+
+    assert decision.selected_model == "model-a"
+    assert "profile_lookup_failed" in decision.profile_warnings
