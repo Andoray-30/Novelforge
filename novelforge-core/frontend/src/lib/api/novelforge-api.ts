@@ -1,5 +1,5 @@
 import { APIClient, sanitizeAPIErrorDetail } from './client';
-import type {
+import {
   AITask,
   Character,
   CharacterDesign,
@@ -27,6 +27,14 @@ import type {
   TargetAudience,
   WorldBuildingRequest,
   WorldSetting,
+  DeepSynthesisRequest,
+  DeepSynthesisResult,
+  ExtractionAttemptSummary,
+  ExtractionAttempt,
+  RetryExtractionAttemptResponse,
+  RetryQueueSummary,
+  RetryJob,
+  RunDueRetryJobsResponse,
 } from '@/types';
 
 function resolveApiBaseUrl(): string {
@@ -632,7 +640,7 @@ export const extractionAttemptService = {
   getSummary: (params: { sessionId: string; parentId?: string | null }) => {
     const query = new URLSearchParams({ session_id: params.sessionId });
     if (params.parentId) query.set('parent_id', params.parentId);
-    return novelforgeClient.get<import('@/types').ExtractionAttemptSummary>(`/api/extraction/attempts/summary?${query}`);
+    return novelforgeClient.get<ExtractionAttemptSummary>(`/api/extraction/attempts/summary?${query}`);
   },
 
   list: (params: { sessionId: string; parentId?: string | null; status?: string; chapterId?: string | null; limit?: number }) => {
@@ -641,16 +649,16 @@ export const extractionAttemptService = {
     if (params.status) query.set('status', params.status);
     if (params.chapterId) query.set('chapter_id', params.chapterId);
     if (params.limit) query.set('limit', String(params.limit));
-    return novelforgeClient.get<{ items: import('@/types').ExtractionAttempt[]; total: number }>(`/api/extraction/attempts?${query}`);
+    return novelforgeClient.get<{ items: ExtractionAttempt[]; total: number }>(`/api/extraction/attempts?${query}`);
   },
 
   get: (attemptId: string, params: { sessionId: string }) => {
     const query = new URLSearchParams({ session_id: params.sessionId });
-    return novelforgeClient.get<import('@/types').ExtractionAttempt>(`/api/extraction/attempts/${encodeURIComponent(attemptId)}?${query}`);
+    return novelforgeClient.get<ExtractionAttempt>(`/api/extraction/attempts/${encodeURIComponent(attemptId)}?${query}`);
   },
 
   retry: (attemptId: string, params: { sessionId: string }) => {
-    return novelforgeClient.post<import('@/types').RetryExtractionAttemptResponse>(
+    return novelforgeClient.post<RetryExtractionAttemptResponse>(
       `/api/extraction/attempts/${encodeURIComponent(attemptId)}/retry`,
       { session_id: params.sessionId },
     );
@@ -663,18 +671,24 @@ export const retryQueueService = {
     if (params.parentId) query.set('parent_id', params.parentId);
     if (params.status) query.set('status', params.status);
     if (params.limit) query.set('limit', String(params.limit));
-    return novelforgeClient.get<import('@/types').RetryQueueSummary>(`/api/extraction/retry-queue?${query}`);
+    return novelforgeClient.get<RetryQueueSummary>(`/api/extraction/retry-queue?${query}`);
   },
 
   get: (jobId: string, params: { sessionId: string }) => {
     const query = new URLSearchParams({ session_id: params.sessionId });
-    return novelforgeClient.get<import('@/types').RetryJob>(`/api/extraction/retry-queue/${encodeURIComponent(jobId)}?${query}`);
+    return novelforgeClient.get<RetryJob>(`/api/extraction/retry-queue/${encodeURIComponent(jobId)}?${query}`);
   },
 
   runDue: (params: { sessionId: string; modelRole?: string }) => {
-    return novelforgeClient.post<import('@/types').RunDueRetryJobsResponse>('/api/extraction/retry-queue/run-due', {
+    return novelforgeClient.post<RunDueRetryJobsResponse>('/api/extraction/retry-queue/run-due', {
       session_id: params.sessionId,
       model_role: params.modelRole || 'extractor_repair',
     });
+  },
+};
+
+export const deepSynthesisService = {
+  createPreview: (request: DeepSynthesisRequest): Promise<DeepSynthesisResult> => {
+    return novelforgeClient.post<DeepSynthesisResult>('/api/extraction/deep-synthesis/preview', request);
   },
 };

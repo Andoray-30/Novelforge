@@ -7,6 +7,14 @@ export default defineConfig({
     setupFiles: ['./vitest.setup.ts'],
     globals: true,
     css: false,
+    include: ['src/**/*.test.{ts,tsx}', 'tests/**/*.test.{ts,tsx}'],
+    deps: {
+      optimizer: {
+        web: {
+          include: ['lucide-react']
+        }
+      }
+    }
   },
   resolve: {
     alias: {

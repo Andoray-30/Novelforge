@@ -20,8 +20,11 @@ import {
   Users,
   Wrench,
 } from 'lucide-react';
-import { chapterIndexRunService, contentService, extractionAttemptService, modelHealthService, retryQueueService, taskService, textProcessingService } from '@/lib/api';
+import { chapterIndexRunService, contentService, extractionAttemptService, modelHealthService, retryQueueService, taskService, textProcessingService, deepSynthesisService } from '@/lib/api';
 import { buildAssetQualityDiagnostics, type AssetQualityDiagnosticsResult } from '@/lib/asset-quality-diagnostics';
+import { DeepSynthesisPreviewPanel } from './deep-synthesis-preview';
+import { buildDeepSynthesisSelectionState, deriveAcceptedRejectedIds } from './deep-synthesis-utils';
+import { DeepSynthesisResult, DeepSynthesisBudgetTier, DeepSynthesisScopeType } from '@/types';
 import {
   formatLatencyMs,
   formatProfileConfidence,
@@ -695,6 +698,13 @@ export default function ExtractPage() {
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const [recoverySubmitting, setRecoverySubmitting] = useState<string | null>(null);
 
+  const [deepSynthesisResult, setDeepSynthesisResult] = useState<DeepSynthesisResult | null>(null);
+  const [deepSynthesisLoading, setDeepSynthesisLoading] = useState(false);
+  const [deepSynthesisError, setDeepSynthesisError] = useState<string | null>(null);
+  const [deepSynthesisBudgetTier, setDeepSynthesisBudgetTier] = useState<DeepSynthesisBudgetTier>('medium');
+  const [deepSynthesisScopeType, setDeepSynthesisScopeType] = useState<DeepSynthesisScopeType>('full');
+  const [deepSynthesisSelectionState, setDeepSynthesisSelectionState] = useState<Record<string, 'accepted' | 'rejected' | 'undecided'>>({});
+
   const { currentSession, currentSessionId, createSession, switchSession, loadSessions } = useSessions();
   const setSelectedNovelId = useAppStore((state) => state.setSelectedNovelId);
   const activeTasks = useAppStore((state) => state.activeTasks);
@@ -721,6 +731,9 @@ export default function ExtractPage() {
     setModelHealthReport(null);
     setModelHealthError(null);
     setModelHealthLoading(false);
+    setDeepSynthesisResult(null);
+    setDeepSynthesisError(null);
+    setDeepSynthesisLoading(false);
   }, [currentSessionId]);
 
   const ensureSessionId = useCallback(async (selectedFile: File): Promise<string> => {
@@ -1187,6 +1200,68 @@ export default function ExtractPage() {
     } finally {
       setRepairSubmitting(null);
     }
+  };
+
+  const handleRunDeepSynthesisPreview = async () => {
+    const sessionId = completedResult?.session_id || savedSummary?.sessionId || currentSessionId;
+    if (!sessionId) {
+      setDeepSynthesisError('未检测到有效的会话。请先上传文本或打开一个已有提取项目。');
+      return;
+    }
+    setDeepSynthesisLoading(true);
+    setDeepSynthesisError(null);
+    try {
+      const res = await deepSynthesisService.createPreview({
+        session_id: sessionId,
+        scope_type: deepSynthesisScopeType,
+        budget_tier: deepSynthesisBudgetTier
+      });
+      setDeepSynthesisResult(res);
+      setDeepSynthesisSelectionState(buildDeepSynthesisSelectionState(res));
+    } catch (error) {
+      setDeepSynthesisError(error instanceof Error ? error.message : '深度合成预览生成遇到错误');
+    } finally {
+      setDeepSynthesisLoading(false);
+    }
+  };
+
+  const handleAcceptChange = (changeId: string) => {
+    setDeepSynthesisSelectionState(prev => ({
+      ...prev,
+      [changeId]: 'accepted'
+    }));
+  };
+
+  const handleRejectChange = (changeId: string) => {
+    setDeepSynthesisSelectionState(prev => ({
+      ...prev,
+      [changeId]: 'rejected'
+    }));
+  };
+
+  const handleResetChange = (changeId: string) => {
+    setDeepSynthesisSelectionState(prev => ({
+      ...prev,
+      [changeId]: 'undecided'
+    }));
+  };
+
+  const handleAcceptAll = () => {
+    if (!deepSynthesisResult) return;
+    const newState: Record<string, 'accepted' | 'rejected' | 'undecided'> = {};
+    for (const change of deepSynthesisResult.proposed_changes) {
+      newState[change.change_id] = 'accepted';
+    }
+    setDeepSynthesisSelectionState(newState);
+  };
+
+  const handleRejectAll = () => {
+    if (!deepSynthesisResult) return;
+    const newState: Record<string, 'accepted' | 'rejected' | 'undecided'> = {};
+    for (const change of deepSynthesisResult.proposed_changes) {
+      newState[change.change_id] = 'rejected';
+    }
+    setDeepSynthesisSelectionState(newState);
   };
 
   const projectLabel = currentSession?.title || '未选择项目，首次上传时会自动创建。';
@@ -2018,6 +2093,26 @@ export default function ExtractPage() {
             </div>
             {repairMessage ? <div className="nf-alert mt-3">{repairMessage}</div> : null}
           </div>
+        </section>
+
+        {/* Deep Synthesis Preview Section */}
+        <section className="mt-8">
+          <DeepSynthesisPreviewPanel
+            result={deepSynthesisResult}
+            loading={deepSynthesisLoading}
+            error={deepSynthesisError}
+            selectionState={deepSynthesisSelectionState}
+            onAcceptChange={handleAcceptChange}
+            onRejectChange={handleRejectChange}
+            onResetChange={handleResetChange}
+            onAcceptAll={handleAcceptAll}
+            onRejectAll={handleRejectAll}
+            onRunPreview={handleRunDeepSynthesisPreview}
+            budgetTier={deepSynthesisBudgetTier}
+            onBudgetTierChange={setDeepSynthesisBudgetTier}
+            scopeType={deepSynthesisScopeType}
+            onScopeTypeChange={setDeepSynthesisScopeType}
+          />
         </section>
 
         <section className="nf-panel nf-panel-pad">

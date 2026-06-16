@@ -7,9 +7,47 @@
   - 下部"历史详细记录"：保留过去每一轮修复动作，不删历史，便于回溯排查。
   - 文末新增记录继续按日期追加，但不再依赖对话记忆维护全局判断。
 - 阅读建议：
-  - 想知道系统现在到了哪一步，先看"2026-04-19 审计补充（桥接与显示层）"和"2026-04-18 阶段审计结论"。
+  - 想知道系统现在到了哪一步，先看"2026-06-16 Phase G.3"和"2026-04-18 阶段审计结论"。
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
   - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
+
+## 2026-06-16 Phase G.3: 前端 Deep Synthesis Preview 组件与人工确认入口
+
+### 本轮完成
+- **补齐前端 TypeScript 类型**：
+  - 在 `types/index.ts` 中补全 `DeepSynthesisBudgetTier`、`DeepSynthesisScopeType`、`DeepSynthesisAssetType`、`RiskLevel`、`ProposedChange`、`DeepSynthesisPreview`、`DeepSynthesisBudgetSummary`、`DeepSynthesisRoundSummary`、`DeepSynthesisConvergenceSummary`、`DeepSynthesisQualityTrace`、`DeepSynthesisUserFeedback`、`DeepSynthesisResult` 等类型，绝对不添加 raw_response_text, raw_response_preview, chapter_content, provider_error_body 等敏感/违规字段。
+- **扩展前端 API Client**：
+  - 在 `novelforge-api.ts` 中增加 `deepSynthesisService.createPreview(request)`，并在 `lib/api/index.ts` 中注册，支持统一的 `APIClient` 请求、错误拦截和 credentials 配置。
+- **新增格式化与数据转换工具**：
+  - 编写 `deep-synthesis-utils.ts`：包含中文化翻译格式化函数（预算、范围、风险级别、收敛原因等），包含 proposed_changes 分组逻辑，包含 accept/reject 手动确认映射以及 selectionState 数据转换，并支持敏感词与 forbidden 字段内容脱敏拦截（sanitizeDeepSynthesisDisplayValue 限制最大200字符，对 chapter_content, raw_response_text 做 [REDACTED_FIELD] 遮蔽）。
+- **新建高质量 DeepSynthesisPreviewPanel 预览面板**：
+  - 完美设计、自适应宽度、精致的颜色和谐与动画过渡，包含 5 大数据卡片，支持 field-level diff（并排对比旧值与新值），支持来源证据 references 展示，支持高置信度与高风险（warning/danger 样式），支持折叠轮次详情展示（Round summaries），以及人工单独或批量 accept/reject 人工审阅入口。
+- **集成进入 Extract 工作台主页面**：
+  - 在 `extract/page.tsx` 中合适位置集成 `DeepSynthesisPreviewPanel` 组件，无缝对接已完成的 Session ID 和 Novel ID，支持按需触发，默认 budget_tier="medium", scope_type="full"。
+- **编写 Vitest 测试覆盖**：
+  - 编写 `deep-synthesis-utils.test.ts` 进行 100% 格式化、转换、分组和敏感遮蔽安全测试；编写 Mock 冒烟用例，全部测试及 Next.js 生产 Build 完美通过。
+
+### 修改文件
+- `novelforge-core/frontend/src/types/index.ts` — 补齐深度合成类型
+- `novelforge-core/frontend/src/lib/api/novelforge-api.ts` — 添加 `deepSynthesisService` preview 接口
+- `novelforge-core/frontend/src/lib/api/index.ts` — 暴露 `deepSynthesisAPI`
+- `novelforge-core/frontend/src/app/extract/deep-synthesis-utils.ts` — (新建) 翻译格式化、变更分组与遮蔽脱敏
+- `novelforge-core/frontend/src/app/extract/deep-synthesis-utils.test.ts` — (新建) 100% 覆盖率单元测试
+- `novelforge-core/frontend/src/app/extract/deep-synthesis-preview.tsx` — (新建) 精美的前端交互预览与人工确认面板
+- `novelforge-core/frontend/src/app/extract/deep-synthesis-preview.test.tsx` — (新建) 冒烟单元测试用例
+- `novelforge-core/frontend/src/app/extract/page.tsx` — 集成 Preview 控制状态与组件渲染入口
+- `project-docs/PROGRESS.md` — 更新进度日志
+
+### 验证
+- `npm test -- --run`：34 test files passed (170 tests successfully executed)
+- `npm run build`：Next.js Production Build compiled flawlessly
+
+### 风险评估
+- **无风险**：未实现 apply patch 接口，不覆盖内容库。
+- **无风险**：本地 selectionState 完全交互式模拟，生成 accepted/rejected ID 数组，无状态污染风险。
+- **无安全风险**：主动屏蔽 chapter_content 等多类字段，不保存或展示 forbidden data。
+
+---
 
 ## 2026-06-16 Phase G.2: Deep Synthesis 多轮收敛与质量追踪
 

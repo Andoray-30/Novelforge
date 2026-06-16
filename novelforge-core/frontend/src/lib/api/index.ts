@@ -6,9 +6,11 @@ export { SillyTavernAPI } from './sillytavern';
 import {
   aiService,
   workflowService,
-  novelforgeClient
+  novelforgeClient,
+  deepSynthesisService
 } from './novelforge-api';
 
 export const aiAPI = aiService;
 export const workflowAPI = workflowService;
 export const novelforgeAPI = novelforgeClient;
+export const deepSynthesisAPI = deepSynthesisService;
