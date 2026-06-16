@@ -65,8 +65,8 @@ from ..services.ai_scheduler import get_ai_scheduler, AITaskScheduler, TaskPrior
 from ..services.ai_service import AIService
 from ..services.model_health import get_model_health_report, record_model_health_event
 from ..services.model_router import ModelRouter
-from ..services.deep_synthesis import DeepSynthesisService, DeepSynthesisValidationError
-from ..services.deep_synthesis_models import DeepSynthesisRequest
+from ..services.deep_synthesis import DeepSynthesisConflictError, DeepSynthesisService, DeepSynthesisValidationError
+from ..services.deep_synthesis_models import DeepSynthesisApplyRequest, DeepSynthesisRequest
 
 from ..core.config import Config
 from .ai_planning_service import get_ai_planning_service, AIPlanningService
@@ -2561,6 +2561,47 @@ async def create_deep_synthesis_preview(request: DeepSynthesisRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Deep Synthesis preview 生成失败",
+        )
+
+
+@app.post("/api/extraction/deep-synthesis/apply", response_model=dict)
+async def apply_deep_synthesis_preview(request: DeepSynthesisApplyRequest):
+    try:
+        service = DeepSynthesisService(
+            attempt_store=attempt_store,
+            content_manager=content_manager,
+        )
+        result = await service.apply_preview(request)
+        if result.conflicts:
+            conflict_reasons = {conflict.reason.value for conflict in result.conflicts}
+            if conflict_reasons & {"version_mismatch", "current_value_mismatch", "missing_asset"}:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=result.model_dump(mode="json"),
+                )
+            if conflict_reasons & {"forbidden_field_path", "invalid_field_path"}:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=result.model_dump(mode="json"),
+                )
+        return result.model_dump(mode="json")
+    except HTTPException:
+        raise
+    except (DeepSynthesisValidationError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    except DeepSynthesisConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        )
+    except Exception:
+        logger.exception("Deep Synthesis apply 内部异常")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Deep Synthesis apply 执行失败",
         )
 
 

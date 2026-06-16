@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from novelforge.services.attempt_store import AttemptStore
+from novelforge.content.models import ContentItem, ContentMetadata, ContentStatus, ContentType
 
 
 class FakeRouter:
@@ -35,6 +36,42 @@ class MemoryStorage:
 
     async def list_keys(self, storage_type=None):
         return list(self.data.keys())
+
+
+def make_content_item(*, content_id="char-api", version=1, extracted_data=None):
+    return ContentItem(
+        metadata=ContentMetadata(
+            id=content_id,
+            title="林墨",
+            type=ContentType.CHARACTER,
+            status=ContentStatus.DRAFT,
+            version=version,
+        ),
+        content="",
+        extracted_data=extracted_data or {"profile": {"summary": "旧摘要", "traits": ["沉默"]}},
+    )
+
+
+class FakeContentManager:
+    def __init__(self, items=None, fail_on_get=False, fail_on_update=False):
+        self.items = {item.metadata.id: item for item in (items or [])}
+        self.fail_on_get = fail_on_get
+        self.fail_on_update = fail_on_update
+
+    async def get_content(self, content_id):
+        if self.fail_on_get:
+            raise RuntimeError("provider_error_body: get failed")
+        return self.items.get(content_id)
+
+    async def update_content(self, content_id, content_item):
+        if self.fail_on_update:
+            raise RuntimeError("provider_error_body: update failed")
+        existing = self.items.get(content_id)
+        if existing is None:
+            return False
+        content_item.metadata.version = existing.metadata.version + 1
+        self.items[content_id] = content_item
+        return True
 
 
 class FailingStorage(MemoryStorage):
@@ -72,12 +109,64 @@ def payload(**overrides):
     return data
 
 
+def apply_payload(**overrides):
+    data = {
+        "session_id": "api-session-deep",
+        "preview": {
+            "summary": "已生成 Deep Synthesis preview patch。",
+            "proposed_changes": [
+                {
+                    "change_id": "char-api:1",
+                    "asset_type": "character",
+                    "asset_id": "char-api",
+                    "asset_version": "v1",
+                    "field_path": "profile.summary",
+                    "current_value": "旧摘要",
+                    "proposed_value": "新摘要",
+                    "confidence": 0.9,
+                    "reason": "结构化资产摘要需要更新。",
+                    "evidence_refs": [],
+                    "risk_level": "low",
+                }
+            ],
+            "conflicts_resolved": [],
+            "new_links": [],
+            "risk_flags": [],
+            "confidence_delta": 0.0,
+            "evidence_refs": [],
+            "apply_plan": {
+                "requires_user_confirmation": True,
+                "apply_mode": "preview_patch",
+                "patch_strategy": "field_level",
+                "asset_write_policy": "confirm_before_apply",
+            },
+            "requires_user_confirmation": True,
+        },
+        "accepted_change_ids": ["char-api:1"],
+        "rejected_change_ids": [],
+        "expected_asset_versions": {"char-api": "v1"},
+        "dry_run": False,
+    }
+    data.update(overrides)
+    return data
+
+
 def client_with_fake_router(monkeypatch):
     import novelforge.api as api_module
 
     router = FakeRouter()
     monkeypatch.setattr(api_module.extraction_service, "model_router", router)
     monkeypatch.setattr(api_module, "attempt_store", AttemptStore(MemoryStorage()))
+    return TestClient(api_module.app), router
+
+
+def client_with_fake_content(monkeypatch, content_manager):
+    import novelforge.api as api_module
+
+    router = FakeRouter()
+    monkeypatch.setattr(api_module.extraction_service, "model_router", router)
+    monkeypatch.setattr(api_module, "attempt_store", AttemptStore(MemoryStorage()))
+    monkeypatch.setattr(api_module, "content_manager", content_manager)
     return TestClient(api_module.app), router
 
 
@@ -178,3 +267,74 @@ def test_post_deep_synthesis_preview_forbidden_field_does_not_echo_value(monkeyp
     assert "chapter_content" in detail
     # field values must not be echoed
     assert "secret novel text here" not in detail
+
+
+def test_post_deep_synthesis_apply_success(monkeypatch):
+    client, _ = client_with_fake_content(monkeypatch, FakeContentManager([make_content_item()]))
+
+    response = client.post("/api/extraction/deep-synthesis/apply", json=apply_payload())
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+    assert data["summary"]["applied_count"] == 1
+
+
+def test_post_deep_synthesis_apply_rejected_ids_are_skipped(monkeypatch):
+    client, _ = client_with_fake_content(monkeypatch, FakeContentManager([make_content_item()]))
+
+    response = client.post("/api/extraction/deep-synthesis/apply", json=apply_payload(accepted_change_ids=[], rejected_change_ids=["char-api:1"]))
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["summary"]["skipped_count"] == 1
+    assert data["skipped_changes"][0]["reason"] == "rejected_by_user"
+
+
+def test_post_deep_synthesis_apply_version_mismatch_returns_409(monkeypatch):
+    client, _ = client_with_fake_content(monkeypatch, FakeContentManager([make_content_item(version=2)]))
+
+    response = client.post("/api/extraction/deep-synthesis/apply", json=apply_payload())
+
+    assert response.status_code == 409
+
+
+def test_post_deep_synthesis_apply_forbidden_field_returns_400(monkeypatch):
+    client, _ = client_with_fake_content(monkeypatch, FakeContentManager([make_content_item()]))
+    request = apply_payload()
+    request["preview"]["proposed_changes"][0]["field_path"] = "profile.raw_response_text"
+
+    response = client.post("/api/extraction/deep-synthesis/apply", json=request)
+
+    assert response.status_code == 400
+
+
+def test_post_deep_synthesis_apply_dry_run_does_not_write(monkeypatch):
+    manager = FakeContentManager([make_content_item()])
+    client, _ = client_with_fake_content(monkeypatch, manager)
+
+    response = client.post("/api/extraction/deep-synthesis/apply", json=apply_payload(dry_run=True))
+
+    assert response.status_code == 200
+    assert manager.items["char-api"].extracted_data["profile"]["summary"] == "旧摘要"
+
+
+def test_post_deep_synthesis_apply_500_returns_safe_detail(monkeypatch):
+    client, _ = client_with_fake_content(monkeypatch, FakeContentManager([make_content_item()], fail_on_get=True))
+    client = TestClient(client.app, raise_server_exceptions=False)
+
+    response = client.post("/api/extraction/deep-synthesis/apply", json=apply_payload())
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Deep Synthesis apply 执行失败"
+
+
+def test_post_deep_synthesis_apply_response_excludes_forbidden_fields(monkeypatch):
+    client, _ = client_with_fake_content(monkeypatch, FakeContentManager([make_content_item()]))
+
+    response = client.post("/api/extraction/deep-synthesis/apply", json=apply_payload())
+    serialized = json.dumps(response.json(), ensure_ascii=False)
+
+    assert "chapter_content" not in serialized
+    assert "raw_response_text" not in serialized
+    assert "raw_response_preview" not in serialized
