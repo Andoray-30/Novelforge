@@ -11,6 +11,42 @@
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
   - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
 
+## 2026-06-16 Phase G.1: Deep Synthesis 基础框架
+
+### 本轮完成
+- 新增 Deep Synthesis Pydantic schema：`DeepSynthesisRequest`、`DeepSynthesisScope`、`DeepSynthesisBudgetTier`、`DeepSynthesisPreview`、`ProposedChange`、`Conflict`、`NewLink`、`RiskFlag`、`EvidenceRef`、`ApplyPlan`、`DeepSynthesisResult`、`DeepSynthesisWarning`。
+- 新增 `DeepSynthesisService` 基础框架：接收结构化资产请求，递归拒绝 forbidden fields，建立预算计划，调用 `ModelRouter.select_model("extractor_deep", session_id=...)`，生成 preview patch，记录 `AttemptStore`。
+- 新增 preview API：`POST /api/extraction/deep-synthesis/preview`，只返回 preview，不 apply、不写资产库、不调用真实 provider。
+- `AttemptRecord` 增加 `task_type=deep_synthesis` 及 synthesis metadata 兼容字段；`deep_synthesis` attempt 持久化时剔除 `raw_response_preview` / `raw_response_hash`，不保存正文或 raw response。
+- 新增服务与 API 测试，覆盖 structured assets、forbidden field、预算档位、router fallback、attempt 记录、安全输出和空资产 warning。
+
+### 安全边界
+- Deep Synthesis G.1 只消费结构化资产，不读取、不传递、不持久化真实小说正文。
+- 递归拒绝：`chapter_content`、`raw_response_text`、`raw_response_preview`、`provider_error_body`、`full_text`、`original_text`。
+- `evidence_refs` 只保留结构化引用或 200 字符以内摘要；API response 不包含 forbidden fields。
+
+### 当前边界
+- 未实现 Deep Synthesis 多轮收敛。
+- 未实现 apply patch 写库。
+- 未实现前端 Preview UI。
+- 未修改 ModelRouter / BudgetedScheduler / RetryQueue 核心语义。
+
+### 修改文件
+- `novelforge-core/novelforge/services/deep_synthesis_models.py` — Deep Synthesis schema。
+- `novelforge-core/novelforge/services/deep_synthesis.py` — Deep Synthesis preview service。
+- `novelforge-core/novelforge/services/attempt_store.py` — 增加 deep_synthesis attempt metadata 兼容字段与安全持久化剔除。
+- `novelforge-core/novelforge/api/__init__.py` — 增加 preview API。
+- `novelforge-core/tests/services/test_deep_synthesis.py` — 服务层测试。
+- `novelforge-core/tests/api/test_deep_synthesis_api.py` — API 测试。
+- `project-docs/PROGRESS.md` — 添加 Phase G.1 记录。
+
+### 验证
+- `pytest tests/services/test_deep_synthesis.py -v`：17 passed。
+- `pytest tests/api/test_deep_synthesis_api.py -v`：5 passed。
+- `pytest tests/ -q`：414 passed。
+- `git diff --check`：通过，仅出现既有 Windows LF → CRLF warning。
+- `git status --short`：工作树存在大量本轮外的既有改动；本轮只修改上述允许范围文件。
+
 ## 2026-06-16 Phase G: Deep Synthesis 设计
 
 ### 设计完成
