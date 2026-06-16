@@ -11,6 +11,50 @@
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
   - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
 
+## 2026-06-17 Phase G.4.1: Deep Synthesis Apply Patch Backend Foundation
+
+### 本轮完成
+- 新增 Deep Synthesis apply schema：
+  - `DeepSynthesisApplyRequest`：`session_id`、`preview`、`accepted_change_ids`、`rejected_change_ids`、`expected_asset_versions`、`dry_run`、`idempotency_key`
+  - `DeepSynthesisApplyResult` / `DeepSynthesisApplySummary` / `DeepSynthesisAppliedChange` / `DeepSynthesisSkippedChange` / `DeepSynthesisApplyConflict`
+  - `DeepSynthesisApplyStatus` / `DeepSynthesisApplySkipReason`，覆盖 success / partial / failed / dry_run 与 rejected / undecided / duplicate / forbidden / version / current_value 等原因
+- 在 `deep_synthesis.py` 中实现字段级 apply 纯函数与服务逻辑：
+  - `parse_field_path()`：禁止空 segment、`__proto__` / `constructor` / `prototype`、`chapter_content` / `raw_response_text` / `raw_response_preview` / `provider_error_body` / `full_text` / `original_text`
+  - `get_field_value()` / `apply_field_patch()`：只做字段级 patch，不原地修改输入，不整段覆盖 asset
+  - `apply_preview()`：只处理 `accepted_change_ids`，跳过 `rejected` / `undecided`，支持 `dry_run`，支持 version/current_value 校验，支持 duplicate change_id 跳过
+- 接入现有资产写入路径：
+  - 优先通过 `ContentManager.get_content()` / `ContentManager.update_content()` 读取与写入
+  - 未直接绕过 storage 层，不写 raw_response_text / raw_response_preview / chapter_content
+- 新增 API：
+  - `POST /api/extraction/deep-synthesis/apply`
+  - 400：validation error / forbidden field path / invalid field path
+  - 409：version mismatch / current_value mismatch / missing asset
+  - 500：固定安全 detail `Deep Synthesis apply 执行失败`
+- 扩展 AttemptStore 记录 apply attempt metadata：
+  - `task_type="deep_synthesis_apply"`
+  - 记录 `accepted_count` / `rejected_count` / `applied_count` / `skipped_count` / `conflict_count` / `dry_run` / `user_acceptance_rate` / `status` / `error_type`
+  - 不记录 preview 原始内容、raw_response_text、raw_response_preview、chapter_content、provider_error_body
+
+### 当前边界
+- 未实现前端 Apply 按钮
+- 未调用真实 provider
+- 未修改模型路由
+- 未修改预算调度核心语义
+- 未实现整段资产覆盖或自动全量 apply
+- 未保存 raw_response_text / raw_response_preview / chapter_content
+- 未直接写数据库文件，仍通过 ContentManager / storage 抽象
+
+### 测试计划
+- `pytest tests/services/test_deep_synthesis.py -v`
+- `pytest tests/api/test_deep_synthesis_api.py -v`
+- `pytest tests/ -q`
+- `git diff --check`
+- `git status --short`
+
+### 风险提示
+- 目前 apply 逻辑以 `extracted_data` 字段级 patch 为主，未扩展到所有 `ContentItem` 顶层字段
+- 版本校验目前采用 `v{metadata.version}` 约定，和现有内容版本号保持兼容
+
 ## 2026-06-17 Phase G.3.3: Deep Synthesis Preview Visual QA
 
 ### 本轮完成
