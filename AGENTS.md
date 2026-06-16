@@ -275,7 +275,7 @@ Sisyphus 必须遵守以下上下文预算：
 
 ### 推荐角色分工
 
-**Sisyphus**：
+**Sisyphus**（orchestration agent，不亲自实现）：
 * 总控
 * 路线图规划
 * 任务拆分
@@ -283,13 +283,21 @@ Sisyphus 必须遵守以下上下文预算：
 * 架构边界审查
 * 最终验收总结
 
-**Worker agent（deep / quick / unspecified-high）**：
-* 代码实现
+**Worker agent（deep / unspecified-high）**：
+* 后端代码实现
 * 机械重构
 * 测试新增
 * bug 修复
 * 本地验证
 * 提交代码
+
+**Visual Engineering worker（visual-engineering category）**：
+* 前端代码实现
+* UI/UX 设计与实现
+* 组件开发
+* 样式调整
+* 前端测试
+* 多模态图像理解（mimo v2.5 支持）
 
 **Oracle**：
 * 架构审查
@@ -297,6 +305,14 @@ Sisyphus 必须遵守以下上下文预算：
 * regression 审查
 * 安全边界审查
 * 是否偏离项目初心判断
+* 多模态图像分析（mimo v2.5 支持）
+
+**Multimodal Looker**：
+* 媒体文件分析（PDF、图片、图表）
+* 视觉 QA 验证
+* 截图对比
+* 设计系统检查
+* 多模态图像理解（mimo v2.5 支持）
 
 **小型 worker（quick category）**：
 * 单文件修改
@@ -304,6 +320,18 @@ Sisyphus 必须遵守以下上下文预算：
 * 测试修复
 * 文档整理
 * lint / formatting 修复
+
+**Librarian**：
+* 文档查找
+* 外部资源搜索
+* API 参考查询
+* 最佳实践查找
+
+**Explore**：
+* 代码库探索
+* 上下文搜索
+* 模式发现
+* 依赖分析
 
 ### 标准委派流程
 
