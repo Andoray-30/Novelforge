@@ -11,6 +11,43 @@
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
   - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
 
+## 2026-06-17 Phase G.3.3: Deep Synthesis Preview Visual QA
+
+### 本轮完成
+- 完成 Deep Synthesis Preview 前端视觉 QA 验证：
+  - 前端基础验证：npm test (34 files, 179 tests passed)、tsc (clean)、build (成功)
+  - 页面权限验证：/extract 可直接访问（本地开发环境已认证）
+  - Deep Synthesis Preview 区块验证：标题、scope selector、budget tier selector、生成按钮、空态提示均存在
+  - 状态验证：empty state、loading state、error state（代码审查）、mock preview state 均正常
+  - 视觉检查：Desktop 1440px 和 Mobile 390px 布局正常，无溢出、无重叠
+  - 交互验证：accept/reject/reset/accept all/reject all 均通过本地状态更新，scope/budget selector 可切换
+  - 安全验证：页面文本和 HTML 中无 forbidden fields（chapter_content、raw_response_text 等）
+  - 网络验证：仅调用 POST /api/extraction/deep-synthesis/preview，未调用 apply API 或资产写入 API
+- 产出 QA 报告：`project-docs/visual-audits/deep-synthesis-g3.3.md`
+- 截图：desktop-empty-state.png、desktop-deep-synthesis-preview-data.png、desktop-round-summary-expanded.png、mobile-deep-synthesis.png、mobile-deep-synthesis-focused.png
+
+### 发现
+1. 无显式 "preview only" 横幅：组件通过按钮标签 "Preview" 和 requires_user_confirmation 警告暗示预览模式，但无持久化 "本阶段只预览，不写库" 提示。属于 minor UX finding，非阻断。
+2. 空资产预览正常：后端返回 valid response with no proposed_changes。
+3. Error state 通过代码审查验证（API 成功返回，未触发 error 分支）。
+4. Mobile 布局响应式正常。
+
+### 阻断问题
+* 无
+
+### 当前边界
+- 未实现 apply patch API
+- 未调用 apply API
+- 未写资产库
+- 未调用真实 provider
+- 未展示 forbidden fields
+- 无显式 "preview only" 横幅（minor UX finding）
+
+### 下一步建议
+- Phase G.4: apply patch 后端写库
+
+---
+
 ## 2026-06-16 Phase G.3.1: Deep Synthesis Frontend Contract Fix
 
 ### 本轮完成
