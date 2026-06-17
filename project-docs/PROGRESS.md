@@ -7,9 +7,58 @@
   - 下部"历史详细记录"：保留过去每一轮修复动作，不删历史，便于回溯排查。
   - 文末新增记录继续按日期追加，但不再依赖对话记忆维护全局判断。
 - 阅读建议：
-  - 想知道系统现在到了哪一步，先看"2026-06-16 Phase G.3"和"2026-04-18 阶段审计结论"。
+  - 想知道系统现在到了哪一步，先看"2026-06-17 Phase G.4.3"和"2026-04-18 阶段审计结论"。
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
-  - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
+- 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
+
+## 2026-06-17 Phase G.4.3: Deep Synthesis Apply Flow Visual QA / E2E Verification
+
+### 本轮完成
+- **基础测试验证**：
+  - 后端服务测试：55 passed（`pytest tests/services/test_deep_synthesis.py -v`）
+  - 后端 API 测试：16 passed（`pytest tests/api/test_deep_synthesis_api.py -v`）
+  - 前端测试：34 files, 200 passed（`npm test -- --run`）
+  - TypeScript 类型检查：零错误（`npx tsc --noEmit --incremental false`）
+  - 生产构建：成功（`npm run build`，extract page 31.4 kB）
+
+- **E2E Apply Flow 验证**：
+  - 页面访问：/extract 可直接访问（本地开发环境已认证）
+  - Deep Synthesis Preview 区块：标题、Ready badge、Attempt ID 均存在
+  - 安全横幅："预览模式 — 本阶段默认只预检" + "点击确认写入后才会修改资产库"（已修复 G.3.3 minor UX finding）
+  - Selection 状态栏：已接受/已拒绝/待决策计数正常
+  - Dry Run 按钮：acceptedCount=0 时正确 disabled，提示"请先接受至少一项变更后才能预检"
+  - Confirm Apply 按钮：dryRunPassed=false 时正确 disabled，提示"请先运行预检（Dry Run），确认无冲突后再写入"
+  - 代码审查验证：handleDryRunDeepSynthesisApply / handleConfirmDeepSynthesisApply 逻辑正确
+  - 选择变更清除：accept/reject/reset 自动清空 applyResult/dryRunPassed/applyCompleted
+
+- **视觉 QA**：
+  - Desktop 1440px：Apply 按钮布局正确，安全横幅可见，无溢出
+  - Mobile 390px：按钮垂直堆叠，无横向溢出（scrollWidth=clientWidth=390）
+  - 5 张截图已保存
+
+- **安全验证**：
+  - 页面文本和 HTML 中无 forbidden fields（chapter_content、raw_response_text、raw_response_preview、provider_error_body、full_text、original_text）
+  - 无 API key 泄露
+  - 网络请求仅调用 POST /api/extraction/deep-synthesis/preview，无 apply 或 provider 调用
+
+### 测试结果
+- 后端：71 passed（55 service + 16 API）
+- 前端：200 passed
+- tsc：零错误
+- build：成功
+
+### 修改文件
+- `project-docs/visual-audits/deep-synthesis-g4.3.md` — QA 报告（新增）
+- `project-docs/visual-audits/deep-synthesis-g4.3-*.png` — 截图（新增 5 张）
+- `project-docs/PROGRESS.md` — 进度更新
+
+### 阻断问题
+* 无
+
+### 下一步建议
+- Phase G.4.4 - MVP Closeout
+
+---
 
 ## 2026-06-17 Phase G.4.2: Frontend Apply Button & Apply Result Display
 
