@@ -421,12 +421,22 @@ async def test_apply_idempotency_metadata_and_result_exclude_forbidden_fields():
 
     result = await service.apply_preview(make_apply_request(idempotency_key="safe-key"))
     persisted = await store.get(result.attempt_id)
-    serialized = json.dumps(persisted.model_dump(mode="json"), ensure_ascii=False)
 
-    assert "raw_response_text" not in serialized
-    assert "raw_response_preview" not in serialized
-    assert "provider_error_body" not in serialized
-    assert "chapter_content" not in serialized
+    assert persisted is not None
+    assert "idempotency" in persisted.budget_summary
+
+    idempotency_metadata = persisted.budget_summary["idempotency"]
+    serialized_metadata = json.dumps(idempotency_metadata, ensure_ascii=False)
+    serialized_result = json.dumps(idempotency_metadata["result"], ensure_ascii=False)
+
+    assert "raw_response_text" not in serialized_metadata
+    assert "raw_response_preview" not in serialized_metadata
+    assert "provider_error_body" not in serialized_metadata
+    assert "chapter_content" not in serialized_metadata
+    assert "raw_response_text" not in serialized_result
+    assert "raw_response_preview" not in serialized_result
+    assert "provider_error_body" not in serialized_result
+    assert "chapter_content" not in serialized_result
 
 
 @pytest.mark.asyncio

@@ -2607,15 +2607,19 @@ async def apply_deep_synthesis_preview(request: DeepSynthesisApplyRequest):
         return result.model_dump(mode="json")
     except HTTPException:
         raise
+    except DeepSynthesisConflictError as exc:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "error": "HTTP 409 错误",
+                "detail": {"error": "idempotency_conflict", "detail": str(exc)},
+                "timestamp": datetime.now().isoformat(),
+            },
+        )
     except (DeepSynthesisValidationError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
-        )
-    except DeepSynthesisConflictError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"error": "idempotency_conflict", "detail": str(exc)},
         )
     except Exception:
         logger.exception("Deep Synthesis apply 内部异常")
