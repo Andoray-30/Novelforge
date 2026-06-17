@@ -173,11 +173,12 @@ def test_get_performance_profile_with_scope_session(client):
 def test_get_performance_profile_with_scope_global(client):
     """GET /api/extraction/performance-profile supports scope=global."""
     response = client.get(
-        "/api/extraction/performance-profile?session_id=global-placeholder&scope=global"
+        "/api/extraction/performance-profile?scope=global"
     )
     assert response.status_code == 200
     data = response.json()
     assert "profiles" in data
+    assert "source_attempt_count" in data
 
 
 def test_get_performance_profile_with_model_filter(client):
@@ -226,11 +227,23 @@ def test_post_rebuild_global_performance_profile(client):
     """POST /api/extraction/performance-profile/rebuild supports global scope."""
     response = client.post(
         "/api/extraction/performance-profile/rebuild",
-        json={"session_id": "", "scope": "global"},
+        json={"scope": "global"},
     )
     assert response.status_code == 200
     data = response.json()
     assert "profiles" in data
+    assert "source_attempt_count" in data
+
+
+def test_get_global_performance_profile_empty_data_safe(client):
+    response = client.get(
+        "/api/extraction/performance-profile?scope=global&model_used=__missing_model__"
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["profiles"] == []
+    assert "generated_at" in data
+    assert "warnings" in data
 
 
 def test_performance_profile_no_raw_response_text(client):

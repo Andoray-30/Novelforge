@@ -2461,7 +2461,7 @@ async def retry_attempt(attempt_id: str, request: RetryAttemptRequest):
 
 @app.get("/api/extraction/performance-profile", response_model=dict)
 async def get_performance_profile(
-    session_id: str = Query(..., min_length=1),
+    session_id: str = Query(""),
     scope: str = Query("session"),
     model_used: Optional[str] = Query(None),
     task_role: Optional[str] = Query(None),

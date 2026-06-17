@@ -407,7 +407,7 @@ class PerformanceProfileService:
         for attempt in attempts:
             record = attempt.model_dump()
             role = derive_task_role(record, self._model_pools)
-            bucket = token_bucket(record.get("estimated_tokens", 0))
+            bucket = globals()["token_bucket"](record.get("estimated_tokens", 0))
             model = record.get("model_used", "unknown")
             key = (model, role, bucket, session_id if scope == "session" else "")
 
@@ -440,6 +440,13 @@ class PerformanceProfileService:
                 source_attempt_count=len(records),
             )
             profiles.append(profile)
+
+        if self._profile_store is not None:
+            await self._profile_store.rebuild(
+                scope,
+                session_id if scope == "session" else "",
+                profiles,
+            )
 
         return {
             "profiles": [p.model_dump(mode="json") for p in profiles],
