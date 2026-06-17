@@ -146,8 +146,10 @@ AttemptRecord (existing)
 - `task_type: Optional[str]` — 筛选 task_type（如 `"deep_synthesis_apply"`、`"deep_synthesis"`、`"chapter_index"`）
 - `since: Optional[str]` — ISO timestamp，只返回 created_at >= since 的记录
 - `until: Optional[str]` — ISO timestamp，只返回 created_at <= until 的记录
+- `limit: int = 50` — 分页：返回记录上限（最大 200）
+- `offset: int = 0` — 分页：跳过前 N 条记录
 
-不新增独立端点，复用现有 `/api/extraction/attempts` 并扩展筛选能力。
+不新增独立端点，复用现有 `/api/extraction/attempts` 并扩展筛选能力。返回结果需包含 `total` 字段以便前端计算分页。
 
 ### 5.2 增强现有 detail endpoint
 
@@ -157,6 +159,7 @@ AttemptRecord (existing)
 - 从 `budget_summary` 中提取并展平关键字段到顶层（`applied_count`、`skipped_count`、`conflict_count`、`user_acceptance_rate`）
 - 不返回 `budget_summary.idempotency.result` 完整快照
 - 保持向后兼容：非 deep_synthesis_apply 记录行为不变
+- 支持分页参数 `limit: int = 50`、`offset: int = 0`（当返回 applied_changes 等列表字段时）
 
 ### 5.3 新增 summary 筛选
 
@@ -180,6 +183,9 @@ AttemptRecord (existing)
   - 状态徽章：success（绿）、partial（黄）、failed（红）、dry_run（蓝）
   - 摘要卡片：applied_count / skipped_count / conflict_count / user_acceptance_rate
   - 点击展开详情：显示 applied_changes 摘要（asset_id + field_path + version before→after）
+- **展开详情的可用性约束**：
+  - `applied_changes` 详情展开仅对 `budget_summary` 中存在 `idempotency` 快照的记录可用（即 apply 时使用了 idempotency_key 的操作）
+  - 非幂等 apply 记录（无 idempotency snapshot）仅显示摘要卡片，展开按钮置灰并提示"详情不可用（非幂等记录）"
 - **不展示**：raw response、forbidden fields、完整 previous/applied value（截断至 200 字符）
 
 ### 6.2 Diff View（未来）
