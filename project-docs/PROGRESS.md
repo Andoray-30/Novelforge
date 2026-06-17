@@ -7,9 +7,47 @@
   - 下部"历史详细记录"：保留过去每一轮修复动作，不删历史，便于回溯排查。
   - 文末新增记录继续按日期追加，但不再依赖对话记忆维护全局判断。
 - 阅读建议：
-  - 想知道系统现在到了哪一步，先看"2026-06-17 Phase G.5"和"2026-06-17 Phase G.4.4"。
+  - 想知道系统现在到了哪一步，先看"2026-06-17 Phase H.3"、"2026-06-17 Phase H.2"和"2026-06-17 Phase G.4.4"。
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
 - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
+
+## 2026-06-17 Phase H.3: Deep Synthesis Multi-Asset Apply Verification
+
+### 本轮完成
+- 在 `tests/services/test_deep_synthesis.py` 新增 multi-asset apply 验证覆盖。
+- 覆盖 character + relationship 双 accepted 写入。
+- 覆盖 accepted / rejected / undecided 混合决策：只写 accepted，rejected 与 undecided 均不写。
+- 覆盖 event asset version conflict：冲突资产 no-write，其他 accepted 资产仍可写入，结果为 `partial`。
+- 覆盖 multi-asset idempotency replay：同 key + 同请求返回同一 `attempt_id`，不重复写入。
+- 覆盖 multi-asset idempotency conflict：同 key + 不同请求触发冲突，不额外写入。
+- 覆盖 multi-asset direct construction：直接构造 Preview/ProposedChange/ApplyRequest 验证双 asset 写入。
+- 新增 `project-docs/visual-audits/deep-synthesis-h3.md` 记录验证范围、命令、结果和风险。
+
+### 验证结果
+- 基线 service：62 passed。
+- 基线 API：21 passed。
+- 新增 targeted：6 passed（`-k "multi_asset"`）。
+- service 全量：68 passed。
+- API 全量：21 passed。
+- 仅出现既有 `.pytest_cache` 写入权限 warning，不影响测试结论。
+
+### 修改文件
+- `novelforge-core/tests/services/test_deep_synthesis.py` — 新增 multi-asset apply 测试。
+- `project-docs/visual-audits/deep-synthesis-h3.md` — H.3 验证报告（新增）。
+- `project-docs/PROGRESS.md` — 进度更新。
+
+### 阻断问题
+- 无。
+
+### 结论
+- **Phase H.3: PASS**。
+- Deep Synthesis apply 的多资产写入、混合决策、局部冲突和幂等语义均已有服务层测试覆盖。
+
+### 下一步建议
+- 可选：补充 API 层 multi-asset apply 请求级覆盖。
+- 可选：Phase H.0 performance-profile global scope 既有失败清理。
+
+---
 
 ## 2026-06-17 Phase H.2: Deep Synthesis Non-empty Apply E2E Browser Test
 

@@ -14,7 +14,15 @@ from novelforge.services.deep_synthesis import (
     get_field_value,
     parse_field_path,
 )
-from novelforge.services.deep_synthesis_models import DeepSynthesisApplyRequest, DeepSynthesisRequest
+from novelforge.services.deep_synthesis_models import (
+    ApplyPlan,
+    DeepSynthesisApplyRequest,
+    DeepSynthesisAssetType,
+    DeepSynthesisPreview,
+    DeepSynthesisRequest,
+    ProposedChange,
+    RiskLevel,
+)
 from novelforge.content.models import ContentItem, ContentMetadata, ContentStatus, ContentType
 
 
@@ -148,6 +156,43 @@ def make_apply_request(**overrides):
         "expected_asset_versions": {"char-1": "v1"},
         "dry_run": False,
     }
+    payload.update(overrides)
+    return DeepSynthesisApplyRequest.model_validate(payload)
+
+
+def make_multi_asset_apply_request(**overrides):
+    payload = make_apply_request().model_dump(mode="json")
+    payload["preview"]["proposed_changes"] = [
+        {
+            "change_id": "char-1:summary",
+            "asset_type": "character",
+            "asset_id": "char-1",
+            "asset_version": "v1",
+            "field_path": "profile.summary",
+            "current_value": "旧摘要",
+            "proposed_value": "角色新摘要",
+            "confidence": 0.9,
+            "reason": "角色资料需要更新。",
+            "evidence_refs": [],
+            "risk_level": "low",
+        },
+        {
+            "change_id": "rel-1:status",
+            "asset_type": "relationship",
+            "asset_id": "rel-1",
+            "asset_version": "v1",
+            "field_path": "relation.status",
+            "current_value": "疏离",
+            "proposed_value": "同盟",
+            "confidence": 0.86,
+            "reason": "关系资产显示双方已形成同盟。",
+            "evidence_refs": [],
+            "risk_level": "low",
+        },
+    ]
+    payload["accepted_change_ids"] = ["char-1:summary", "rel-1:status"]
+    payload["rejected_change_ids"] = []
+    payload["expected_asset_versions"] = {"char-1": "v1", "rel-1": "v1"}
     payload.update(overrides)
     return DeepSynthesisApplyRequest.model_validate(payload)
 
@@ -581,6 +626,134 @@ async def test_apply_preview_multiple_accepted_changes_updates_only_accepted_fie
 
 
 @pytest.mark.asyncio
+async def test_apply_multi_asset_accepted_success():
+    manager = FakeContentManager([
+        make_content_item(content_id="char-1", extracted_data={"profile": {"summary": "旧摘要"}}),
+        make_content_item(content_id="rel-1", extracted_data={"relation": {"status": "疏离"}}),
+    ])
+    service = DeepSynthesisService(content_manager=manager)
+
+    result = await service.apply_preview(make_multi_asset_apply_request())
+
+    assert result.status == "success"
+    assert result.summary.applied_count == 2
+    assert [change.change_id for change in result.applied_changes] == ["char-1:summary", "rel-1:status"]
+    assert manager.items["char-1"].extracted_data["profile"]["summary"] == "角色新摘要"
+    assert manager.items["rel-1"].extracted_data["relation"]["status"] == "同盟"
+    assert len(manager.write_calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_apply_multi_asset_mixed_decisions():
+    manager = FakeContentManager([
+        make_content_item(content_id="char-1", extracted_data={"profile": {"summary": "旧摘要"}}),
+        make_content_item(content_id="rel-1", extracted_data={"relation": {"status": "疏离"}}),
+        make_content_item(content_id="event-1", extracted_data={"event": {"outcome": "未定"}}),
+    ])
+    service = DeepSynthesisService(content_manager=manager)
+    request = make_multi_asset_apply_request()
+    request.preview.proposed_changes.append(request.preview.proposed_changes[0].model_copy(deep=True))
+    request.preview.proposed_changes[2].change_id = "event-1:outcome"
+    request.preview.proposed_changes[2].asset_type = DeepSynthesisAssetType.event
+    request.preview.proposed_changes[2].asset_id = "event-1"
+    request.preview.proposed_changes[2].field_path = "event.outcome"
+    request.preview.proposed_changes[2].current_value = "未定"
+    request.preview.proposed_changes[2].proposed_value = "撤离"
+    request.accepted_change_ids = ["char-1:summary"]
+    request.rejected_change_ids = ["rel-1:status"]
+    request.expected_asset_versions = {"char-1": "v1", "rel-1": "v1", "event-1": "v1"}
+
+    result = await service.apply_preview(request)
+
+    assert result.status == "success"
+    assert result.summary.applied_count == 1
+    assert result.summary.skipped_count == 2
+    assert {skip.change_id: skip.reason for skip in result.skipped_changes} == {
+        "rel-1:status": "rejected_by_user",
+        "event-1:outcome": "undecided",
+    }
+    assert manager.items["char-1"].extracted_data["profile"]["summary"] == "角色新摘要"
+    assert manager.items["rel-1"].extracted_data["relation"]["status"] == "疏离"
+    assert manager.items["event-1"].extracted_data["event"]["outcome"] == "未定"
+    assert len(manager.write_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_apply_multi_asset_conflict():
+    manager = FakeContentManager([
+        make_content_item(content_id="char-1", extracted_data={"profile": {"summary": "旧摘要"}}),
+        make_content_item(content_id="event-1", version=2, extracted_data={"event": {"outcome": "未定"}}),
+    ])
+    service = DeepSynthesisService(content_manager=manager)
+    request = make_multi_asset_apply_request()
+    request.preview.proposed_changes[1].change_id = "event-1:outcome"
+    request.preview.proposed_changes[1].asset_type = DeepSynthesisAssetType.event
+    request.preview.proposed_changes[1].asset_id = "event-1"
+    request.preview.proposed_changes[1].field_path = "event.outcome"
+    request.preview.proposed_changes[1].current_value = "未定"
+    request.preview.proposed_changes[1].proposed_value = "撤离"
+    request.accepted_change_ids = ["char-1:summary", "event-1:outcome"]
+    request.expected_asset_versions = {"char-1": "v1", "event-1": "v1"}
+
+    result = await service.apply_preview(request)
+
+    assert result.status == "partial"
+    assert result.summary.applied_count == 1
+    assert result.summary.conflict_count == 1
+    assert result.conflicts[0].change_id == "event-1:outcome"
+    assert result.conflicts[0].reason == "version_mismatch"
+    assert manager.items["char-1"].extracted_data["profile"]["summary"] == "角色新摘要"
+    assert manager.items["event-1"].extracted_data["event"]["outcome"] == "未定"
+    assert [content_id for content_id, _ in manager.write_calls] == ["char-1"]
+
+
+@pytest.mark.asyncio
+async def test_apply_multi_asset_idempotency_replay():
+    storage = MemoryStorage()
+    store = AttemptStore(storage)
+    manager = FakeContentManager([
+        make_content_item(content_id="char-1", extracted_data={"profile": {"summary": "旧摘要"}}),
+        make_content_item(content_id="rel-1", extracted_data={"relation": {"status": "疏离"}}),
+    ])
+    service = DeepSynthesisService(attempt_store=store, content_manager=manager)
+    request = make_multi_asset_apply_request(idempotency_key="multi-asset-key")
+
+    first = await service.apply_preview(request)
+    second = await service.apply_preview(request)
+
+    assert first.status == "success"
+    assert second.status == "success"
+    assert second.attempt_id == first.attempt_id
+    assert second.summary.applied_count == 2
+    assert manager.items["char-1"].metadata.version == 2
+    assert manager.items["rel-1"].metadata.version == 2
+    assert len(manager.write_calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_apply_multi_asset_idempotency_conflict():
+    storage = MemoryStorage()
+    store = AttemptStore(storage)
+    manager = FakeContentManager([
+        make_content_item(content_id="char-1", extracted_data={"profile": {"summary": "旧摘要"}}),
+        make_content_item(content_id="rel-1", extracted_data={"relation": {"status": "疏离"}}),
+    ])
+    service = DeepSynthesisService(attempt_store=store, content_manager=manager)
+
+    await service.apply_preview(make_multi_asset_apply_request(idempotency_key="multi-asset-key"))
+    different = make_multi_asset_apply_request(
+        idempotency_key="multi-asset-key",
+        accepted_change_ids=["char-1:summary"],
+    )
+
+    with pytest.raises(DeepSynthesisConflictError):
+        await service.apply_preview(different)
+    assert manager.items["char-1"].extracted_data["profile"]["summary"] == "角色新摘要"
+    assert manager.items["rel-1"].extracted_data["relation"]["status"] == "同盟"
+    assert len(manager.write_calls) == 2
+
+
+@pytest.mark.asyncio
 async def test_apply_preview_conflict_plus_applied_gives_partial_status():
     manager = FakeContentManager([make_content_item()])
     service = DeepSynthesisService(content_manager=manager)
@@ -950,3 +1123,73 @@ async def test_result_serialization_does_not_contain_forbidden_fields():
     assert "chapter_content" not in serialized
     assert "raw_response_text" not in serialized
     assert "raw_response_preview" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_apply_multi_asset_direct_construction():
+    """多个 asset accepted 通过直接构造 preview/request 都应该写入"""
+    manager = FakeContentManager([
+        make_content_item(content_id="h3-char-001", extracted_data={"profile": {"summary": "旧摘要"}}),
+        make_content_item(content_id="h3-rel-001", extracted_data={"relationship_type": "friend"}),
+    ])
+    storage = MemoryStorage()
+    store = AttemptStore(storage)
+    service = DeepSynthesisService(content_manager=manager, attempt_store=store)
+
+    preview = DeepSynthesisPreview(
+        summary="multi-asset test",
+        proposed_changes=[
+            ProposedChange(
+                change_id="h3-char-summary",
+                asset_type=DeepSynthesisAssetType.character,
+                asset_id="h3-char-001",
+                asset_version="v1",
+                field_path="profile.summary",
+                current_value="旧摘要",
+                proposed_value="新摘要",
+                confidence=0.9,
+                reason="test",
+                evidence_refs=[],
+                risk_level=RiskLevel.low,
+            ),
+            ProposedChange(
+                change_id="h3-rel-type",
+                asset_type=DeepSynthesisAssetType.relationship,
+                asset_id="h3-rel-001",
+                asset_version="v1",
+                field_path="relationship_type",
+                current_value="friend",
+                proposed_value="ally",
+                confidence=0.9,
+                reason="test",
+                evidence_refs=[],
+                risk_level=RiskLevel.low,
+            ),
+        ],
+        conflicts_resolved=[],
+        new_links=[],
+        risk_flags=[],
+        confidence_delta=0.1,
+        evidence_refs=[],
+        apply_plan=ApplyPlan(
+            requires_user_confirmation=True,
+            apply_mode="field_patch",
+            patch_strategy="field_level",
+            asset_write_policy="accepted_only",
+        ),
+        requires_user_confirmation=True,
+    )
+
+    request = DeepSynthesisApplyRequest(
+        session_id="h3-session",
+        preview=preview,
+        accepted_change_ids=["h3-char-summary", "h3-rel-type"],
+        rejected_change_ids=[],
+        expected_asset_versions={"h3-char-001": "v1", "h3-rel-001": "v1"},
+        dry_run=False,
+    )
+
+    result = await service.apply_preview(request)
+    assert result.status == "success"
+    assert result.summary.applied_count == 2
+    assert len(result.applied_changes) == 2
