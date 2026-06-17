@@ -7,6 +7,7 @@ import pytest
 from novelforge.services.attempt_store import AttemptStore
 from novelforge.services.budgeted_scheduler import BudgetedScheduler, BudgetPolicy
 from novelforge.services.deep_synthesis import (
+    DeepSynthesisConflictError,
     DeepSynthesisService,
     DeepSynthesisValidationError,
     apply_field_patch,
@@ -310,6 +311,122 @@ async def test_apply_preview_applies_accepted_change():
     assert result.summary.applied_count == 1
     assert manager.write_calls
     assert manager.items["char-1"].extracted_data["profile"]["summary"] == "新摘要"
+
+
+@pytest.mark.asyncio
+async def test_apply_preview_without_idempotency_key_keeps_existing_behavior():
+    manager = FakeContentManager([make_content_item()])
+    service = DeepSynthesisService(content_manager=manager)
+
+    first = await service.apply_preview(make_apply_request())
+    second = await service.apply_preview(make_apply_request(expected_asset_versions={"char-1": "v2"}, preview=make_apply_request().preview.model_dump(mode="json")))
+
+    assert first.status == "success"
+    assert second.status == "failed"
+    assert len(manager.write_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_apply_preview_same_idempotency_key_replays_without_double_write():
+    storage = MemoryStorage()
+    store = AttemptStore(storage)
+    manager = FakeContentManager([make_content_item()])
+    service = DeepSynthesisService(attempt_store=store, content_manager=manager)
+    request = make_apply_request(idempotency_key="apply-key-1")
+
+    first = await service.apply_preview(request)
+    second = await service.apply_preview(request)
+
+    assert first.status == "success"
+    assert second.status == "success"
+    assert second.attempt_id == first.attempt_id
+    assert len(manager.write_calls) == 1
+    assert manager.items["char-1"].metadata.version == 2
+
+
+@pytest.mark.asyncio
+async def test_apply_preview_same_key_different_request_conflicts_without_write():
+    storage = MemoryStorage()
+    store = AttemptStore(storage)
+    manager = FakeContentManager([make_content_item()])
+    service = DeepSynthesisService(attempt_store=store, content_manager=manager)
+
+    await service.apply_preview(make_apply_request(idempotency_key="apply-key-1"))
+    different = make_apply_request(idempotency_key="apply-key-1", accepted_change_ids=[])
+
+    with pytest.raises(DeepSynthesisConflictError):
+        await service.apply_preview(different)
+    assert len(manager.write_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_apply_preview_same_key_different_session_is_independent():
+    storage = MemoryStorage()
+    store = AttemptStore(storage)
+    manager = FakeContentManager([make_content_item(), make_content_item(content_id="char-2")])
+    service = DeepSynthesisService(attempt_store=store, content_manager=manager)
+    first = make_apply_request(idempotency_key="shared-key")
+    second = make_apply_request(session_id="session-other", idempotency_key="shared-key")
+    second.preview.proposed_changes[0].asset_id = "char-2"
+    second.preview.proposed_changes[0].change_id = "char-2:1"
+    second.accepted_change_ids = ["char-2:1"]
+    second.expected_asset_versions = {"char-2": "v1"}
+
+    await service.apply_preview(first)
+    result = await service.apply_preview(second)
+
+    assert result.status == "success"
+    assert len(manager.write_calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_apply_preview_dry_run_idempotency_key_does_not_block_later_real_apply():
+    storage = MemoryStorage()
+    store = AttemptStore(storage)
+    manager = FakeContentManager([make_content_item()])
+    service = DeepSynthesisService(attempt_store=store, content_manager=manager)
+
+    dry_run = await service.apply_preview(make_apply_request(dry_run=True, idempotency_key="apply-key-1"))
+    real_apply = await service.apply_preview(make_apply_request(idempotency_key="apply-key-1"))
+
+    assert dry_run.status == "dry_run"
+    assert real_apply.status == "success"
+    assert len(manager.write_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_apply_preview_conflict_result_replays_without_writing():
+    storage = MemoryStorage()
+    store = AttemptStore(storage)
+    manager = FakeContentManager([make_content_item(version=2)])
+    service = DeepSynthesisService(attempt_store=store, content_manager=manager)
+    request = make_apply_request(idempotency_key="conflict-key")
+
+    first = await service.apply_preview(request)
+    second = await service.apply_preview(request)
+
+    assert first.status == "failed"
+    assert second.status == "failed"
+    assert second.conflicts[0].reason == "version_mismatch"
+    assert second.attempt_id == first.attempt_id
+    assert manager.write_calls == []
+
+
+@pytest.mark.asyncio
+async def test_apply_idempotency_metadata_and_result_exclude_forbidden_fields():
+    storage = MemoryStorage()
+    store = AttemptStore(storage)
+    manager = FakeContentManager([make_content_item()])
+    service = DeepSynthesisService(attempt_store=store, content_manager=manager)
+
+    result = await service.apply_preview(make_apply_request(idempotency_key="safe-key"))
+    persisted = await store.get(result.attempt_id)
+    serialized = json.dumps(persisted.model_dump(mode="json"), ensure_ascii=False)
+
+    assert "raw_response_text" not in serialized
+    assert "raw_response_preview" not in serialized
+    assert "provider_error_body" not in serialized
+    assert "chapter_content" not in serialized
 
 
 @pytest.mark.asyncio

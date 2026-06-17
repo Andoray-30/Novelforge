@@ -2615,7 +2615,7 @@ async def apply_deep_synthesis_preview(request: DeepSynthesisApplyRequest):
     except DeepSynthesisConflictError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=str(exc),
+            detail={"error": "idempotency_conflict", "detail": str(exc)},
         )
     except Exception:
         logger.exception("Deep Synthesis apply 内部异常")

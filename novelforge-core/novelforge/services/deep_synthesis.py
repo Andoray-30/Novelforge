@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import copy
+import json
 import time
 import uuid
 from typing import Any, Callable, Dict, List, Optional
@@ -127,6 +128,19 @@ class DeepSynthesisService:
     async def apply_preview(self, request: DeepSynthesisApplyRequest) -> DeepSynthesisApplyResult:
         started = self.clock()
         self._validate_apply_request(request)
+        request_fingerprint = None
+        if request.idempotency_key and not request.dry_run:
+            request_fingerprint = self.build_apply_request_fingerprint(request)
+            existing = await self.find_existing_apply_by_idempotency_key(request.session_id, request.idempotency_key)
+            if existing is not None:
+                existing_metadata = existing.budget_summary.get("idempotency") if isinstance(existing.budget_summary, dict) else None
+                existing_fingerprint = existing_metadata.get("request_fingerprint") if isinstance(existing_metadata, dict) else None
+                if existing_fingerprint != request_fingerprint:
+                    raise DeepSynthesisConflictError("Deep Synthesis apply idempotency_key conflicts with a different request fingerprint.")
+                existing_result = existing_metadata.get("result") if isinstance(existing_metadata, dict) else None
+                if isinstance(existing_result, dict):
+                    return DeepSynthesisApplyResult.model_validate(existing_result)
+
         accepted = set(request.accepted_change_ids)
         rejected = set(request.rejected_change_ids)
         applied: List[DeepSynthesisAppliedChange] = []
@@ -243,8 +257,35 @@ class DeepSynthesisService:
             warnings=[],
             attempt_id=None,
         )
-        result.attempt_id = await self.record_apply_attempt(request, result, self._latency_ms(started), None if status in {"success", "dry_run"} else status)
+        result.attempt_id = await self.record_apply_attempt(
+            request,
+            result,
+            self._latency_ms(started),
+            None if status in {"success", "dry_run"} else status,
+            request_fingerprint=request_fingerprint,
+        )
         return result
+
+    @staticmethod
+    def build_apply_request_fingerprint(request: DeepSynthesisApplyRequest) -> str:
+        payload = request.model_dump(mode="json")
+        payload.pop("idempotency_key", None)
+        canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    async def find_existing_apply_by_idempotency_key(self, session_id: str, idempotency_key: str) -> Optional[AttemptRecord]:
+        if self.attempt_store is None:
+            return None
+        records = await self.attempt_store.list_by_session(session_id)
+        for record in reversed(records):
+            if record.task_type != "deep_synthesis_apply":
+                continue
+            metadata = record.budget_summary.get("idempotency") if isinstance(record.budget_summary, dict) else None
+            if not isinstance(metadata, dict):
+                continue
+            if metadata.get("idempotency_key") == idempotency_key:
+                return record
+        return None
 
     def _validate_apply_request(self, request: DeepSynthesisApplyRequest) -> None:
         found = sorted(self._find_forbidden_fields(request.model_dump(mode="json")))
@@ -469,10 +510,32 @@ class DeepSynthesisService:
         result: DeepSynthesisApplyResult,
         latency_ms: int,
         error_type: Optional[str],
+        *,
+        request_fingerprint: Optional[str] = None,
     ) -> Optional[str]:
         if self.attempt_store is None:
             return None
         attempt_id = str(uuid.uuid4())[:20]
+        budget_summary = {
+            "task_type": "deep_synthesis_apply",
+            "applied_count": result.summary.applied_count,
+            "skipped_count": result.summary.skipped_count,
+            "conflict_count": result.summary.conflict_count,
+            "dry_run": result.summary.dry_run,
+            "accepted_count": result.summary.accepted_count,
+            "rejected_count": result.summary.rejected_count,
+            "user_acceptance_rate": self.compute_user_acceptance_rate(request.accepted_change_ids, request.rejected_change_ids),
+            "status": result.status,
+            "error_type": error_type,
+        }
+        if request.idempotency_key and request_fingerprint and not request.dry_run:
+            result_snapshot = result.model_dump(mode="json")
+            result_snapshot["attempt_id"] = attempt_id
+            budget_summary["idempotency"] = {
+                "idempotency_key": request.idempotency_key,
+                "request_fingerprint": request_fingerprint,
+                "result": result_snapshot,
+            }
         record = AttemptRecord(
             id=attempt_id,
             task_type="deep_synthesis_apply",
@@ -518,18 +581,7 @@ class DeepSynthesisService:
             quality_after_preview=None,
             user_acceptance_rate=self.compute_user_acceptance_rate(request.accepted_change_ids, request.rejected_change_ids),
             pass_type="generation",
-            budget_summary={
-                "task_type": "deep_synthesis_apply",
-                "applied_count": result.summary.applied_count,
-                "skipped_count": result.summary.skipped_count,
-                "conflict_count": result.summary.conflict_count,
-                "dry_run": result.summary.dry_run,
-                "accepted_count": result.summary.accepted_count,
-                "rejected_count": result.summary.rejected_count,
-                "user_acceptance_rate": self.compute_user_acceptance_rate(request.accepted_change_ids, request.rejected_change_ids),
-                "status": result.status,
-                "error_type": error_type,
-            },
+            budget_summary=budget_summary,
         )
         await self.attempt_store.record(record)
         return attempt_id

@@ -57,6 +57,7 @@ class FakeContentManager:
         self.items = {item.metadata.id: item for item in (items or [])}
         self.fail_on_get = fail_on_get
         self.fail_on_update = fail_on_update
+        self.write_calls = []
 
     async def get_content(self, content_id):
         if self.fail_on_get:
@@ -71,6 +72,7 @@ class FakeContentManager:
             return False
         content_item.metadata.version = existing.metadata.version + 1
         self.items[content_id] = content_item
+        self.write_calls.append((content_id, content_item))
         return True
 
 
@@ -280,6 +282,56 @@ def test_post_deep_synthesis_apply_success(monkeypatch):
     assert data["summary"]["applied_count"] == 1
 
 
+def test_post_deep_synthesis_apply_with_idempotency_key_success(monkeypatch):
+    client, _ = client_with_fake_content(monkeypatch, FakeContentManager([make_content_item()]))
+
+    response = client.post("/api/extraction/deep-synthesis/apply", json=apply_payload(idempotency_key="api-key-1"))
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+    assert data["attempt_id"]
+
+
+def test_post_deep_synthesis_apply_duplicate_key_same_request_does_not_double_write(monkeypatch):
+    manager = FakeContentManager([make_content_item()])
+    client, _ = client_with_fake_content(monkeypatch, manager)
+    request = apply_payload(idempotency_key="api-key-1")
+
+    first = client.post("/api/extraction/deep-synthesis/apply", json=request)
+    second = client.post("/api/extraction/deep-synthesis/apply", json=request)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["attempt_id"] == first.json()["attempt_id"]
+    assert len(manager.write_calls) == 1
+
+
+def test_post_deep_synthesis_apply_duplicate_key_different_request_returns_409(monkeypatch):
+    manager = FakeContentManager([make_content_item()])
+    client, _ = client_with_fake_content(monkeypatch, manager)
+
+    first = client.post("/api/extraction/deep-synthesis/apply", json=apply_payload(idempotency_key="api-key-1"))
+    different = apply_payload(idempotency_key="api-key-1", accepted_change_ids=[])
+    second = client.post("/api/extraction/deep-synthesis/apply", json=different)
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert second.json()["detail"]["error"] == "idempotency_conflict"
+    assert len(manager.write_calls) == 1
+
+
+def test_post_deep_synthesis_apply_without_idempotency_key_still_works(monkeypatch):
+    manager = FakeContentManager([make_content_item()])
+    client, _ = client_with_fake_content(monkeypatch, manager)
+
+    response = client.post("/api/extraction/deep-synthesis/apply", json=apply_payload())
+
+    assert response.status_code == 200
+    assert response.json()["summary"]["applied_count"] == 1
+    assert len(manager.write_calls) == 1
+
+
 def test_post_deep_synthesis_apply_rejected_ids_are_skipped(monkeypatch):
     client, _ = client_with_fake_content(monkeypatch, FakeContentManager([make_content_item()]))
 
@@ -363,3 +415,18 @@ def test_post_deep_synthesis_apply_response_excludes_forbidden_fields(monkeypatc
     assert "chapter_content" not in serialized
     assert "raw_response_text" not in serialized
     assert "raw_response_preview" not in serialized
+
+
+def test_post_deep_synthesis_apply_idempotent_response_excludes_forbidden_fields(monkeypatch):
+    client, _ = client_with_fake_content(monkeypatch, FakeContentManager([make_content_item()]))
+
+    response = client.post("/api/extraction/deep-synthesis/apply", json=apply_payload(idempotency_key="safe-api-key"))
+    replay = client.post("/api/extraction/deep-synthesis/apply", json=apply_payload(idempotency_key="safe-api-key"))
+    serialized = json.dumps(replay.json(), ensure_ascii=False)
+
+    assert response.status_code == 200
+    assert replay.status_code == 200
+    assert "chapter_content" not in serialized
+    assert "raw_response_text" not in serialized
+    assert "raw_response_preview" not in serialized
+    assert "provider_error_body" not in serialized
