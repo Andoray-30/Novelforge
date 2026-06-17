@@ -11,7 +11,41 @@
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
 - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
 
-## 2026-06-17 Phase G.5: Deep Synthesis Post-MVP Hardening Backlog & Release Notes
+## 2026-06-17 Phase H.2: Deep Synthesis Non-empty Apply E2E Browser Test
+
+### 本轮完成
+- 使用 Playwright + Route Mocking 进行 Deep Synthesis apply 全流程浏览器 E2E 验证
+- 合成 3 个 proposed_changes（accepted / rejected / undecided 混合状态）
+- 验证 Dry Run：`dry_run=true`，无 idempotency_key
+- 验证 Confirm Apply：`dry_run=false`，idempotency_key 存在（UUID）
+- 验证 UI 展示：applied/skipped/success summary
+- 验证安全：页面 HTML 无 forbidden fields
+- Desktop 1440px 和 Mobile 390px 截图
+
+### 验证结果
+- Desktop E2E：全部通过（7/7 步骤）
+  - Preview 生成与渲染 ✅
+  - Accept/Reject/Undecided 选择交互 ✅
+  - Dry Run 请求验证 ✅
+  - Confirm Apply 请求验证 ✅
+  - Apply Result UI 展示 ✅
+  - 安全验证 ✅
+  - Idempotency key 映射 ✅
+- Mobile 390px：无水平溢出 ✅，页面因认证检查未进入主内容区（headless 模式限制）
+
+### 修改文件
+- `project-docs/visual-audits/deep-synthesis-h2.md` — E2E 报告（新增）
+- `project-docs/visual-audits/deep-synthesis-h2-*.png` — 截图（新增 10 张）
+- `project-docs/PROGRESS.md` — 进度更新
+
+### 阻断问题
+- 无
+
+### 下一步建议
+- Phase H.1.2: Backend idempotency key enforcement hardening
+- Phase H.0: performance-profile global scope 修复
+
+---
 
 ### 本轮完成
 * Deep Synthesis MVP Release Notes
