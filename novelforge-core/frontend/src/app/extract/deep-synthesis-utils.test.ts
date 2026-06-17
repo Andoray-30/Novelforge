@@ -271,6 +271,56 @@ describe('Deep Synthesis Utils', () => {
         'ch-2': 'v3',
       });
     });
+
+    it('maps idempotencyKey to idempotency_key in request', () => {
+      const key = 'test-idempotency-key-abc';
+      const request = buildDeepSynthesisApplyRequest({
+        sessionId: 'sess-1',
+        preview: mockPreview,
+        selectionState: {},
+        dryRun: false,
+        idempotencyKey: key,
+      });
+      expect(request.idempotency_key).toBe(key);
+    });
+
+    it('sets idempotency_key to null when idempotencyKey is not provided', () => {
+      const request = buildDeepSynthesisApplyRequest({
+        sessionId: 'sess-1',
+        preview: mockPreview,
+        selectionState: {},
+        dryRun: false,
+      });
+      expect(request.idempotency_key).toBeNull();
+    });
+
+    it('sets idempotency_key to null when idempotencyKey is explicitly null', () => {
+      const request = buildDeepSynthesisApplyRequest({
+        sessionId: 'sess-1',
+        preview: mockPreview,
+        selectionState: {},
+        dryRun: true,
+        idempotencyKey: null,
+      });
+      expect(request.idempotency_key).toBeNull();
+    });
+
+    it('idempotency_key does not contain proposed_value, current_value, or raw text', () => {
+      const key = 'safe-uuid-key-123';
+      const request = buildDeepSynthesisApplyRequest({
+        sessionId: 'sess-1',
+        preview: mockPreview,
+        selectionState: { 'ch-1': 'accepted' },
+        dryRun: false,
+        idempotencyKey: key,
+      });
+      expect(request.idempotency_key).toBe(key);
+      expect(request.idempotency_key).not.toContain('A');
+      expect(request.idempotency_key).not.toContain('B');
+      expect(request.idempotency_key).not.toContain('test');
+      expect(request.idempotency_key).not.toContain('propose');
+      expect(request.idempotency_key).not.toContain('current');
+    });
   });
 
   describe('formatApplyStatus', () => {

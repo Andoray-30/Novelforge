@@ -723,6 +723,26 @@ export default function ExtractPage() {
   const [deepSynthesisApplyError, setDeepSynthesisApplyError] = useState<string | null>(null);
   const [deepSynthesisDryRunPassed, setDeepSynthesisDryRunPassed] = useState(false);
   const [deepSynthesisApplyCompleted, setDeepSynthesisApplyCompleted] = useState(false);
+  const [deepSynthesisApplyIdempotencyKey, setDeepSynthesisApplyIdempotencyKey] = useState<string | null>(null);
+
+  function createDeepSynthesisApplyIdempotencyKey(): string {
+    return crypto.randomUUID();
+  }
+
+  function getOrCreateDeepSynthesisApplyIdempotencyKey(): string {
+    if (deepSynthesisApplyIdempotencyKey) return deepSynthesisApplyIdempotencyKey;
+    const key = createDeepSynthesisApplyIdempotencyKey();
+    setDeepSynthesisApplyIdempotencyKey(key);
+    return key;
+  }
+
+  const resetDeepSynthesisApplyProgress = useCallback((resetKey = true) => {
+    setDeepSynthesisApplyResult(null);
+    setDeepSynthesisApplyError(null);
+    setDeepSynthesisDryRunPassed(false);
+    setDeepSynthesisApplyCompleted(false);
+    if (resetKey) setDeepSynthesisApplyIdempotencyKey(null);
+  }, []);
 
   const { currentSession, currentSessionId, createSession, switchSession, loadSessions } = useSessions();
   const setSelectedNovelId = useAppStore((state) => state.setSelectedNovelId);
@@ -758,6 +778,7 @@ export default function ExtractPage() {
     setDeepSynthesisApplyError(null);
     setDeepSynthesisDryRunPassed(false);
     setDeepSynthesisApplyCompleted(false);
+    setDeepSynthesisApplyIdempotencyKey(null);
   }, [currentSessionId]);
 
   const ensureSessionId = useCallback(async (selectedFile: File): Promise<string> => {
@@ -1245,6 +1266,7 @@ export default function ExtractPage() {
       });
       setDeepSynthesisResult(res);
       setDeepSynthesisSelectionState(buildDeepSynthesisSelectionState(res));
+      resetDeepSynthesisApplyProgress(true);
     } catch (error) {
       setDeepSynthesisError(error instanceof Error ? error.message : '深度合成预览生成遇到错误');
     } finally {
@@ -1257,10 +1279,7 @@ export default function ExtractPage() {
       ...prev,
       [changeId]: 'accepted'
     }));
-    setDeepSynthesisApplyResult(null);
-    setDeepSynthesisApplyError(null);
-    setDeepSynthesisDryRunPassed(false);
-    setDeepSynthesisApplyCompleted(false);
+    resetDeepSynthesisApplyProgress();
   };
 
   const handleRejectChange = (changeId: string) => {
@@ -1268,10 +1287,7 @@ export default function ExtractPage() {
       ...prev,
       [changeId]: 'rejected'
     }));
-    setDeepSynthesisApplyResult(null);
-    setDeepSynthesisApplyError(null);
-    setDeepSynthesisDryRunPassed(false);
-    setDeepSynthesisApplyCompleted(false);
+    resetDeepSynthesisApplyProgress();
   };
 
   const handleResetChange = (changeId: string) => {
@@ -1279,10 +1295,7 @@ export default function ExtractPage() {
       ...prev,
       [changeId]: 'undecided'
     }));
-    setDeepSynthesisApplyResult(null);
-    setDeepSynthesisApplyError(null);
-    setDeepSynthesisDryRunPassed(false);
-    setDeepSynthesisApplyCompleted(false);
+    resetDeepSynthesisApplyProgress();
   };
 
   const handleAcceptAll = () => {
@@ -1292,10 +1305,7 @@ export default function ExtractPage() {
       newState[change.change_id] = 'accepted';
     }
     setDeepSynthesisSelectionState(newState);
-    setDeepSynthesisApplyResult(null);
-    setDeepSynthesisApplyError(null);
-    setDeepSynthesisDryRunPassed(false);
-    setDeepSynthesisApplyCompleted(false);
+    resetDeepSynthesisApplyProgress();
   };
 
   const handleRejectAll = () => {
@@ -1305,10 +1315,7 @@ export default function ExtractPage() {
       newState[change.change_id] = 'rejected';
     }
     setDeepSynthesisSelectionState(newState);
-    setDeepSynthesisApplyResult(null);
-    setDeepSynthesisApplyError(null);
-    setDeepSynthesisDryRunPassed(false);
-    setDeepSynthesisApplyCompleted(false);
+    resetDeepSynthesisApplyProgress();
   };
 
   const handleDryRunDeepSynthesisApply = async () => {
@@ -1356,6 +1363,7 @@ export default function ExtractPage() {
         preview: deepSynthesisResult.preview,
         selectionState: deepSynthesisSelectionState,
         dryRun: false,
+        idempotencyKey: getOrCreateDeepSynthesisApplyIdempotencyKey(),
       });
       const result = await deepSynthesisService.applyPreview(request);
       setDeepSynthesisApplyResult(result);

@@ -29,6 +29,32 @@
 
 ---
 
+## 2026-06-17 Phase H.1.1: Frontend Idempotency Key Wiring
+
+### 本轮完成
+- 在 `page.tsx` 新增 `deepSynthesisApplyIdempotencyKey` 状态
+- 新增 `createDeepSynthesisApplyIdempotencyKey()`、`getOrCreateDeepSynthesisApplyIdempotencyKey()` 辅助函数
+- 新增 `resetDeepSynthesisApplyProgress()` 统一清空 apply 进度状态（含 key 重置）
+- Confirm Apply 使用 `getOrCreateDeepSynthesisApplyIdempotencyKey()` 传入 `idempotencyKey`
+- Dry Run 不传 `idempotencyKey`（保持 null）
+- 选中变更、新 preview 生成、accept/reject/reset 均清空旧 key
+- `applyCompleted=true` 后不清空 key，按钮保持 disabled
+- 会话切换时清空 key
+- 在 `deep-synthesis-utils.test.ts` 新增 4 条测试覆盖 idempotency key 映射与安全性
+- 所有 204 条前端测试通过，TypeScript 类型检查通过，生产构建通过
+
+### 验证结果
+- 前端测试：204 passed (34 test files)
+- TypeScript：无错误
+- 构建：成功
+- 后端回归：2 个既有失败（非本次改动引入），其余通过
+
+### 下一步建议
+- Phase H.1.2: Backend idempotency key enforcement hardening
+- Phase H.0: performance-profile global scope 修复
+
+---
+
 ## 2026-06-17 Phase G.4.4: Deep Synthesis MVP Closeout
 
 ### 本轮完成
