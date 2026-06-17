@@ -2,7 +2,7 @@ import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { DeepSynthesisPreviewPanel } from './deep-synthesis-preview';
-import type { DeepSynthesisResult, DeepSynthesisAssetType } from '@/types';
+import type { DeepSynthesisResult, DeepSynthesisAssetType, DeepSynthesisApplyResult } from '@/types';
 
 function buildDeepSynthesisResultFixture(overrides?: Partial<DeepSynthesisResult>): DeepSynthesisResult {
   return {
@@ -135,6 +135,13 @@ const defaultProps = {
   onBudgetTierChange: vi.fn(),
   scopeType: 'full' as const,
   onScopeTypeChange: vi.fn(),
+  applyResult: null,
+  applyLoading: false,
+  applyError: null,
+  onDryRunApply: vi.fn(),
+  onConfirmApply: vi.fn(),
+  dryRunPassed: false,
+  applyCompleted: false,
 };
 
 describe('DeepSynthesisPreviewPanel', () => {
@@ -220,5 +227,182 @@ describe('DeepSynthesisPreviewPanel', () => {
     expect(body).toContain('低预算演进（最多 1 轮）');
     expect(body).toContain('标准预算演进（最多 2 轮）');
     expect(body).toContain('高预算演进（最多 3 轮）');
+  });
+
+  it('renders apply safety banner', () => {
+    render(React.createElement(DeepSynthesisPreviewPanel, { result: buildDeepSynthesisResultFixture(), ...defaultProps }));
+    expect(screen.getByText(/本阶段默认只预检/)).toBeTruthy();
+    expect(screen.getByText(/点击确认写入后才会修改资产库/)).toBeTruthy();
+  });
+
+  it('dry run button disabled when accepted_count=0', () => {
+    const selectionState: Record<string, 'accepted' | 'rejected' | 'undecided'> = {
+      'ch-1': 'undecided',
+      'ch-2': 'undecided',
+    };
+    render(React.createElement(DeepSynthesisPreviewPanel, {
+      result: buildDeepSynthesisResultFixture(),
+      ...defaultProps,
+      selectionState,
+    }));
+    const dryRunButton = screen.getByText('预检应用（Dry Run）');
+    expect(dryRunButton.closest('button')?.disabled).toBe(true);
+  });
+
+  it('dry run button enabled when at least one accepted', () => {
+    const selectionState: Record<string, 'accepted' | 'rejected' | 'undecided'> = {
+      'ch-1': 'accepted',
+      'ch-2': 'undecided',
+    };
+    render(React.createElement(DeepSynthesisPreviewPanel, {
+      result: buildDeepSynthesisResultFixture(),
+      ...defaultProps,
+      selectionState,
+    }));
+    const dryRunButton = screen.getByText('预检应用（Dry Run）');
+    expect(dryRunButton.closest('button')?.disabled).toBe(false);
+  });
+
+  it('clicking dry run calls onDryRunApply', () => {
+    const onDryRunApply = vi.fn();
+    const selectionState: Record<string, 'accepted' | 'rejected' | 'undecided'> = {
+      'ch-1': 'accepted',
+    };
+    render(React.createElement(DeepSynthesisPreviewPanel, {
+      result: buildDeepSynthesisResultFixture(),
+      ...defaultProps,
+      selectionState,
+      onDryRunApply,
+    }));
+    const dryRunButton = screen.getByText('预检应用（Dry Run）');
+    fireEvent.click(dryRunButton);
+    expect(onDryRunApply).toHaveBeenCalledTimes(1);
+  });
+
+  it('confirm apply disabled before successful dry_run', () => {
+    render(React.createElement(DeepSynthesisPreviewPanel, {
+      result: buildDeepSynthesisResultFixture(),
+      ...defaultProps,
+      dryRunPassed: false,
+    }));
+    const confirmButton = screen.getByText('确认写入资产库');
+    expect(confirmButton.closest('button')?.disabled).toBe(true);
+  });
+
+  it('confirm apply enabled after dry_run success without conflicts', () => {
+    render(React.createElement(DeepSynthesisPreviewPanel, {
+      result: buildDeepSynthesisResultFixture(),
+      ...defaultProps,
+      dryRunPassed: true,
+    }));
+    const confirmButton = screen.getByText('确认写入资产库');
+    expect(confirmButton.closest('button')?.disabled).toBe(false);
+  });
+
+  it('applied result summary displays counts', () => {
+    const applyResult: DeepSynthesisApplyResult = {
+      status: 'dry_run',
+      summary: { accepted_count: 2, rejected_count: 1, undecided_count: 0, applied_count: 0, skipped_count: 1, conflict_count: 0, failed_count: 0, dry_run: true, all_or_nothing: false },
+      applied_changes: [],
+      skipped_changes: [],
+      conflicts: [],
+      warnings: [],
+      task_type: 'deep_synthesis_apply',
+    };
+    render(React.createElement(DeepSynthesisPreviewPanel, {
+      result: buildDeepSynthesisResultFixture(),
+      ...defaultProps,
+      applyResult,
+    }));
+    const body = document.body.textContent || '';
+    expect(body).toContain('预检通过');
+    expect(body).toContain('已应用');
+  });
+
+  it('conflict result displays reason and sanitized expected/actual values', () => {
+    const applyResult: DeepSynthesisApplyResult = {
+      status: 'partial',
+      summary: { accepted_count: 1, rejected_count: 0, undecided_count: 0, applied_count: 0, skipped_count: 0, conflict_count: 1, failed_count: 0, dry_run: false, all_or_nothing: false },
+      applied_changes: [],
+      skipped_changes: [],
+      conflicts: [{
+        change_id: 'ch-1',
+        asset_type: 'character' as DeepSynthesisAssetType,
+        asset_id: 'char-001',
+        field_path: 'personality',
+        reason: 'version_mismatch',
+        expected: 'v1',
+        actual: 'v2',
+        message: 'Version conflict detected',
+      }],
+      warnings: [],
+      task_type: 'deep_synthesis_apply',
+    };
+    render(React.createElement(DeepSynthesisPreviewPanel, {
+      result: buildDeepSynthesisResultFixture(),
+      ...defaultProps,
+      applyResult,
+    }));
+    const body = document.body.textContent || '';
+    expect(body).toContain('版本不匹配');
+    expect(body).toContain('Version conflict detected');
+    expect(body).toContain('char-001');
+  });
+
+  it('skipped result displays skip reason', () => {
+    const applyResult: DeepSynthesisApplyResult = {
+      status: 'dry_run',
+      summary: { accepted_count: 1, rejected_count: 0, undecided_count: 0, applied_count: 0, skipped_count: 1, conflict_count: 0, failed_count: 0, dry_run: true, all_or_nothing: false },
+      applied_changes: [],
+      skipped_changes: [{
+        change_id: 'ch-2',
+        asset_type: 'world_fact' as DeepSynthesisAssetType,
+        asset_id: 'world-001',
+        field_path: 'description',
+        reason: 'undecided',
+        message: 'Change not decided by user',
+      }],
+      conflicts: [],
+      warnings: [],
+      task_type: 'deep_synthesis_apply',
+    };
+    render(React.createElement(DeepSynthesisPreviewPanel, {
+      result: buildDeepSynthesisResultFixture(),
+      ...defaultProps,
+      applyResult,
+    }));
+    const body = document.body.textContent || '';
+    expect(body).toContain('未决定');
+    expect(body).toContain('Change not decided by user');
+  });
+
+  it('forbidden values do not render in apply result', () => {
+    const applyResult: DeepSynthesisApplyResult = {
+      status: 'dry_run',
+      summary: { accepted_count: 1, rejected_count: 0, undecided_count: 0, applied_count: 0, skipped_count: 0, conflict_count: 0, failed_count: 0, dry_run: true, all_or_nothing: false },
+      applied_changes: [{
+        change_id: 'ch-1',
+        asset_type: 'character' as DeepSynthesisAssetType,
+        asset_id: 'char-001',
+        asset_version_before: 'v1',
+        asset_version_after: 'v2',
+        field_path: 'personality',
+        previous_value: 'chapter_content secret text',
+        applied_value: 'raw_response_text hidden data',
+      }],
+      skipped_changes: [],
+      conflicts: [],
+      warnings: [],
+      task_type: 'deep_synthesis_apply',
+    };
+    render(React.createElement(DeepSynthesisPreviewPanel, {
+      result: buildDeepSynthesisResultFixture(),
+      ...defaultProps,
+      applyResult,
+    }));
+    const body = document.body.textContent || '';
+    expect(body).not.toContain('chapter_content');
+    expect(body).not.toContain('raw_response_text');
+    expect(body).toContain('[REDACTED_FIELD]');
   });
 });

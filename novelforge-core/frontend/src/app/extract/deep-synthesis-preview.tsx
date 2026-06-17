@@ -20,14 +20,19 @@ import {
   ArrowRight,
   TrendingUp,
   Award,
-  BookOpen
+  BookOpen,
+  Shield,
+  Zap,
+  FileCheck,
+  Loader2
 } from 'lucide-react';
 import {
   DeepSynthesisResult,
   DeepSynthesisBudgetTier,
   DeepSynthesisScopeType,
   DeepSynthesisAssetType,
-  ProposedChange
+  ProposedChange,
+  DeepSynthesisApplyResult
 } from '@/types';
 import {
   formatDeepSynthesisBudgetTier,
@@ -39,7 +44,10 @@ import {
   formatPercent,
   formatQualityDelta,
   groupProposedChangesByAssetType,
-  sanitizeDeepSynthesisDisplayValue
+  sanitizeDeepSynthesisDisplayValue,
+  formatApplyStatus,
+  formatApplySkipReason,
+  hasApplyConflicts,
 } from './deep-synthesis-utils';
 
 interface DeepSynthesisPreviewPanelProps {
@@ -57,6 +65,13 @@ interface DeepSynthesisPreviewPanelProps {
   onBudgetTierChange: (tier: DeepSynthesisBudgetTier) => void;
   scopeType: DeepSynthesisScopeType;
   onScopeTypeChange: (scope: DeepSynthesisScopeType) => void;
+  applyResult: DeepSynthesisApplyResult | null;
+  applyLoading: boolean;
+  applyError: string | null;
+  onDryRunApply: () => void;
+  onConfirmApply: () => void;
+  dryRunPassed: boolean;
+  applyCompleted: boolean;
 }
 
 export function DeepSynthesisPreviewPanel({
@@ -73,7 +88,14 @@ export function DeepSynthesisPreviewPanel({
   budgetTier,
   onBudgetTierChange,
   scopeType,
-  onScopeTypeChange
+  onScopeTypeChange,
+  applyResult,
+  applyLoading,
+  applyError,
+  onDryRunApply,
+  onConfirmApply,
+  dryRunPassed,
+  applyCompleted,
 }: DeepSynthesisPreviewPanelProps) {
   const [collapsedRounds, setCollapsedRounds] = useState<Record<number, boolean>>({});
 
@@ -223,6 +245,15 @@ export function DeepSynthesisPreviewPanel({
 
       {/* Main Panel Content */}
       <div className="p-6">
+        {/* Apply Safety Banner */}
+        <div className="mb-6 p-4 bg-amber-500/8 border border-amber-500/20 rounded-lg flex items-start gap-3">
+          <Shield className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+          <div>
+            <h4 className="text-sm font-semibold text-amber-200">预览模式 — 本阶段默认只预检</h4>
+            <p className="text-xs text-amber-400/80 mt-1">点击确认写入后才会修改资产库。预览结果仅供参考，不会自动变更任何资产。</p>
+          </div>
+        </div>
+
         {error && (
           <div className="mb-6 p-4 bg-red-900/10 border border-red-500/20 rounded-lg flex items-start gap-3">
             <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
@@ -332,6 +363,208 @@ export function DeepSynthesisPreviewPanel({
                 </button>
               </div>
             </div>
+
+            {/* Apply Action Section */}
+            <div className="p-5 bg-slate-950 border border-slate-800 rounded-lg space-y-4">
+              <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                <Zap className="w-4 h-4 text-amber-400" /> 应用变更（Apply）
+              </h3>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={onDryRunApply}
+                  disabled={applyLoading || acceptedCount === 0}
+                  className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 disabled:bg-slate-900 disabled:text-slate-600 text-slate-200 font-medium text-sm rounded-lg transition-colors border border-slate-700 disabled:border-slate-800 cursor-pointer disabled:cursor-not-allowed"
+                >
+                  {applyLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <FileCheck className="w-4 h-4" />
+                  )}
+                  预检应用（Dry Run）
+                </button>
+                <button
+                  onClick={onConfirmApply}
+                  disabled={!dryRunPassed || applyLoading || applyCompleted}
+                  className="flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-500 active:bg-amber-700 disabled:bg-slate-900 disabled:text-slate-600 text-white font-medium text-sm rounded-lg transition-colors border border-amber-500/30 disabled:border-slate-800 cursor-pointer disabled:cursor-not-allowed"
+                >
+                  {applyLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <CheckCircle className="w-4 h-4" />
+                  )}
+                  确认写入资产库
+                </button>
+              </div>
+              {acceptedCount === 0 && (
+                <p className="text-xs text-slate-500">请先接受至少一项变更后才能预检。</p>
+              )}
+              {!dryRunPassed && !applyCompleted && acceptedCount > 0 && !applyLoading && (
+                <p className="text-xs text-slate-500">请先运行预检（Dry Run），确认无冲突后再写入。</p>
+              )}
+              {applyCompleted && (
+                <p className="text-xs text-emerald-400 flex items-center gap-1">
+                  <CheckCircle className="w-3.5 h-3.5" /> 变更已成功写入资产库。
+                </p>
+              )}
+            </div>
+
+            {/* Apply Error */}
+            {applyError && (
+              <div className="p-4 bg-red-900/10 border border-red-500/20 rounded-lg flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="text-sm font-semibold text-red-200">应用失败</h4>
+                  <p className="text-xs text-red-400 mt-1">{applyError}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Apply Result Display */}
+            {applyResult && (
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                  <FileCheck className="w-4 h-4 text-emerald-400" /> 应用结果
+                </h3>
+
+                {/* Summary Cards */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div className="p-4 bg-slate-950 border border-slate-800/80 rounded-lg">
+                    <span className="block text-[11px] text-slate-500 font-medium">状态</span>
+                    <span className={`block text-lg font-semibold font-mono mt-1 ${
+                      applyResult.status === 'success' ? 'text-emerald-400'
+                        : applyResult.status === 'dry_run' ? 'text-sky-400'
+                          : applyResult.status === 'partial' ? 'text-amber-400'
+                            : 'text-red-400'
+                    }`}>
+                      {formatApplyStatus(applyResult.status)}
+                    </span>
+                  </div>
+                  <div className="p-4 bg-slate-950 border border-slate-800/80 rounded-lg">
+                    <span className="block text-[11px] text-slate-500 font-medium">已应用</span>
+                    <span className="block text-2xl font-semibold font-mono text-emerald-400 mt-1">
+                      {applyResult.summary.applied_count}
+                    </span>
+                  </div>
+                  <div className="p-4 bg-slate-950 border border-slate-800/80 rounded-lg">
+                    <span className="block text-[11px] text-slate-500 font-medium">已跳过</span>
+                    <span className="block text-2xl font-semibold font-mono text-amber-400 mt-1">
+                      {applyResult.summary.skipped_count}
+                    </span>
+                  </div>
+                  <div className="p-4 bg-slate-950 border border-slate-800/80 rounded-lg">
+                    <span className="block text-[11px] text-slate-500 font-medium">冲突</span>
+                    <span className="block text-2xl font-semibold font-mono text-red-400 mt-1">
+                      {applyResult.summary.conflict_count}
+                    </span>
+                  </div>
+                </div>
+
+                {applyResult.attempt_id && (
+                  <p className="text-xs text-slate-500 font-mono">Attempt ID: {applyResult.attempt_id}</p>
+                )}
+
+                {/* Applied Changes List */}
+                {applyResult.applied_changes.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="text-xs font-semibold text-emerald-400">已应用变更</h4>
+                    <div className="flex flex-col gap-2">
+                      {applyResult.applied_changes.map((change) => (
+                        <div key={change.change_id} className="p-3 bg-emerald-950/10 border border-emerald-500/10 rounded-lg text-xs">
+                          <div className="flex flex-wrap items-center gap-2 mb-2">
+                            <span className="font-mono text-emerald-300 bg-emerald-950/20 px-2 py-0.5 rounded">{change.asset_id}</span>
+                            <span className="font-mono text-slate-400">{change.field_path}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-slate-400">
+                            <span className="font-mono">{change.asset_version_before}</span>
+                            <ArrowRight className="w-3 h-3 text-emerald-400" />
+                            <span className="font-mono text-emerald-400">{change.asset_version_after}</span>
+                          </div>
+                          {(change.previous_value !== undefined || change.applied_value !== undefined) && (
+                            <div className="mt-2 grid grid-cols-2 gap-2">
+                              <div>
+                                <span className="block text-[10px] text-slate-500">旧值</span>
+                                <span className="block text-slate-400 break-words">{sanitizeDeepSynthesisDisplayValue(change.previous_value == null ? null : String(change.previous_value))}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] text-emerald-400/80">新值</span>
+                                <span className="block text-emerald-300 break-words">{sanitizeDeepSynthesisDisplayValue(change.applied_value == null ? null : String(change.applied_value))}</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Skipped Changes List */}
+                {applyResult.skipped_changes.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="text-xs font-semibold text-amber-400">已跳过变更</h4>
+                    <div className="flex flex-col gap-2">
+                      {applyResult.skipped_changes.map((change) => (
+                        <div key={change.change_id} className="p-3 bg-amber-950/10 border border-amber-500/10 rounded-lg text-xs">
+                          <div className="flex flex-wrap items-center gap-2 mb-1">
+                            <span className="font-mono text-amber-300 bg-amber-950/20 px-2 py-0.5 rounded">{change.asset_id}</span>
+                            <span className="font-mono text-slate-400">{change.field_path}</span>
+                            <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-semibold">
+                              {formatApplySkipReason(change.reason)}
+                            </span>
+                          </div>
+                          <p className="text-slate-400">{change.message}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Conflicts List */}
+                {applyResult.conflicts.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="text-xs font-semibold text-red-400">冲突</h4>
+                    <div className="flex flex-col gap-2">
+                      {applyResult.conflicts.map((conflict) => (
+                        <div key={conflict.change_id} className="p-3 bg-red-950/10 border border-red-500/10 rounded-lg text-xs">
+                          <div className="flex flex-wrap items-center gap-2 mb-1">
+                            <span className="font-mono text-red-300 bg-red-950/20 px-2 py-0.5 rounded">{conflict.asset_id}</span>
+                            <span className="font-mono text-slate-400">{conflict.field_path}</span>
+                            <span className="px-2 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20 font-semibold">
+                              {formatApplySkipReason(conflict.reason)}
+                            </span>
+                          </div>
+                          <p className="text-slate-400 mb-2">{conflict.message}</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <span className="block text-[10px] text-slate-500">期望值</span>
+                              <span className="block text-slate-400 break-words">{sanitizeDeepSynthesisDisplayValue(conflict.expected == null ? null : String(conflict.expected))}</span>
+                            </div>
+                            <div>
+                              <span className="block text-[10px] text-red-400/80">实际值</span>
+                              <span className="block text-red-300 break-words">{sanitizeDeepSynthesisDisplayValue(conflict.actual == null ? null : String(conflict.actual))}</span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Warnings */}
+                {applyResult.warnings.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="text-xs font-semibold text-amber-400">警告</h4>
+                    <div className="flex flex-col gap-2">
+                      {applyResult.warnings.map((warn, index) => (
+                        <div key={warn.warning_id || index} className="p-3 bg-amber-500/8 border border-amber-500/20 rounded-lg text-xs flex items-start gap-2">
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                          <p className="text-amber-400">{warn.message}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Proposed Changes list, grouped by asset_type */}
             <div className="space-y-6">

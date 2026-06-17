@@ -11,6 +11,75 @@
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
   - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
 
+## 2026-06-17 Phase G.4.2: Frontend Apply Button & Apply Result Display
+
+### 本轮完成
+- **补齐前端 Apply 类型**：
+  - `DeepSynthesisApplySkipReason`：10 种跳过原因的 union type
+  - `DeepSynthesisApplyRequest`：session_id、preview、accepted/rejected_change_ids、expected_asset_versions、dry_run、idempotency_key
+  - `DeepSynthesisAppliedChange`：change_id、asset_type、asset_id、version before→after、field_path、previous/applied_value
+  - `DeepSynthesisSkippedChange`：change_id、reason、message
+  - `DeepSynthesisApplyConflict`：change_id、reason、expected/actual（sanitized）
+  - `DeepSynthesisApplySummary`：accepted/rejected/undecided/applied/skipped/conflict/failed_count、dry_run、all_or_nothing
+  - `DeepSynthesisApplyResult`：status（success/partial/failed/dry_run）、summary、applied/skipped/changes、conflicts、warnings
+
+- **API Client**：
+  - `deepSynthesisService.applyPreview(request)`：POST /api/extraction/deep-synthesis/apply
+  - 使用原生 fetch 处理 409/400 structured response，提取 `payload.detail` 中的 `DeepSynthesisApplyResult`
+  - 409/400 中的结构化 conflict 数据通过 `extractApplyResultFromPayload` 解析
+  - 非结构化 error 仍走标准 `sanitizeAPIErrorDetail` 路径
+
+- **Utils**：
+  - `buildDeepSynthesisApplyRequest()`：从 selectionState 提取 accepted/rejected，从 preview.proposed_changes 构建 expected_asset_versions
+  - `formatApplyStatus()`：success→成功、partial→部分成功、failed→失败、dry_run→预检通过
+  - `formatApplySkipReason()`：10 种跳过原因的中文标签
+  - `hasApplyConflicts(result)`：判断是否存在冲突
+  - `canConfirmRealApplyAfterDryRun(result)`：dry_run 且无冲突时允许确认写入
+
+- **DeepSynthesisPreviewPanel UI**：
+  - 安全横幅："本阶段默认只预检；点击确认写入后才会修改资产库。"
+  - Selection summary：accepted/rejected/undecided count（已有）
+  - Dry Run 按钮：accepted_count=0 时 disabled，loading 时 disabled
+  - Confirm Apply 按钮：dry_runPassed=false 时 disabled，applyCompleted=true 时 disabled，带 amber 危险样式
+  - Apply result summary cards：status / applied_count / skipped_count / conflict_count / attempt_id
+  - Applied changes list：asset_id / field_path / version before→after / previous→applied value（sanitized）
+  - Skipped changes list：reason / message / asset_id / field_path
+  - Conflicts list：reason / message / expected/actual（sanitized）
+  - Warnings list：warnings[].message
+
+- **page.tsx 集成**：
+  - 新增状态：deepSynthesisApplyResult / ApplyLoading / ApplyError / DryRunPassed / ApplyCompleted
+  - 新增 handlers：handleDryRunDeepSynthesisApply / handleConfirmDeepSynthesisApply
+  - Selection change（accept/reject/reset/accept all/reject all）自动清空 applyResult / dryRunPassed / applyCompleted
+  - 409 structured conflict 通过 extractStructuredApplyResult 从 APIError.detail 解析并展示
+  - 预检通过后才允许确认写入；确认写入成功后禁用按钮
+
+### 安全边界
+- 不自动 apply：preview 生成后不触发 apply
+- 不 apply rejected/undecided：只传 accepted_change_ids
+- 不 allow confirm before dry_run pass：dryRunPassed=false 时 confirm disabled
+- 不 display forbidden fields：所有 previous_value/applied_value/expected/actual 走 sanitizeDeepSynthesisDisplayValue
+- 不 call provider
+- 不 change backend
+
+### 测试结果
+- `npm test -- --run`：34 test files, 200 tests passed
+- `npx tsc --noEmit --incremental false`：zero errors
+- `npm run build`：Next.js production build successful
+- `git diff --check`：only LF→CRLF warnings (Windows)
+
+### 修改文件
+- `novelforge-core/frontend/src/types/index.ts` — Apply types
+- `novelforge-core/frontend/src/lib/api/novelforge-api.ts` — applyPreview API client
+- `novelforge-core/frontend/src/app/extract/deep-synthesis-utils.ts` — Apply utils
+- `novelforge-core/frontend/src/app/extract/deep-synthesis-utils.test.ts` — Apply utils tests
+- `novelforge-core/frontend/src/app/extract/deep-synthesis-preview.tsx` — Apply UI
+- `novelforge-core/frontend/src/app/extract/deep-synthesis-preview.test.tsx` — Apply UI tests
+- `novelforge-core/frontend/src/app/extract/page.tsx` — Apply state + handlers
+- `project-docs/PROGRESS.md` — Progress update
+
+---
+
 ## 2026-06-17 Phase G.4.1: Deep Synthesis Apply Patch Backend Foundation
 
 ### 本轮完成

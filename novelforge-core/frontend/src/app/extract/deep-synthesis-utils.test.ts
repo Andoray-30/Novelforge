@@ -12,8 +12,13 @@ import {
   buildDeepSynthesisSelectionState,
   deriveAcceptedRejectedIds,
   sanitizeDeepSynthesisDisplayValue,
+  buildDeepSynthesisApplyRequest,
+  formatApplyStatus,
+  formatApplySkipReason,
+  hasApplyConflicts,
+  canConfirmRealApplyAfterDryRun,
 } from './deep-synthesis-utils';
-import type { ProposedChange, DeepSynthesisResult } from '@/types';
+import type { ProposedChange, DeepSynthesisResult, DeepSynthesisPreview, DeepSynthesisApplyResult } from '@/types';
 
 describe('Deep Synthesis Utils', () => {
   describe('formatDeepSynthesisBudgetTier', () => {
@@ -202,6 +207,164 @@ describe('Deep Synthesis Utils', () => {
     it('returns default placeholder for null/undefined', () => {
       expect(sanitizeDeepSynthesisDisplayValue(null)).toBe('—');
       expect(sanitizeDeepSynthesisDisplayValue(undefined)).toBe('—');
+    });
+  });
+
+  describe('buildDeepSynthesisApplyRequest', () => {
+    const mockPreview: DeepSynthesisPreview = {
+      summary: 'test',
+      proposed_changes: [
+        { change_id: 'ch-1', asset_type: 'character', asset_id: 'c1', asset_version: 'v2', field_path: 'name', current_value: 'A', proposed_value: 'B', confidence: 0.9, reason: 'r', evidence_refs: [], risk_level: 'low' },
+        { change_id: 'ch-2', asset_type: 'world_fact', asset_id: 'w1', asset_version: 'v3', field_path: 'desc', current_value: null, proposed_value: 'X', confidence: 0.8, reason: 'r', evidence_refs: [], risk_level: 'medium' },
+      ],
+      conflicts_resolved: [],
+      new_links: [],
+      risk_flags: [],
+      confidence_delta: 0.1,
+      evidence_refs: [],
+      apply_plan: { requires_user_confirmation: true, apply_mode: 'preview_patch', patch_strategy: 'field_level', asset_write_policy: 'confirm_before_apply' },
+      requires_user_confirmation: true,
+    };
+
+    it('maps accepted and rejected change IDs correctly', () => {
+      const selectionState: Record<string, 'accepted' | 'rejected' | 'undecided'> = {
+        'ch-1': 'accepted',
+        'ch-2': 'rejected',
+      };
+      const request = buildDeepSynthesisApplyRequest({
+        sessionId: 'sess-1',
+        preview: mockPreview,
+        selectionState,
+        dryRun: true,
+      });
+      expect(request.accepted_change_ids).toEqual(['ch-1']);
+      expect(request.rejected_change_ids).toEqual(['ch-2']);
+      expect(request.session_id).toBe('sess-1');
+      expect(request.dry_run).toBe(true);
+    });
+
+    it('excludes undecided changes from accepted/rejected', () => {
+      const selectionState: Record<string, 'accepted' | 'rejected' | 'undecided'> = {
+        'ch-1': 'accepted',
+        'ch-2': 'undecided',
+      };
+      const request = buildDeepSynthesisApplyRequest({
+        sessionId: 'sess-1',
+        preview: mockPreview,
+        selectionState,
+        dryRun: false,
+      });
+      expect(request.accepted_change_ids).toEqual(['ch-1']);
+      expect(request.rejected_change_ids).toEqual([]);
+      expect(request.dry_run).toBe(false);
+    });
+
+    it('generates expected_asset_versions from preview', () => {
+      const request = buildDeepSynthesisApplyRequest({
+        sessionId: 'sess-1',
+        preview: mockPreview,
+        selectionState: {},
+        dryRun: true,
+      });
+      expect(request.expected_asset_versions).toEqual({
+        'ch-1': 'v2',
+        'ch-2': 'v3',
+      });
+    });
+  });
+
+  describe('formatApplyStatus', () => {
+    it('formats all status values', () => {
+      expect(formatApplyStatus('success')).toBe('成功');
+      expect(formatApplyStatus('partial')).toBe('部分成功');
+      expect(formatApplyStatus('failed')).toBe('失败');
+      expect(formatApplyStatus('dry_run')).toBe('预检通过');
+    });
+  });
+
+  describe('formatApplySkipReason', () => {
+    it('formats all skip reason values', () => {
+      expect(formatApplySkipReason('rejected_by_user')).toBe('用户拒绝');
+      expect(formatApplySkipReason('undecided')).toBe('未决定');
+      expect(formatApplySkipReason('duplicate_change_id')).toBe('重复变更');
+      expect(formatApplySkipReason('unsupported_asset_type')).toBe('不支持的资产类型');
+      expect(formatApplySkipReason('missing_asset')).toBe('资产不存在');
+      expect(formatApplySkipReason('invalid_field_path')).toBe('无效字段路径');
+      expect(formatApplySkipReason('forbidden_field_path')).toBe('禁止字段路径');
+      expect(formatApplySkipReason('version_mismatch')).toBe('版本不匹配');
+      expect(formatApplySkipReason('current_value_mismatch')).toBe('当前值不匹配');
+      expect(formatApplySkipReason('dry_run')).toBe('预检模式');
+    });
+  });
+
+  describe('hasApplyConflicts', () => {
+    it('returns true when conflicts exist', () => {
+      expect(hasApplyConflicts({
+        status: 'partial',
+        summary: { accepted_count: 1, rejected_count: 0, undecided_count: 0, applied_count: 0, skipped_count: 0, conflict_count: 1, failed_count: 0, dry_run: false, all_or_nothing: false },
+        applied_changes: [],
+        skipped_changes: [],
+        conflicts: [{ change_id: 'c1', asset_type: 'character', asset_id: 'a1', field_path: 'f', reason: 'version_mismatch', message: 'm' }],
+        warnings: [],
+        task_type: 'deep_synthesis_apply',
+      } as DeepSynthesisApplyResult)).toBe(true);
+    });
+
+    it('returns false when no conflicts', () => {
+      expect(hasApplyConflicts({
+        status: 'dry_run',
+        summary: { accepted_count: 1, rejected_count: 0, undecided_count: 0, applied_count: 0, skipped_count: 0, conflict_count: 0, failed_count: 0, dry_run: true, all_or_nothing: false },
+        applied_changes: [],
+        skipped_changes: [],
+        conflicts: [],
+        warnings: [],
+        task_type: 'deep_synthesis_apply',
+      })).toBe(false);
+    });
+  });
+
+  describe('canConfirmRealApplyAfterDryRun', () => {
+    it('returns true only for dry_run status without conflicts', () => {
+      const dryRunNoConflict: DeepSynthesisApplyResult = {
+        status: 'dry_run',
+        summary: { accepted_count: 1, rejected_count: 0, undecided_count: 0, applied_count: 0, skipped_count: 0, conflict_count: 0, failed_count: 0, dry_run: true, all_or_nothing: false },
+        applied_changes: [],
+        skipped_changes: [],
+        conflicts: [],
+        warnings: [],
+        task_type: 'deep_synthesis_apply',
+      };
+      expect(canConfirmRealApplyAfterDryRun(dryRunNoConflict)).toBe(true);
+    });
+
+    it('returns false for null', () => {
+      expect(canConfirmRealApplyAfterDryRun(null)).toBe(false);
+    });
+
+    it('returns false when conflicts exist', () => {
+      const dryRunWithConflict: DeepSynthesisApplyResult = {
+        status: 'dry_run',
+        summary: { accepted_count: 1, rejected_count: 0, undecided_count: 0, applied_count: 0, skipped_count: 0, conflict_count: 1, failed_count: 0, dry_run: true, all_or_nothing: false },
+        applied_changes: [],
+        skipped_changes: [],
+        conflicts: [{ change_id: 'c1', asset_type: 'character', asset_id: 'a1', field_path: 'f', reason: 'version_mismatch', message: 'm' }],
+        warnings: [],
+        task_type: 'deep_synthesis_apply',
+      };
+      expect(canConfirmRealApplyAfterDryRun(dryRunWithConflict)).toBe(false);
+    });
+
+    it('returns false for non-dry_run status', () => {
+      const successResult: DeepSynthesisApplyResult = {
+        status: 'success',
+        summary: { accepted_count: 1, rejected_count: 0, undecided_count: 0, applied_count: 1, skipped_count: 0, conflict_count: 0, failed_count: 0, dry_run: false, all_or_nothing: false },
+        applied_changes: [],
+        skipped_changes: [],
+        conflicts: [],
+        warnings: [],
+        task_type: 'deep_synthesis_apply',
+      };
+      expect(canConfirmRealApplyAfterDryRun(successResult)).toBe(false);
     });
   });
 });

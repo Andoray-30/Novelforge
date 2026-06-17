@@ -1,4 +1,4 @@
-import { APIClient, sanitizeAPIErrorDetail } from './client';
+import { APIClient, APIError, sanitizeAPIErrorDetail } from './client';
 import {
   AITask,
   Character,
@@ -29,6 +29,8 @@ import {
   WorldSetting,
   DeepSynthesisRequest,
   DeepSynthesisResult,
+  DeepSynthesisApplyRequest,
+  DeepSynthesisApplyResult,
   ExtractionAttemptSummary,
   ExtractionAttempt,
   RetryExtractionAttemptResponse,
@@ -687,8 +689,50 @@ export const retryQueueService = {
   },
 };
 
+function extractApplyResultFromPayload(payload: unknown): DeepSynthesisApplyResult | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const obj = payload as Record<string, unknown>;
+  const detail = obj.detail;
+  if (!detail || typeof detail !== 'object') return null;
+  const d = detail as Record<string, unknown>;
+  if (typeof d.status === 'string' && d.summary && typeof d.summary === 'object' && typeof d.task_type === 'string') {
+    return d as unknown as DeepSynthesisApplyResult;
+  }
+  return null;
+}
+
 export const deepSynthesisService = {
   createPreview: (request: DeepSynthesisRequest): Promise<DeepSynthesisResult> => {
     return novelforgeClient.post<DeepSynthesisResult>('/api/extraction/deep-synthesis/preview', request);
+  },
+
+  applyPreview: async (request: DeepSynthesisApplyRequest): Promise<DeepSynthesisApplyResult> => {
+    const response = await fetch(`${BASE_URL}/api/extraction/deep-synthesis/apply`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    });
+
+    const payload = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      const structuredResult = extractApplyResultFromPayload(payload);
+      if (structuredResult) {
+        throw new APIError(response.status, JSON.stringify(structuredResult));
+      }
+      let detail = response.statusText || 'Apply 请求失败';
+      if (typeof payload?.detail === 'string' && payload.detail.trim()) {
+        detail = payload.detail;
+      } else if (typeof payload?.error === 'string' && payload.error.trim()) {
+        detail = payload.error;
+      }
+      if (response.status === 401 && typeof window !== 'undefined' && window.location.pathname !== '/login') {
+        window.location.assign('/login');
+      }
+      throw new APIError(response.status, sanitizeAPIErrorDetail(detail, response.status, response.statusText));
+    }
+
+    return payload as DeepSynthesisApplyResult;
   },
 };

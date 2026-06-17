@@ -940,3 +940,81 @@ export interface DeepSynthesisResult {
   user_feedback?: DeepSynthesisUserFeedback | null;
   task_type: string;
 }
+
+// === Deep Synthesis Apply Types ===
+
+export type DeepSynthesisApplySkipReason =
+  | 'rejected_by_user'
+  | 'undecided'
+  | 'duplicate_change_id'
+  | 'unsupported_asset_type'
+  | 'missing_asset'
+  | 'invalid_field_path'
+  | 'forbidden_field_path'
+  | 'version_mismatch'
+  | 'current_value_mismatch'
+  | 'dry_run';
+
+export interface DeepSynthesisApplyRequest {
+  session_id: string;
+  preview: DeepSynthesisPreview;
+  accepted_change_ids: string[];
+  rejected_change_ids: string[];
+  expected_asset_versions: Record<string, string>;
+  dry_run: boolean;
+  idempotency_key?: string | null;
+}
+
+export interface DeepSynthesisAppliedChange {
+  change_id: string;
+  asset_type: DeepSynthesisAssetType;
+  asset_id: string;
+  asset_version_before: string;
+  asset_version_after: string;
+  field_path: string;
+  previous_value?: unknown;
+  applied_value?: unknown;
+}
+
+export interface DeepSynthesisSkippedChange {
+  change_id: string;
+  asset_type: DeepSynthesisAssetType;
+  asset_id: string;
+  field_path: string;
+  reason: DeepSynthesisApplySkipReason;
+  message: string;
+}
+
+export interface DeepSynthesisApplyConflict {
+  change_id: string;
+  asset_type: DeepSynthesisAssetType;
+  asset_id: string;
+  field_path: string;
+  reason: DeepSynthesisApplySkipReason;
+  expected?: unknown;
+  actual?: unknown;
+  message: string;
+}
+
+export interface DeepSynthesisApplySummary {
+  accepted_count: number;
+  rejected_count: number;
+  undecided_count: number;
+  applied_count: number;
+  skipped_count: number;
+  conflict_count: number;
+  failed_count: number;
+  dry_run: boolean;
+  all_or_nothing: boolean;
+}
+
+export interface DeepSynthesisApplyResult {
+  status: 'success' | 'partial' | 'failed' | 'dry_run';
+  summary: DeepSynthesisApplySummary;
+  applied_changes: DeepSynthesisAppliedChange[];
+  skipped_changes: DeepSynthesisSkippedChange[];
+  conflicts: DeepSynthesisApplyConflict[];
+  warnings: DeepSynthesisWarning[];
+  attempt_id?: string | null;
+  task_type: string;
+}

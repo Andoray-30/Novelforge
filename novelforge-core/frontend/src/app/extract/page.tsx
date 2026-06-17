@@ -21,10 +21,11 @@ import {
   Wrench,
 } from 'lucide-react';
 import { chapterIndexRunService, contentService, extractionAttemptService, modelHealthService, retryQueueService, taskService, textProcessingService, deepSynthesisService } from '@/lib/api';
+import { isAPIError } from '@/lib/api/client';
 import { buildAssetQualityDiagnostics, type AssetQualityDiagnosticsResult } from '@/lib/asset-quality-diagnostics';
 import { DeepSynthesisPreviewPanel } from './deep-synthesis-preview';
-import { buildDeepSynthesisSelectionState, deriveAcceptedRejectedIds } from './deep-synthesis-utils';
-import { DeepSynthesisResult, DeepSynthesisBudgetTier, DeepSynthesisScopeType } from '@/types';
+import { buildDeepSynthesisSelectionState, deriveAcceptedRejectedIds, buildDeepSynthesisApplyRequest } from './deep-synthesis-utils';
+import { DeepSynthesisResult, DeepSynthesisBudgetTier, DeepSynthesisScopeType, DeepSynthesisApplyResult } from '@/types';
 import {
   formatLatencyMs,
   formatProfileConfidence,
@@ -156,6 +157,19 @@ const CANDIDATE_COUNT_LABELS: Record<string, string> = {
   chapter_index_history_reused: '复用历史成功章',
   chapter_index_combined_indices: '合并章节索引',
 };
+
+function extractStructuredApplyResult(error: unknown): DeepSynthesisApplyResult | null {
+  if (!isAPIError(error)) return null;
+  try {
+    const parsed = JSON.parse(error.detail);
+    if (parsed && typeof parsed === 'object' && typeof parsed.status === 'string' && parsed.summary && typeof parsed.task_type === 'string') {
+      return parsed as DeepSynthesisApplyResult;
+    }
+  } catch {
+    // detail is not structured JSON
+  }
+  return null;
+}
 
 function hasAcceptedExtension(fileName: string): boolean {
   const lowerName = fileName.toLowerCase();
@@ -704,6 +718,11 @@ export default function ExtractPage() {
   const [deepSynthesisBudgetTier, setDeepSynthesisBudgetTier] = useState<DeepSynthesisBudgetTier>('medium');
   const [deepSynthesisScopeType, setDeepSynthesisScopeType] = useState<DeepSynthesisScopeType>('full');
   const [deepSynthesisSelectionState, setDeepSynthesisSelectionState] = useState<Record<string, 'accepted' | 'rejected' | 'undecided'>>({});
+  const [deepSynthesisApplyResult, setDeepSynthesisApplyResult] = useState<DeepSynthesisApplyResult | null>(null);
+  const [deepSynthesisApplyLoading, setDeepSynthesisApplyLoading] = useState(false);
+  const [deepSynthesisApplyError, setDeepSynthesisApplyError] = useState<string | null>(null);
+  const [deepSynthesisDryRunPassed, setDeepSynthesisDryRunPassed] = useState(false);
+  const [deepSynthesisApplyCompleted, setDeepSynthesisApplyCompleted] = useState(false);
 
   const { currentSession, currentSessionId, createSession, switchSession, loadSessions } = useSessions();
   const setSelectedNovelId = useAppStore((state) => state.setSelectedNovelId);
@@ -734,6 +753,11 @@ export default function ExtractPage() {
     setDeepSynthesisResult(null);
     setDeepSynthesisError(null);
     setDeepSynthesisLoading(false);
+    setDeepSynthesisApplyResult(null);
+    setDeepSynthesisApplyLoading(false);
+    setDeepSynthesisApplyError(null);
+    setDeepSynthesisDryRunPassed(false);
+    setDeepSynthesisApplyCompleted(false);
   }, [currentSessionId]);
 
   const ensureSessionId = useCallback(async (selectedFile: File): Promise<string> => {
@@ -1233,6 +1257,10 @@ export default function ExtractPage() {
       ...prev,
       [changeId]: 'accepted'
     }));
+    setDeepSynthesisApplyResult(null);
+    setDeepSynthesisApplyError(null);
+    setDeepSynthesisDryRunPassed(false);
+    setDeepSynthesisApplyCompleted(false);
   };
 
   const handleRejectChange = (changeId: string) => {
@@ -1240,6 +1268,10 @@ export default function ExtractPage() {
       ...prev,
       [changeId]: 'rejected'
     }));
+    setDeepSynthesisApplyResult(null);
+    setDeepSynthesisApplyError(null);
+    setDeepSynthesisDryRunPassed(false);
+    setDeepSynthesisApplyCompleted(false);
   };
 
   const handleResetChange = (changeId: string) => {
@@ -1247,6 +1279,10 @@ export default function ExtractPage() {
       ...prev,
       [changeId]: 'undecided'
     }));
+    setDeepSynthesisApplyResult(null);
+    setDeepSynthesisApplyError(null);
+    setDeepSynthesisDryRunPassed(false);
+    setDeepSynthesisApplyCompleted(false);
   };
 
   const handleAcceptAll = () => {
@@ -1256,6 +1292,10 @@ export default function ExtractPage() {
       newState[change.change_id] = 'accepted';
     }
     setDeepSynthesisSelectionState(newState);
+    setDeepSynthesisApplyResult(null);
+    setDeepSynthesisApplyError(null);
+    setDeepSynthesisDryRunPassed(false);
+    setDeepSynthesisApplyCompleted(false);
   };
 
   const handleRejectAll = () => {
@@ -1265,6 +1305,73 @@ export default function ExtractPage() {
       newState[change.change_id] = 'rejected';
     }
     setDeepSynthesisSelectionState(newState);
+    setDeepSynthesisApplyResult(null);
+    setDeepSynthesisApplyError(null);
+    setDeepSynthesisDryRunPassed(false);
+    setDeepSynthesisApplyCompleted(false);
+  };
+
+  const handleDryRunDeepSynthesisApply = async () => {
+    const sessionId = completedResult?.session_id || savedSummary?.sessionId || currentSessionId;
+    if (!sessionId || !deepSynthesisResult) return;
+    setDeepSynthesisApplyLoading(true);
+    setDeepSynthesisApplyError(null);
+    try {
+      const request = buildDeepSynthesisApplyRequest({
+        sessionId,
+        preview: deepSynthesisResult.preview,
+        selectionState: deepSynthesisSelectionState,
+        dryRun: true,
+      });
+      const result = await deepSynthesisService.applyPreview(request);
+      setDeepSynthesisApplyResult(result);
+      if (result.status === 'dry_run' && !result.conflicts?.length) {
+        setDeepSynthesisDryRunPassed(true);
+      } else {
+        setDeepSynthesisDryRunPassed(false);
+      }
+    } catch (error) {
+      const structuredResult = extractStructuredApplyResult(error);
+      if (structuredResult) {
+        setDeepSynthesisApplyResult(structuredResult);
+        setDeepSynthesisDryRunPassed(false);
+      } else {
+        setDeepSynthesisApplyError(error instanceof Error ? error.message : '预检应用遇到错误');
+      }
+    } finally {
+      setDeepSynthesisApplyLoading(false);
+    }
+  };
+
+  const handleConfirmDeepSynthesisApply = async () => {
+    const sessionId = completedResult?.session_id || savedSummary?.sessionId || currentSessionId;
+    if (!sessionId || !deepSynthesisResult || !deepSynthesisDryRunPassed) return;
+    const acceptedCount = Object.values(deepSynthesisSelectionState).filter(v => v === 'accepted').length;
+    if (acceptedCount === 0) return;
+    setDeepSynthesisApplyLoading(true);
+    setDeepSynthesisApplyError(null);
+    try {
+      const request = buildDeepSynthesisApplyRequest({
+        sessionId,
+        preview: deepSynthesisResult.preview,
+        selectionState: deepSynthesisSelectionState,
+        dryRun: false,
+      });
+      const result = await deepSynthesisService.applyPreview(request);
+      setDeepSynthesisApplyResult(result);
+      if (result.status === 'success' || result.status === 'partial') {
+        setDeepSynthesisApplyCompleted(true);
+      }
+    } catch (error) {
+      const structuredResult = extractStructuredApplyResult(error);
+      if (structuredResult) {
+        setDeepSynthesisApplyResult(structuredResult);
+      } else {
+        setDeepSynthesisApplyError(error instanceof Error ? error.message : '写入资产库遇到错误');
+      }
+    } finally {
+      setDeepSynthesisApplyLoading(false);
+    }
   };
 
   const projectLabel = currentSession?.title || '未选择项目，首次上传时会自动创建。';
@@ -2115,6 +2222,13 @@ export default function ExtractPage() {
             onBudgetTierChange={setDeepSynthesisBudgetTier}
             scopeType={deepSynthesisScopeType}
             onScopeTypeChange={setDeepSynthesisScopeType}
+            applyResult={deepSynthesisApplyResult}
+            applyLoading={deepSynthesisApplyLoading}
+            applyError={deepSynthesisApplyError}
+            onDryRunApply={handleDryRunDeepSynthesisApply}
+            onConfirmApply={handleConfirmDeepSynthesisApply}
+            dryRunPassed={deepSynthesisDryRunPassed}
+            applyCompleted={deepSynthesisApplyCompleted}
           />
         </section>
 

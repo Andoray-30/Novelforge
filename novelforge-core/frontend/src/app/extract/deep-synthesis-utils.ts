@@ -4,7 +4,11 @@ import {
   RiskLevel,
   ProposedChange,
   DeepSynthesisAssetType,
-  DeepSynthesisResult
+  DeepSynthesisResult,
+  DeepSynthesisApplyRequest,
+  DeepSynthesisApplyResult,
+  DeepSynthesisApplySkipReason,
+  DeepSynthesisPreview,
 } from '@/types';
 
 export function formatDeepSynthesisBudgetTier(tier: DeepSynthesisBudgetTier | string): string {
@@ -167,4 +171,78 @@ export function sanitizeDeepSynthesisDisplayValue(value: string | null | undefin
     return cleaned.slice(0, 200) + '...';
   }
   return cleaned;
+}
+
+export function buildDeepSynthesisApplyRequest(params: {
+  sessionId: string;
+  preview: DeepSynthesisPreview;
+  selectionState: Record<string, 'accepted' | 'rejected' | 'undecided'>;
+  dryRun: boolean;
+  idempotencyKey?: string | null;
+}): DeepSynthesisApplyRequest {
+  const { accepted_change_ids: accepted, rejected_change_ids: rejected } = deriveAcceptedRejectedIds(params.selectionState);
+  const expectedAssetVersions: Record<string, string> = {};
+  for (const change of params.preview.proposed_changes) {
+    expectedAssetVersions[change.change_id] = change.asset_version;
+  }
+  return {
+    session_id: params.sessionId,
+    preview: params.preview,
+    accepted_change_ids: accepted,
+    rejected_change_ids: rejected,
+    expected_asset_versions: expectedAssetVersions,
+    dry_run: params.dryRun,
+    idempotency_key: params.idempotencyKey ?? null,
+  };
+}
+
+export function formatApplyStatus(status: DeepSynthesisApplyResult['status']): string {
+  switch (status) {
+    case 'success':
+      return '成功';
+    case 'partial':
+      return '部分成功';
+    case 'failed':
+      return '失败';
+    case 'dry_run':
+      return '预检通过';
+    default:
+      return status || '未知';
+  }
+}
+
+export function formatApplySkipReason(reason: DeepSynthesisApplySkipReason): string {
+  switch (reason) {
+    case 'rejected_by_user':
+      return '用户拒绝';
+    case 'undecided':
+      return '未决定';
+    case 'duplicate_change_id':
+      return '重复变更';
+    case 'unsupported_asset_type':
+      return '不支持的资产类型';
+    case 'missing_asset':
+      return '资产不存在';
+    case 'invalid_field_path':
+      return '无效字段路径';
+    case 'forbidden_field_path':
+      return '禁止字段路径';
+    case 'version_mismatch':
+      return '版本不匹配';
+    case 'current_value_mismatch':
+      return '当前值不匹配';
+    case 'dry_run':
+      return '预检模式';
+    default:
+      return reason || '未知原因';
+  }
+}
+
+export function hasApplyConflicts(result: DeepSynthesisApplyResult): boolean {
+  return Array.isArray(result.conflicts) && result.conflicts.length > 0;
+}
+
+export function canConfirmRealApplyAfterDryRun(result: DeepSynthesisApplyResult | null): boolean {
+  if (!result) return false;
+  return result.status === 'dry_run' && !hasApplyConflicts(result);
 }
