@@ -7,9 +7,43 @@
   - 下部"历史详细记录"：保留过去每一轮修复动作，不删历史，便于回溯排查。
   - 文末新增记录继续按日期追加，但不再依赖对话记忆维护全局判断。
 - 阅读建议：
-  - 想知道系统现在到了哪一步，先看"2026-06-17 Phase H.3"、"2026-06-17 Phase H.2"和"2026-06-17 Phase G.4.4"。
+  - 想知道系统现在到了哪一步，先看"2026-06-17 Phase H.4"、"2026-06-17 Phase H.3"、"2026-06-17 Phase H.2"和"2026-06-17 Phase G.4.4"。
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
 - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
+
+## 2026-06-17 Phase H.4: Deep Synthesis Apply Audit / History Planning
+
+### 本轮完成
+- 审计 Deep Synthesis apply 记录结构：
+  - `record_apply_attempt()` 记录 task_type、session_id、status、latency_ms、parsed_candidate_counts（含 applied/skipped/conflict/dry_run 计数）、budget_summary（含 user_acceptance_rate、idempotency 数据）、proposed_change_count、unresolved_conflict_count、convergence_reason、user_acceptance_rate。
+  - 安全：raw_response_preview/raw_response_hash 在 persist 时剔除；FORBIDDEN_INPUT_FIELDS 阻止 chapter_content 等进入输入。
+- 审计 AttemptStore 查询能力：
+  - 支持 list_by_session、list_by_chapter、get、stats。
+  - **缺失**：无 task_type 筛选、无时间范围筛选、无分页。
+- 审计现有 API 端点：
+  - `GET /api/extraction/attempts` 能返回 deep_synthesis_apply 记录，但无法与 chapter_index 记录区分。
+  - **缺失**：无 task_type query 参数。
+- 创建规划文档：`project-docs/DEEP_SYNTHESIS_APPLY_AUDIT_HISTORY_PLAN.md`
+  - 包含：Problem Statement、Current State Audit、Minimal Audit Data Model、Data Safety Rules、Proposed Backend API、Proposed Frontend UX、Recommended Implementation Phases（H.4.1 ~ H.7）、Open Questions、Decision。
+
+### 审计发现
+- apply 记录通过 AttemptRecord 复用存储，字段足够存摘要。
+- 详细变更历史（field_path / previous / applied）仅通过 idempotency result snapshot 有条件保存。
+- `convergence_reason` 语义过载：preview 中表示收敛原因，apply 中被赋值为 result.status。
+- `quality_before` / `quality_after_preview` 在 apply 记录中始终为 None。
+
+### 推荐下一步
+- **Phase H.4.1**（Backend task_type Filter）：AttemptStore 新增 task_type 筛选方法，API 新增 task_type query 参数。
+- 理由：改动最小、无前端依赖、解锁 H.5、风险极低。
+
+### 修改文件
+- `project-docs/DEEP_SYNTHESIS_APPLY_AUDIT_HISTORY_PLAN.md` — 规划文档（新增）
+- `project-docs/PROGRESS.md` — 进度更新
+
+### 阻断问题
+- 无
+
+---
 
 ## 2026-06-17 Phase H.3: Deep Synthesis Multi-Asset Apply Verification
 
