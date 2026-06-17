@@ -7,9 +7,45 @@
   - 下部"历史详细记录"：保留过去每一轮修复动作，不删历史，便于回溯排查。
   - 文末新增记录继续按日期追加，但不再依赖对话记忆维护全局判断。
 - 阅读建议：
-  - 想知道系统现在到了哪一步，先看"2026-06-17 Phase G.4.3"和"2026-04-18 阶段审计结论"。
+  - 想知道系统现在到了哪一步，先看"2026-06-17 Phase G.4.4"和"2026-04-18 阶段审计结论"。
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
 - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
+
+## 2026-06-17 Phase G.4.4: Deep Synthesis MVP Closeout
+
+### 本轮完成
+- **MVP 验证**：使用 synthetic asset 端到端验证 Deep Synthesis apply 全流程
+  - 创建 synthetic character asset (qa-character-apply-001, v1)
+  - Dry run：status="dry_run", applied_count=0, rejected/undecided 均跳过
+  - Confirm apply：status="success", applied_count=1, 仅 accepted change 写入
+  - Conflict (version mismatch)：409, reason="version_mismatch", 不写入
+  - Conflict (current_value mismatch)：409, reason="current_value_mismatch", 不写入
+  - 安全验证：API 响应中无 forbidden fields
+
+- **测试结果**：
+  - 后端：71 passed（55 service + 16 API）
+  - 前端：200 passed
+  - tsc：零错误
+  - build：成功
+
+### 修改文件
+- `project-docs/visual-audits/deep-synthesis-g4.4.md` — MVP Closeout 报告（新增）
+- `project-docs/visual-audits/deep-synthesis-g4.4-extract-page.png` — 截图（新增）
+- `project-docs/PROGRESS.md` — 进度更新
+
+### 阻断问题
+* 无
+
+### MVP decision
+- **Deep Synthesis MVP status: complete**
+- 所有验证步骤通过，apply 全流程（preview → selection → dry run → confirm → conflict detection）端到端验证完成
+
+### 下一步建议
+- 可选：前端 apply flow E2E 浏览器测试
+- 可选：多 asset 批量 apply 测试
+- 可选：idempotency key 重复提交测试
+
+---
 
 ## 2026-06-17 Phase G.4.3: Deep Synthesis Apply Flow Visual QA / E2E Verification
 
