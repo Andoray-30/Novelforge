@@ -131,8 +131,27 @@ class AttemptStore:
             return None
         return AttemptRecord(**data)
 
-    async def list_by_session(self, session_id: str) -> List[AttemptRecord]:
-        """List all attempts for a given session."""
+    async def list_by_session(
+        self,
+        session_id: str,
+        task_type: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: int = 0,
+    ) -> List[AttemptRecord] | tuple[List[AttemptRecord], int]:
+        results = await self._load_session_records(session_id=session_id, task_type=task_type)
+        if limit is None and offset == 0:
+            return results
+
+        bounded_limit = min(max(limit if limit is not None else 50, 1), 200)
+        bounded_offset = max(offset, 0)
+        total = len(results)
+        return results[bounded_offset : bounded_offset + bounded_limit], total
+
+    async def _load_session_records(
+        self,
+        session_id: str,
+        task_type: Optional[str] = None,
+    ) -> List[AttemptRecord]:
         all_keys = await self._storage.list_keys()
         attempt_keys = [k for k in all_keys if k.startswith(ATTEMPT_KEY_PREFIX)]
 
@@ -140,6 +159,8 @@ class AttemptStore:
         for key in attempt_keys:
             data = await self._storage.load(key)
             if data and data.get("session_id") == session_id:
+                if task_type and data.get("task_type") != task_type:
+                    continue
                 results.append(AttemptRecord(**data))
 
         results.sort(key=lambda r: (r.chapter_order, r.attempt_number))
@@ -161,10 +182,10 @@ class AttemptStore:
         results.sort(key=lambda r: r.attempt_number)
         return results
 
-    async def stats(self, session_id: Optional[str] = None) -> AttemptStats:
+    async def stats(self, session_id: Optional[str] = None, task_type: Optional[str] = None) -> AttemptStats:
         """Compute aggregate statistics for attempts."""
         if session_id:
-            records = await self.list_by_session(session_id)
+            records = await self._load_session_records(session_id=session_id, task_type=task_type)
         else:
             all_keys = await self._storage.list_keys()
             attempt_keys = [k for k in all_keys if k.startswith(ATTEMPT_KEY_PREFIX)]
@@ -172,6 +193,8 @@ class AttemptStore:
             for key in attempt_keys:
                 data = await self._storage.load(key)
                 if data:
+                    if task_type and data.get("task_type") != task_type:
+                        continue
                     records.append(AttemptRecord(**data))
 
         if not records:

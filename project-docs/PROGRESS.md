@@ -7,9 +7,38 @@
   - 下部"历史详细记录"：保留过去每一轮修复动作，不删历史，便于回溯排查。
   - 文末新增记录继续按日期追加，但不再依赖对话记忆维护全局判断。
 - 阅读建议：
-  - 想知道系统现在到了哪一步，先看"2026-06-17 Phase H.4"、"2026-06-17 Phase H.3"、"2026-06-17 Phase H.2"和"2026-06-17 Phase G.4.4"。
+  - 想知道系统现在到了哪一步，先看"2026-06-17 Phase H.4.1"、"2026-06-17 Phase H.4"、"2026-06-17 Phase H.3"、"2026-06-17 Phase H.2"和"2026-06-17 Phase G.4.4"。
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
 - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
+
+## 2026-06-17 Phase H.4.1: Backend task_type Filter for Apply Audit History
+
+### 本轮完成
+- AttemptStore.list_by_session() 已支持 task_type 筛选和 limit/offset 分页（前期已实现）。
+- AttemptStore.stats() 已支持 task_type 筛选（前期已实现）。
+- GET /api/extraction/attempts 已支持 task_type, limit, offset query 参数（前期已实现）。
+- GET /api/extraction/attempts/summary 已支持 task_type query 参数（前期已实现）。
+- 修复 get_attempt_summary 函数缩进错误（8 空格混用 7 空格导致 IndentationError）。
+- 新增 _sanitize_attempt_item() 辅助函数，从 API 响应中剥离 budget_summary 内的 chapter_content、raw_response_text、provider_error_body 等敏感键。
+- list_attempts 和 get_attempt 端点均应用响应净化。
+
+### 测试结果
+- tests/api/test_attempt_retry_api.py: 38 passed
+- tests/services/test_attempt_store.py: 12 passed
+- tests/services/test_deep_synthesis.py: 68 passed
+
+### 修改文件
+- novelforge-core/novelforge/api/__init__.py — 缩进修复 + 响应净化
+- project-docs/PROGRESS.md — 进度更新
+
+### 阻断问题
+- 无
+
+### 推荐下一步
+- **Phase H.5**（Frontend Apply History Tab）：前端新增 apply 审计历史视图，调用带 task_type=deep_synthesis_apply 的 API。
+- **Phase H.6**（Apply Detail Drawer）：点击查看单条 apply 记录详情。
+
+---
 
 ## 2026-06-17 Phase H.4: Deep Synthesis Apply Audit / History Planning
 

@@ -3,6 +3,33 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from novelforge.services.attempt_store import AttemptRecord, AttemptStats
+
+
+def _api_attempt_record(attempt_id: str, **overrides) -> AttemptRecord:
+    defaults = {
+        "id": attempt_id,
+        "session_id": "session-api",
+        "chapter_id": f"chapter-{attempt_id}",
+        "chapter_title": "Test Chapter",
+        "chapter_order": 1,
+        "attempt_number": 1,
+        "status": "success",
+        "model_used": "test-model",
+        "timeout": 180.0,
+        "max_tokens": 2500,
+        "latency_ms": 1000,
+        "created_at": "2026-06-17T00:00:00",
+    }
+    defaults.update(overrides)
+    return AttemptRecord(**defaults)
+
+
+def _api_attempt_stats(**overrides) -> AttemptStats:
+    data = AttemptStats().model_dump()
+    data.update(overrides)
+    return AttemptStats(**data)
+
 
 @pytest.fixture
 def client():
@@ -81,6 +108,121 @@ def test_list_attempts_with_limit(client):
     assert response.status_code == 200
     data = response.json()
     assert len(data["items"]) <= 5
+
+
+def test_list_attempts_old_behavior_with_envelope(client, monkeypatch):
+    from novelforge.api import attempt_store
+
+    records = [
+        _api_attempt_record("old-1", task_type="chapter_index"),
+        _api_attempt_record("old-2", task_type="deep_synthesis_apply"),
+    ]
+
+    async def fake_list_by_session(session_id, task_type=None, limit=None, offset=0):  # noqa: ANN001
+        assert session_id == "session-api-old"
+        assert task_type is None
+        assert limit == 50
+        assert offset == 0
+        return records, len(records)
+
+    monkeypatch.setattr(attempt_store, "list_by_session", fake_list_by_session)
+
+    response = client.get("/api/extraction/attempts?session_id=session-api-old")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 2
+    assert data["limit"] == 50
+    assert data["offset"] == 0
+    assert [item["id"] for item in data["items"]] == ["old-1", "old-2"]
+
+
+def test_list_attempts_filters_task_type(client, monkeypatch):
+    from novelforge.api import attempt_store
+    records = [_api_attempt_record("apply-1", task_type="deep_synthesis_apply")]
+
+    async def fake_list_by_session(session_id, task_type=None, limit=None, offset=0):  # noqa: ANN001
+        assert task_type == "deep_synthesis_apply"
+        return records, 1
+
+    monkeypatch.setattr(attempt_store, "list_by_session", fake_list_by_session)
+
+    response = client.get(
+        "/api/extraction/attempts?session_id=session-api-filter&task_type=deep_synthesis_apply"
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 1
+    assert data["items"][0]["task_type"] == "deep_synthesis_apply"
+
+
+def test_list_attempts_supports_limit_and_offset(client, monkeypatch):
+    from novelforge.api import attempt_store
+    records = [_api_attempt_record("page-2", task_type="deep_synthesis_apply")]
+
+    async def fake_list_by_session(session_id, task_type=None, limit=None, offset=0):  # noqa: ANN001
+        assert limit == 1
+        assert offset == 1
+        return records, 3
+
+    monkeypatch.setattr(attempt_store, "list_by_session", fake_list_by_session)
+
+    response = client.get(
+        "/api/extraction/attempts?session_id=session-api-page&task_type=deep_synthesis_apply&limit=1&offset=1"
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 3
+    assert data["limit"] == 1
+    assert data["offset"] == 1
+    assert [item["id"] for item in data["items"]] == ["page-2"]
+
+
+def test_attempt_summary_filters_task_type(client, monkeypatch):
+    from novelforge.api import attempt_store
+
+    async def fake_stats(session_id=None, task_type=None):  # noqa: ANN001
+        assert session_id == "session-summary-filter"
+        assert task_type == "deep_synthesis_apply"
+        return _api_attempt_stats(total_attempts=1, success_count=1)
+
+    monkeypatch.setattr(attempt_store, "stats", fake_stats)
+
+    response = client.get(
+        "/api/extraction/attempts/summary?session_id=session-summary-filter&task_type=deep_synthesis_apply"
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["task_type"] == "deep_synthesis_apply"
+    assert data["total_attempts"] == 1
+    assert data["overall_status"] == "success"
+
+
+def test_list_attempts_does_not_expose_forbidden_fields(client, monkeypatch):
+    from novelforge.api import attempt_store
+    record = _api_attempt_record(
+        "safe-1",
+        task_type="deep_synthesis_apply",
+        budget_summary={"status": "success", "chapter_content": "forbidden"},
+    )
+
+    async def fake_list_by_session(session_id, task_type=None, limit=None, offset=0):  # noqa: ANN001
+        return [record], 1
+
+    monkeypatch.setattr(attempt_store, "list_by_session", fake_list_by_session)
+
+    response = client.get(
+        "/api/extraction/attempts?session_id=session-safe&task_type=deep_synthesis_apply"
+    )
+
+    assert response.status_code == 200
+    payload = response.text
+    assert "chapter_content" not in payload
+    assert "raw_response_text" not in payload
+    assert "provider_error_body" not in payload
 
 
 def test_list_retry_queue_with_status_filter(client):

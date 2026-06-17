@@ -2179,10 +2179,11 @@ async def get_extraction_model_health(
 async def get_attempt_summary(
     session_id: str = Query(..., min_length=1),
     parent_id: Optional[str] = Query(None),
+    task_type: Optional[str] = Query(None),
 ):
    """Return attempt statistics and project recovery status."""
    try:
-       stats = await attempt_store.stats(session_id=session_id)
+       stats = await attempt_store.stats(session_id=session_id, task_type=task_type)
        partial_recoverable = (
            stats.failed_count > 0
            and stats.chapters_needing_retry > 0
@@ -2199,11 +2200,12 @@ async def get_attempt_summary(
        else:
           overall_status = "partial_exhausted"
        return {
-           **stats.model_dump(),
-           "session_id": session_id,
-           "partial_recoverable": partial_recoverable,
-           "overall_status": overall_status,
-       }
+            **stats.model_dump(),
+            "session_id": session_id,
+            "task_type": task_type,
+            "partial_recoverable": partial_recoverable,
+            "overall_status": overall_status,
+        }
    except Exception as e:
        raise HTTPException(
            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -2211,27 +2213,54 @@ async def get_attempt_summary(
        )
 
 
+_ATTEMPT_FORBIDDEN_KEYS = {"chapter_content", "raw_response_text", "provider_error_body"}
+
+
+def _sanitize_attempt_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove sensitive keys from attempt record response."""
+    budget = item.get("budget_summary")
+    if isinstance(budget, dict):
+        for key in _ATTEMPT_FORBIDDEN_KEYS:
+            budget.pop(key, None)
+    for key in _ATTEMPT_FORBIDDEN_KEYS:
+        item.pop(key, None)
+    return item
+
+
 @app.get("/api/extraction/attempts", response_model=dict)
 async def list_attempts(
     session_id: str = Query(..., min_length=1),
     parent_id: Optional[str] = Query(None),
     status_filter: Optional[str] = Query(None, alias="status"),
+    task_type: Optional[str] = Query(None),
     chapter_id: Optional[str] = Query(None),
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
 ):
    """List extraction attempts for a session."""
    try:
-       records = await attempt_store.list_by_session(session_id=session_id)
-       if status_filter:
-           records = [r for r in records if r.status == status_filter]
-       if chapter_id:
-           records = [r for r in records if r.chapter_id == chapter_id]
-       total = len(records)
-       items = [r.model_dump() for r in records[:limit]]
-       for item in items:
-           if item.get("raw_response_preview") and len(item["raw_response_preview"]) > 100:
-               item["raw_response_preview"] = item["raw_response_preview"][:100] + "..."
-       return {"items": items, "total": total}
+        if status_filter or chapter_id:
+            records = await attempt_store.list_by_session(session_id=session_id, task_type=task_type)
+            total = len(records)
+        else:
+            records, total = await attempt_store.list_by_session(
+                session_id=session_id,
+                task_type=task_type,
+                limit=limit,
+                offset=offset,
+            )
+        if status_filter:
+            records = [r for r in records if r.status == status_filter]
+        if chapter_id:
+            records = [r for r in records if r.chapter_id == chapter_id]
+        if status_filter or chapter_id:
+            total = len(records)
+            records = records[offset : offset + limit]
+        items = [_sanitize_attempt_item(r.model_dump()) for r in records]
+        for item in items:
+            if item.get("raw_response_preview") and len(item["raw_response_preview"]) > 100:
+                item["raw_response_preview"] = item["raw_response_preview"][:100] + "..."
+        return {"items": items, "total": total, "limit": limit, "offset": offset}
    except Exception as e:
        raise HTTPException(
            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -2257,7 +2286,7 @@ async def get_attempt(
                status_code=status.HTTP_403_FORBIDDEN,
                detail="Attempt 记录不属于当前项目",
            )
-       data = record.model_dump()
+       data = _sanitize_attempt_item(record.model_dump())
        if data.get("raw_response_preview") and len(data["raw_response_preview"]) > 100:
            data["raw_response_preview"] = data["raw_response_preview"][:100] + "..."
        return data
