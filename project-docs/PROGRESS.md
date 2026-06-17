@@ -7,9 +7,27 @@
   - 下部"历史详细记录"：保留过去每一轮修复动作，不删历史，便于回溯排查。
   - 文末新增记录继续按日期追加，但不再依赖对话记忆维护全局判断。
 - 阅读建议：
-  - 想知道系统现在到了哪一步，先看"2026-06-17 Phase G.4.4"和"2026-04-18 阶段审计结论"。
+  - 想知道系统现在到了哪一步，先看"2026-06-17 Phase G.5"和"2026-06-17 Phase G.4.4"。
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
 - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
+
+## 2026-06-17 Phase G.5: Deep Synthesis Post-MVP Hardening Backlog & Release Notes
+
+### 本轮完成
+* Deep Synthesis MVP Release Notes
+* Post-MVP Hardening Backlog
+* PROGRESS.md 状态更新
+
+### 当前状态
+* Deep Synthesis MVP: Complete
+* Phase G: Complete
+* Next recommended phase: Phase H.0 - System Reliability Cleanup / Baseline Fix
+
+### 下一步建议
+* H.0 优先处理 performance-profile global scope 两个既有失败
+* 然后再进入 Deep Synthesis post-MVP hardening P0/P1
+
+---
 
 ## 2026-06-17 Phase G.4.4: Deep Synthesis MVP Closeout
 
