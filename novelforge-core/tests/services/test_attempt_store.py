@@ -212,6 +212,28 @@ async def test_attempt_store_list_by_session():
 
 
 @pytest.mark.asyncio
+async def test_attempt_store_list_by_session_filters_task_type_and_paginates():
+    storage = MemoryStorage()
+    store = AttemptStore(storage_manager=storage)
+
+    await store.record(_make_record(id="a1", task_type="chapter_index", chapter_order=1))
+    await store.record(_make_record(id="a2", task_type="deep_synthesis_apply", chapter_order=2))
+    await store.record(_make_record(id="a3", task_type="deep_synthesis_apply", chapter_order=3))
+    await store.record(_make_record(id="a4", task_type="deep_synthesis_apply", chapter_order=4))
+
+    items, total = await store.list_by_session(
+        "session-a",
+        task_type="deep_synthesis_apply",
+        limit=2,
+        offset=1,
+    )
+
+    assert total == 3
+    assert [record.id for record in items] == ["a3", "a4"]
+    assert all(record.task_type == "deep_synthesis_apply" for record in items)
+
+
+@pytest.mark.asyncio
 async def test_attempt_store_list_by_chapter():
     """AttemptStore 必须能按 chapter_id 查询。"""
     storage = MemoryStorage()
