@@ -11,9 +11,10 @@ const PAGE_SIZE = 10;
 interface DeepSynthesisApplyHistoryProps {
   sessionId: string | null;
   parentId?: string | null;
+  refreshKey?: number;
 }
 
-export function DeepSynthesisApplyHistory({ sessionId, parentId }: DeepSynthesisApplyHistoryProps) {
+export function DeepSynthesisApplyHistory({ sessionId, parentId, refreshKey }: DeepSynthesisApplyHistoryProps) {
   const [items, setItems] = useState<ExtractionApplyHistoryItem[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
@@ -47,6 +48,12 @@ export function DeepSynthesisApplyHistory({ sessionId, parentId }: DeepSynthesis
   useEffect(() => {
     void loadHistory(0);
   }, [loadHistory]);
+
+  useEffect(() => {
+    if (refreshKey !== undefined && refreshKey > 0) {
+      void loadHistory(0);
+    }
+  }, [refreshKey, loadHistory]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const currentPage = Math.floor(offset / PAGE_SIZE) + 1;

@@ -724,6 +724,7 @@ export default function ExtractPage() {
   const [deepSynthesisApplyError, setDeepSynthesisApplyError] = useState<string | null>(null);
   const [deepSynthesisDryRunPassed, setDeepSynthesisDryRunPassed] = useState(false);
   const [deepSynthesisApplyCompleted, setDeepSynthesisApplyCompleted] = useState(false);
+  const [applyRefreshKey, setApplyRefreshKey] = useState(0);
   const [deepSynthesisApplyIdempotencyKey, setDeepSynthesisApplyIdempotencyKey] = useState<string | null>(null);
 
   function createDeepSynthesisApplyIdempotencyKey(): string {
@@ -1370,6 +1371,7 @@ export default function ExtractPage() {
       setDeepSynthesisApplyResult(result);
       if (result.status === 'success' || result.status === 'partial') {
         setDeepSynthesisApplyCompleted(true);
+        setApplyRefreshKey((prev) => prev + 1);
       }
     } catch (error) {
       const structuredResult = extractStructuredApplyResult(error);
@@ -2246,6 +2248,7 @@ export default function ExtractPage() {
           <DeepSynthesisApplyHistory
             sessionId={completedResult?.session_id || savedSummary?.sessionId || currentSessionId}
             parentId={completedResult?.parent_id || null}
+            refreshKey={applyRefreshKey}
           />
         </section>
 
