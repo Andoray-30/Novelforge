@@ -7,11 +7,46 @@
   - 下部"历史详细记录"：保留过去每一轮修复动作，不删历史，便于回溯排查。
   - 文末新增记录继续按日期追加，但不再依赖对话记忆维护全局判断。
 - 阅读建议：
-  - 想知道系统现在到了哪一步，先看"2026-06-17 Phase H.4.1"、"2026-06-17 Phase H.4"、"2026-06-17 Phase H.3"、"2026-06-17 Phase H.2"和"2026-06-17 Phase G.4.4"。
+  - 想知道系统现在到了哪一步，先看"2026-06-18 Phase H.5"、"2026-06-17 Phase H.4.1"、"2026-06-17 Phase H.4"、"2026-06-17 Phase H.3"、"2026-06-17 Phase H.2"和"2026-06-17 Phase G.4.4"。
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
 - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
 
-## 2026-06-17 Phase H.4.1: Backend task_type Filter for Apply Audit History
+## 2026-06-18 Phase H.5: Frontend Apply History Tab
+
+### 本轮完成
+- 在 `types/index.ts` 新增 `ExtractionAttemptListResponse` 和 `ExtractionApplyHistoryItem` 接口，定义 apply 历史 API 响应结构。
+- 在 `deep-synthesis-utils.ts` 新增 `extractApplyHistoryCounts()` 和 `formatApplyHistoryStatus()` 工具函数。
+  - `extractApplyHistoryCounts`：从 `parsed_candidate_counts` 提取 applied/skipped/conflicts/dry_run 和 acceptance_rate。
+  - `formatApplyHistoryStatus`：将 status 映射为中文标签和色调（success/warning/danger/neutral）。
+- 新增 `deep-synthesis-apply-history.tsx` 组件，支持 loading/empty/error/list 四种状态，含分页和刷新。
+- 在 `novelforge-api.ts` 的 `extractionAttemptService` 新增 `listApplyHistory` 方法，支持 task_type/limit/offset 参数。
+- 将 `DeepSynthesisApplyHistory` 集成到 `/extract` 页面，位于 Deep Synthesis Preview 面板下方。
+- 新增 `deep-synthesis-apply-history.test.tsx` 组件测试（8 个用例）。
+- 在 `deep-synthesis-utils.test.ts` 新增 8 个工具函数测试用例。
+
+### 测试结果
+- npm test -- --run: 35 files, 220 tests passed
+- npx tsc --noEmit --incremental false: 0 errors
+- npm run build: Compiled successfully
+
+### 修改文件
+- `novelforge-core/frontend/src/types/index.ts` — 新增 ExtractionAttemptListResponse、ExtractionApplyHistoryItem
+- `novelforge-core/frontend/src/app/extract/deep-synthesis-utils.ts` — 新增 extractApplyHistoryCounts、formatApplyHistoryStatus
+- `novelforge-core/frontend/src/app/extract/deep-synthesis-utils.test.ts` — 新增 8 个测试用例
+- `novelforge-core/frontend/src/app/extract/deep-synthesis-apply-history.tsx` — 新增组件
+- `novelforge-core/frontend/src/app/extract/deep-synthesis-apply-history.test.tsx` — 新增 8 个组件测试
+- `novelforge-core/frontend/src/lib/api/novelforge-api.ts` — 新增 listApplyHistory 方法、task_type/offset 参数
+- `novelforge-core/frontend/src/app/extract/page.tsx` — 集成 Apply History 组件
+- `project-docs/PROGRESS.md` — 进度更新
+
+### 阻断问题
+- 无
+
+### 推荐下一步
+- **Phase H.6**（Apply Detail Drawer）：点击查看单条 apply 记录详情。
+- **Phase H.7**（Apply History 高级筛选）：按时间范围、status 筛选。
+
+---
 
 ### 本轮完成
 - AttemptStore.list_by_session() 已支持 task_type 筛选和 limit/offset 分页（前期已实现）。

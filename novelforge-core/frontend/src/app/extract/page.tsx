@@ -24,6 +24,7 @@ import { chapterIndexRunService, contentService, extractionAttemptService, model
 import { isAPIError } from '@/lib/api/client';
 import { buildAssetQualityDiagnostics, type AssetQualityDiagnosticsResult } from '@/lib/asset-quality-diagnostics';
 import { DeepSynthesisPreviewPanel } from './deep-synthesis-preview';
+import { DeepSynthesisApplyHistory } from './deep-synthesis-apply-history';
 import { buildDeepSynthesisSelectionState, deriveAcceptedRejectedIds, buildDeepSynthesisApplyRequest } from './deep-synthesis-utils';
 import { DeepSynthesisResult, DeepSynthesisBudgetTier, DeepSynthesisScopeType, DeepSynthesisApplyResult } from '@/types';
 import {
@@ -2237,6 +2238,14 @@ export default function ExtractPage() {
             onConfirmApply={handleConfirmDeepSynthesisApply}
             dryRunPassed={deepSynthesisDryRunPassed}
             applyCompleted={deepSynthesisApplyCompleted}
+          />
+        </section>
+
+        {/* Deep Synthesis Apply History Section */}
+        <section className="mt-5">
+          <DeepSynthesisApplyHistory
+            sessionId={completedResult?.session_id || savedSummary?.sessionId || currentSessionId}
+            parentId={completedResult?.parent_id || null}
           />
         </section>
 

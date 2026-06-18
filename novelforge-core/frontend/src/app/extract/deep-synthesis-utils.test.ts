@@ -17,8 +17,10 @@ import {
   formatApplySkipReason,
   hasApplyConflicts,
   canConfirmRealApplyAfterDryRun,
+  extractApplyHistoryCounts,
+  formatApplyHistoryStatus,
 } from './deep-synthesis-utils';
-import type { ProposedChange, DeepSynthesisResult, DeepSynthesisPreview, DeepSynthesisApplyResult } from '@/types';
+import type { ProposedChange, DeepSynthesisResult, DeepSynthesisPreview, DeepSynthesisApplyResult, ExtractionApplyHistoryItem } from '@/types';
 
 describe('Deep Synthesis Utils', () => {
   describe('formatDeepSynthesisBudgetTier', () => {
@@ -415,6 +417,76 @@ describe('Deep Synthesis Utils', () => {
         task_type: 'deep_synthesis_apply',
       };
       expect(canConfirmRealApplyAfterDryRun(successResult)).toBe(false);
+    });
+  });
+
+  describe('extractApplyHistoryCounts', () => {
+    it('extracts counts from a full apply history item', () => {
+      const item: ExtractionApplyHistoryItem = {
+        id: 'a1',
+        status: 'success',
+        parsed_candidate_counts: { applied: 5, skipped: 2, conflicts: 1 },
+        user_acceptance_rate: 0.8,
+      };
+      const counts = extractApplyHistoryCounts(item);
+      expect(counts.applied).toBe(5);
+      expect(counts.skipped).toBe(2);
+      expect(counts.conflicts).toBe(1);
+      expect(counts.dryRun).toBe(false);
+      expect(counts.acceptanceRate).toBe('80%');
+    });
+
+    it('handles missing parsed_candidate_counts', () => {
+      const item: ExtractionApplyHistoryItem = { id: 'a2', status: 'partial' };
+      const counts = extractApplyHistoryCounts(item);
+      expect(counts.applied).toBe(0);
+      expect(counts.skipped).toBe(0);
+      expect(counts.conflicts).toBe(0);
+      expect(counts.dryRun).toBe(false);
+      expect(counts.acceptanceRate).toBe('—');
+    });
+
+    it('detects dry_run flag', () => {
+      const item: ExtractionApplyHistoryItem = {
+        id: 'a3',
+        status: 'dry_run',
+        parsed_candidate_counts: { dry_run: true, applied: 3 },
+      };
+      const counts = extractApplyHistoryCounts(item);
+      expect(counts.dryRun).toBe(true);
+      expect(counts.applied).toBe(3);
+    });
+  });
+
+  describe('formatApplyHistoryStatus', () => {
+    it('formats success status', () => {
+      const result = formatApplyHistoryStatus('success');
+      expect(result.label).toBe('成功');
+      expect(result.tone).toBe('success');
+    });
+
+    it('formats partial status', () => {
+      const result = formatApplyHistoryStatus('partial');
+      expect(result.label).toBe('部分成功');
+      expect(result.tone).toBe('warning');
+    });
+
+    it('formats failed status', () => {
+      const result = formatApplyHistoryStatus('failed');
+      expect(result.label).toBe('失败');
+      expect(result.tone).toBe('danger');
+    });
+
+    it('formats dry_run status', () => {
+      const result = formatApplyHistoryStatus('dry_run');
+      expect(result.label).toBe('预检');
+      expect(result.tone).toBe('neutral');
+    });
+
+    it('handles null status', () => {
+      const result = formatApplyHistoryStatus(null);
+      expect(result.label).toBe('未知');
+      expect(result.tone).toBe('neutral');
     });
   });
 });

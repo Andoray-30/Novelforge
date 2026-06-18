@@ -764,6 +764,28 @@ export interface RetryExtractionAttemptResponse {
   status: string;
 }
 
+export interface ExtractionAttemptListResponse {
+  items: ExtractionApplyHistoryItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface ExtractionApplyHistoryItem {
+  id: string;
+  task_type?: string | null;
+  session_id?: string | null;
+  created_at?: string | null;
+  status?: string | null;
+  latency_ms?: number | null;
+  parsed_candidate_counts?: Record<string, number | boolean | string | null> | null;
+  budget_summary?: Record<string, unknown> | null;
+  proposed_change_count?: number | null;
+  unresolved_conflict_count?: number | null;
+  user_acceptance_rate?: number | null;
+  convergence_reason?: string | null;
+}
+
 // === Deep Synthesis Types (aligned with backend deep_synthesis_models.py) ===
 
 export type DeepSynthesisBudgetTier = 'low' | 'medium' | 'high';

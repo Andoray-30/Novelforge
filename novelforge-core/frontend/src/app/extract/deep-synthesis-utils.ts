@@ -9,6 +9,7 @@ import {
   DeepSynthesisApplyResult,
   DeepSynthesisApplySkipReason,
   DeepSynthesisPreview,
+  type ExtractionApplyHistoryItem,
 } from '@/types';
 
 export function formatDeepSynthesisBudgetTier(tier: DeepSynthesisBudgetTier | string): string {
@@ -245,4 +246,40 @@ export function hasApplyConflicts(result: DeepSynthesisApplyResult): boolean {
 export function canConfirmRealApplyAfterDryRun(result: DeepSynthesisApplyResult | null): boolean {
   if (!result) return false;
   return result.status === 'dry_run' && !hasApplyConflicts(result);
+}
+
+export function extractApplyHistoryCounts(attempt: ExtractionApplyHistoryItem): {
+  applied: number;
+  skipped: number;
+  conflicts: number;
+  dryRun: boolean;
+  acceptanceRate: string;
+} {
+  const counts = attempt.parsed_candidate_counts ?? {};
+  const applied = typeof counts.applied === 'number' ? counts.applied : 0;
+  const skipped = typeof counts.skipped === 'number' ? counts.skipped : 0;
+  const conflicts = typeof counts.conflicts === 'number' ? counts.conflicts : 0;
+  const dryRun = counts.dry_run === true;
+  const acceptanceRate = typeof attempt.user_acceptance_rate === 'number'
+    ? `${Math.round(attempt.user_acceptance_rate * 100)}%`
+    : '—';
+  return { applied, skipped, conflicts, dryRun, acceptanceRate };
+}
+
+export function formatApplyHistoryStatus(status: string | null | undefined): {
+  label: string;
+  tone: 'success' | 'warning' | 'danger' | 'neutral';
+} {
+  switch (status) {
+    case 'success':
+      return { label: '成功', tone: 'success' };
+    case 'partial':
+      return { label: '部分成功', tone: 'warning' };
+    case 'failed':
+      return { label: '失败', tone: 'danger' };
+    case 'dry_run':
+      return { label: '预检', tone: 'neutral' };
+    default:
+      return { label: status || '未知', tone: 'neutral' };
+  }
 }

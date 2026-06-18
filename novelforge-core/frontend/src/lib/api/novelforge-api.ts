@@ -33,6 +33,8 @@ import {
   DeepSynthesisApplyResult,
   ExtractionAttemptSummary,
   ExtractionAttempt,
+  ExtractionAttemptListResponse,
+  ExtractionApplyHistoryItem,
   RetryExtractionAttemptResponse,
   RetryQueueSummary,
   RetryJob,
@@ -645,13 +647,24 @@ export const extractionAttemptService = {
     return novelforgeClient.get<ExtractionAttemptSummary>(`/api/extraction/attempts/summary?${query}`);
   },
 
-  list: (params: { sessionId: string; parentId?: string | null; status?: string; chapterId?: string | null; limit?: number }) => {
+  list: (params: { sessionId: string; parentId?: string | null; status?: string; chapterId?: string | null; limit?: number; taskType?: string; offset?: number }) => {
     const query = new URLSearchParams({ session_id: params.sessionId });
     if (params.parentId) query.set('parent_id', params.parentId);
     if (params.status) query.set('status', params.status);
     if (params.chapterId) query.set('chapter_id', params.chapterId);
     if (params.limit) query.set('limit', String(params.limit));
+    if (params.taskType) query.set('task_type', params.taskType);
+    if (params.offset) query.set('offset', String(params.offset));
     return novelforgeClient.get<{ items: ExtractionAttempt[]; total: number }>(`/api/extraction/attempts?${query}`);
+  },
+
+  listApplyHistory: (params: { sessionId: string; parentId?: string | null; taskType?: string; limit?: number; offset?: number }) => {
+    const query = new URLSearchParams({ session_id: params.sessionId });
+    if (params.parentId) query.set('parent_id', params.parentId);
+    if (params.taskType) query.set('task_type', params.taskType);
+    if (params.limit) query.set('limit', String(params.limit));
+    if (params.offset) query.set('offset', String(params.offset));
+    return novelforgeClient.get<ExtractionAttemptListResponse>(`/api/extraction/attempts?${query}`);
   },
 
   get: (attemptId: string, params: { sessionId: string }) => {
