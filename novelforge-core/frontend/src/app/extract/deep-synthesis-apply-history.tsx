@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { History, Loader2, RefreshCw, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { History, Loader2, RefreshCw, AlertCircle, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
 import { extractionAttemptService } from '@/lib/api';
-import type { ExtractionApplyHistoryItem } from '@/types';
+import type { DeepSynthesisApplyHistoryDetail, ExtractionApplyHistoryItem } from '@/types';
 import { extractApplyHistoryCounts, formatApplyHistoryStatus } from './deep-synthesis-utils';
+import { DeepSynthesisApplyDetailDrawer } from './deep-synthesis-apply-detail-drawer';
 
 const PAGE_SIZE = 10;
 
@@ -20,6 +21,10 @@ export function DeepSynthesisApplyHistory({ sessionId, parentId, refreshKey }: D
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detail, setDetail] = useState<DeepSynthesisApplyHistoryDetail | null>(null);
 
   const loadHistory = useCallback(async (pageOffset: number) => {
     if (!sessionId) return;
@@ -57,6 +62,22 @@ export function DeepSynthesisApplyHistory({ sessionId, parentId, refreshKey }: D
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const currentPage = Math.floor(offset / PAGE_SIZE) + 1;
+
+  const openDetail = useCallback(async (attemptId: string) => {
+    if (!sessionId) return;
+    setDetailOpen(true);
+    setDetailLoading(true);
+    setDetailError(null);
+    setDetail(null);
+    try {
+      const nextDetail = await extractionAttemptService.getApplyHistoryDetail({ sessionId, attemptId });
+      setDetail(nextDetail);
+    } catch (err) {
+      setDetailError(err instanceof Error ? err.message : '加载应用详情失败');
+    } finally {
+      setDetailLoading(false);
+    }
+  }, [sessionId]);
 
   if (!sessionId) {
     return (
@@ -152,6 +173,14 @@ export function DeepSynthesisApplyHistory({ sessionId, parentId, refreshKey }: D
                         {item.task_type ? ` · ${item.task_type}` : ''}
                       </p>
                     </div>
+                    <button
+                      type="button"
+                      className="nf-button nf-button--secondary text-xs"
+                      onClick={() => void openDetail(item.id)}
+                    >
+                      <Eye className="h-4 w-4" />
+                      查看详情
+                    </button>
                   </div>
                   <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                     {[
@@ -208,6 +237,13 @@ export function DeepSynthesisApplyHistory({ sessionId, parentId, refreshKey }: D
           ) : null}
         </>
       )}
+      <DeepSynthesisApplyDetailDrawer
+        open={detailOpen}
+        detail={detail}
+        loading={detailLoading}
+        error={detailError}
+        onClose={() => setDetailOpen(false)}
+      />
     </div>
   );
 }

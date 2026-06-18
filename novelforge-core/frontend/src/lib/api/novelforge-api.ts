@@ -35,6 +35,7 @@ import {
   ExtractionAttempt,
   ExtractionAttemptListResponse,
   ExtractionApplyHistoryItem,
+  DeepSynthesisApplyHistoryDetail,
   RetryExtractionAttemptResponse,
   RetryQueueSummary,
   RetryJob,
@@ -670,6 +671,60 @@ export const extractionAttemptService = {
   get: (attemptId: string, params: { sessionId: string }) => {
     const query = new URLSearchParams({ session_id: params.sessionId });
     return novelforgeClient.get<ExtractionAttempt>(`/api/extraction/attempts/${encodeURIComponent(attemptId)}?${query}`);
+  },
+
+  getApplyHistoryDetail: async (params: { sessionId: string; attemptId: string }): Promise<DeepSynthesisApplyHistoryDetail> => {
+    const query = new URLSearchParams({ session_id: params.sessionId });
+    const attempt = await novelforgeClient.get<ExtractionApplyHistoryItem & Record<string, unknown>>(
+      `/api/extraction/attempts/${encodeURIComponent(params.attemptId)}?${query}`,
+    );
+    const counts = attempt.parsed_candidate_counts ?? {};
+    const budgetSummary = attempt.budget_summary && typeof attempt.budget_summary === 'object'
+      ? attempt.budget_summary as Record<string, unknown>
+      : {};
+    const idempotency = budgetSummary.idempotency && typeof budgetSummary.idempotency === 'object'
+      ? budgetSummary.idempotency as Record<string, unknown>
+      : null;
+    const snapshot = idempotency?.result_snapshot && typeof idempotency.result_snapshot === 'object'
+      ? idempotency.result_snapshot as Record<string, unknown>
+      : null;
+    if (!snapshot) {
+      return {
+        detail_available: false,
+        unavailable_reason: '详情不可用（非幂等记录或快照已净化）',
+        idempotency_snapshot_available: false,
+        status: attempt.status ?? null,
+        summary: {
+          applied_count: typeof counts.applied === 'number' ? counts.applied : undefined,
+          skipped_count: typeof counts.skipped === 'number' ? counts.skipped : undefined,
+          conflict_count: typeof counts.conflicts === 'number' ? counts.conflicts : undefined,
+          accepted_count: typeof counts.accepted_count === 'number' ? counts.accepted_count : undefined,
+          rejected_count: typeof counts.rejected_count === 'number' ? counts.rejected_count : undefined,
+          dry_run: typeof counts.dry_run === 'boolean' ? counts.dry_run : undefined,
+        },
+      };
+    }
+
+    return {
+      detail_available: true,
+      idempotency_snapshot_available: true,
+      status: typeof snapshot.status === 'string' ? snapshot.status : attempt.status ?? null,
+      summary: snapshot.summary && typeof snapshot.summary === 'object'
+        ? snapshot.summary as DeepSynthesisApplyHistoryDetail['summary']
+        : undefined,
+      applied_changes: Array.isArray(snapshot.applied_changes)
+        ? snapshot.applied_changes as DeepSynthesisApplyHistoryDetail['applied_changes']
+        : [],
+      skipped_changes: Array.isArray(snapshot.skipped_changes)
+        ? snapshot.skipped_changes as DeepSynthesisApplyHistoryDetail['skipped_changes']
+        : [],
+      conflicts: Array.isArray(snapshot.conflicts)
+        ? snapshot.conflicts as DeepSynthesisApplyHistoryDetail['conflicts']
+        : [],
+      warnings: Array.isArray(snapshot.warnings)
+        ? snapshot.warnings.map((warning) => typeof warning === 'string' ? warning : JSON.stringify(warning))
+        : [],
+    };
   },
 
   retry: (attemptId: string, params: { sessionId: string }) => {

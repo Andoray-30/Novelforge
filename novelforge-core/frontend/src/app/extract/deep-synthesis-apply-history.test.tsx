@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import { DeepSynthesisApplyHistory } from './deep-synthesis-apply-history';
+import { extractionAttemptService } from '@/lib/api';
 import type { ExtractionApplyHistoryItem } from '@/types';
 
 vi.mock('@/lib/api', () => ({
@@ -10,7 +11,6 @@ vi.mock('@/lib/api', () => ({
   },
 }));
 
-const { extractionAttemptService } = await import('@/lib/api');
 const mockList = vi.mocked(extractionAttemptService.listApplyHistory);
 
 function makeItem(overrides: Partial<ExtractionApplyHistoryItem> = {}): ExtractionApplyHistoryItem {

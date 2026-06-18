@@ -7,9 +7,37 @@
   - 下部"历史详细记录"：保留过去每一轮修复动作，不删历史，便于回溯排查。
   - 文末新增记录继续按日期追加，但不再依赖对话记忆维护全局判断。
 - 阅读建议：
-  - 想知道系统现在到了哪一步，先看"2026-06-18 Phase H.5"、"2026-06-17 Phase H.4.1"、"2026-06-17 Phase H.4"、"2026-06-17 Phase H.3"、"2026-06-17 Phase H.2"和"2026-06-17 Phase G.4.4"。
+  - 想知道系统现在到了哪一步，先看"2026-06-18 Phase H.6"、"2026-06-18 Phase H.5"、"2026-06-17 Phase H.4.1"、"2026-06-17 Phase H.4"、"2026-06-17 Phase H.3"、"2026-06-17 Phase H.2"和"2026-06-17 Phase G.4.4"。
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
 - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
+
+## 2026-06-18 Phase H.6: Integrate Apply Detail Drawer
+
+### 本轮完成
+- `DeepSynthesisApplyHistory` 已集成 `DeepSynthesisApplyDetailDrawer`：
+  - 每条记录含 "查看详情" 按钮（Eye 图标），点击后调用 `openDetail(attemptId)` 获取详情并打开 drawer。
+  - Drawer 关闭后回到列表（`onClose` 设置 `detailOpen=false`）。
+  - Drawer 支持 loading / error / detail_available=false / detail 四种状态。
+- 修复 `novelforge-api.ts` 中 `snapshot` 可能为 null 的 TS 错误（将 `Boolean(snapshot)` guard 改为直接 `!snapshot` 检查，启用 TS 控制流分析）。
+- 修复 `deep-synthesis-apply-history.test.tsx` 中 top-level `await` 导致的 TS 编译错误（改为静态 import + `vi.mocked`）。
+
+### 测试结果
+- npm test -- --run: 35 files, 220 tests passed
+- npx tsc --noEmit --incremental false: 0 errors
+- npm run build: Compiled successfully
+
+### 修改文件
+- `novelforge-core/frontend/src/lib/api/novelforge-api.ts` — 修复 snapshot null guard
+- `novelforge-core/frontend/src/app/extract/deep-synthesis-apply-history.test.tsx` — 修复 top-level await
+- `project-docs/PROGRESS.md` — 进度更新
+
+### 阻断问题
+- 无
+
+### 推荐下一步
+- **Phase H.7**（Apply History 高级筛选）：按时间范围、status 筛选。
+
+---
 
 ## 2026-06-18 Phase H.5: Frontend Apply History Tab
 
@@ -43,7 +71,7 @@
 - 无
 
 ### 推荐下一步
-- **Phase H.6**（Apply Detail Drawer）：点击查看单条 apply 记录详情。
+- **Phase H.6** ✅（Apply Detail Drawer）：已完成 — 查看单条 apply 记录详情。
 - **Phase H.7**（Apply History 高级筛选）：按时间范围、status 筛选。
 
 ---
