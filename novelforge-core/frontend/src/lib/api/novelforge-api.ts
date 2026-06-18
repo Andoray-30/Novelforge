@@ -41,6 +41,7 @@ import {
   RetryJob,
   RunDueRetryJobsResponse,
 } from '@/types';
+import { sanitizeDeepSynthesisDisplayValue } from '@/app/extract/deep-synthesis-utils';
 
 function resolveApiBaseUrl(): string {
   const configured = process.env.NEXT_PUBLIC_NOVELFORGE_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8001';
@@ -713,13 +714,29 @@ export const extractionAttemptService = {
         ? snapshot.summary as DeepSynthesisApplyHistoryDetail['summary']
         : undefined,
       applied_changes: Array.isArray(snapshot.applied_changes)
-        ? snapshot.applied_changes as DeepSynthesisApplyHistoryDetail['applied_changes']
+        ? (snapshot.applied_changes as Record<string, unknown>[]).map((c) => ({
+            change_id: typeof c.change_id === 'string' ? c.change_id : undefined,
+            asset_type: typeof c.asset_type === 'string' ? c.asset_type : undefined,
+            asset_id: typeof c.asset_id === 'string' ? c.asset_id : undefined,
+            field_path: typeof c.field_path === 'string' ? c.field_path : undefined,
+            version_before: typeof c.version_before === 'string' ? c.version_before : typeof c.asset_version_before === 'string' ? c.asset_version_before : null,
+            version_after: typeof c.version_after === 'string' ? c.version_after : typeof c.asset_version_after === 'string' ? c.asset_version_after : null,
+            value_preview_before: sanitizeDeepSynthesisDisplayValue((c.value_preview_before ?? c.previous_value) as string | null | undefined),
+            value_preview_after: sanitizeDeepSynthesisDisplayValue((c.value_preview_after ?? c.applied_value) as string | null | undefined),
+          }))
         : [],
       skipped_changes: Array.isArray(snapshot.skipped_changes)
         ? snapshot.skipped_changes as DeepSynthesisApplyHistoryDetail['skipped_changes']
         : [],
       conflicts: Array.isArray(snapshot.conflicts)
-        ? snapshot.conflicts as DeepSynthesisApplyHistoryDetail['conflicts']
+        ? (snapshot.conflicts as Record<string, unknown>[]).map((c) => ({
+            change_id: typeof c.change_id === 'string' ? c.change_id : undefined,
+            asset_id: typeof c.asset_id === 'string' ? c.asset_id : null,
+            field_path: typeof c.field_path === 'string' ? c.field_path : null,
+            reason: typeof c.reason === 'string' ? c.reason : undefined,
+            expected_preview: sanitizeDeepSynthesisDisplayValue((c.expected_preview ?? c.expected) as string | null | undefined),
+            actual_preview: sanitizeDeepSynthesisDisplayValue((c.actual_preview ?? c.actual) as string | null | undefined),
+          }))
         : [],
       warnings: Array.isArray(snapshot.warnings)
         ? snapshot.warnings.map((warning) => typeof warning === 'string' ? warning : JSON.stringify(warning))
