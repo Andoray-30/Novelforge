@@ -69,7 +69,7 @@ Phase H.7 Retry 在 H.7.1 类型修复（`DeepSynthesisApplyHistoryDetail` 已�
 | 分页渲染 | ✅ PASS | "第 1 / 2 页"，上一页 disabled，下一页 enabled |
 | 分页下一页 | ✅ PASS | 点击后 "第 2 / 2 页"，上一页 enabled，下一页 disabled |
 | 分页请求 offset | ✅ PASS | Route mock 接收 offset=10 |
-| 刷新按钮 | ✅ PASS | 按钮可点击，非 disabled |
+| 刷新按钮 | ⚠️ CODE-PATH VERIFIED | 按钮可点击；route mock 环境下无法通过 request 事件捕获刷新请求，代码审查确认 `loadHistory(offset)` 在点击时被调用 |
 | Detail drawer (applied) | ✅ PASS | 成功标签 + 幂等快照可用 + 已写入 3 + 写入变更列表 |
 | Detail drawer (conflict) | ✅ PASS | 部分成功 + 已写入 4 + 跳过项 + 冲突项 + expected/actual |
 | Detail drawer (unavailable) | ✅ PASS | "详情不可用" + "非幂等记录或快照已净化" |
@@ -94,11 +94,13 @@ Phase H.7 Retry 在 H.7.1 类型修复（`DeepSynthesisApplyHistoryDetail` 已�
 
 ## Confirm Apply 自动刷新验证
 
-**机制验证**：
+**机制验证（CODE-PATH VERIFIED）**：
 - `page.tsx` 第 1374 行：`setApplyRefreshKey((prev) => prev + 1)` 在 `result.status === 'success' || result.status === 'partial'` 时触发
 - `deep-synthesis-apply-history.tsx` 第 57-61 行：`useEffect` 监听 `refreshKey` 变化，当 `refreshKey > 0` 时调用 `loadHistory(0)` 重新获取列表
 
 **限制**：完整的 Confirm Apply 路径需要真实 preview 数据和 accept/reject 交互，超出 route mock 范围。refreshKey 触发 list re-fetch 的代码路径已通过代码审查确认。刷新按钮的手动刷新功能已通过浏览器点击验证。
+
+**完整 Confirm Apply E2E 延迟**：完整的 Confirm Apply → auto-refresh E2E 验证（含真实网络请求捕获）延迟到 Phase H.9 执行，不阻塞 H.7 Retry 决策，因为 H.7 使用 route mock 环境。
 
 ---
 
@@ -133,7 +135,7 @@ Phase H.7 Retry 在 H.7.1 类型修复（`DeepSynthesisApplyHistoryDetail` 已�
 
 | 文件名 | 内容 |
 |--------|------|
-| `deep-synthesis-h7-desktop-history-list.png` | Desktop 1440px 全页，Apply History 列表 10 条记录 + 分页 |
+| `deep-synthesis-h7-desktop-history-list.png` | Desktop 1440px Apply History 列表，含记录卡片、分页控件（第 1/2 页、上一页、下一页） |
 | `deep-synthesis-h7-desktop-detail-applied.png` | Desktop detail drawer，成功状态，幂等快照可用，写入变更 2 条 |
 | `deep-synthesis-h7-desktop-detail-conflict.png` | Desktop detail drawer，部分成功，跳过项 + 冲突项 + expected/actual |
 | `deep-synthesis-h7-desktop-detail-unavailable.png` | Desktop detail drawer，详情不可用，非幂等记录 |
@@ -152,9 +154,9 @@ Phase H.7 Retry 在 H.7.1 类型修复（`DeepSynthesisApplyHistoryDetail` 已�
 
 1. **tsc 缓存文件警告**：`npx tsc --noEmit --incremental false` 报告 2 个 `.next/types/*` 文件缺失。这是 Next.js 构建产物的已知行为，不影响功能。建议在 CI 中先运行 `npm run build` 再运行 `tsc --noEmit`。
 
-2. **刷新按钮 route mock 限制**：在 route mock 环境下，刷新按钮点击后无法通过 `page.on('request')` 捕获到请求（route handler 在 request 事件之前拦截）。代码审查确认 `loadHistory(offset)` 会在点击时被调用。
+2. **刷新按钮 route mock 限制**：在 route mock 环境下，刷新按钮点击后无法通过 `page.on('request')` 捕获到请求（route handler 在 request 事件之前拦截）。代码审查确认 `loadHistory(offset)` 会在点击时被调用。**标记为 CODE-PATH VERIFIED，非完整 E2E PASS。**
 
-3. **Confirm Apply 完整路径**：需要真实 preview 数据，超出 route mock 范围。refreshKey 触发机制已通过代码审查确认。
+3. **Confirm Apply 完整路径**：需要真实 preview 数据，超出 route mock 范围。refreshKey 触发机制已通过代码审查确认。**完整 Confirm Apply E2E 延迟到 Phase H.9。**
 
 ---
 
@@ -164,15 +166,31 @@ Phase H.7 Retry 在 H.7.1 类型修复（`DeepSynthesisApplyHistoryDetail` 已�
 
 ---
 
+## Oracle Review 修正记录
+
+> 日期：2026-06-20
+> 原始提交：`a83937c`
+> Oracle 结论：REQUEST_CHANGES → 修正后重新提交
+
+### 修正内容
+
+1. **截图修正**：`deep-synthesis-h7-desktop-history-list.png` 原截图显示 Import Wizard 而非 Apply History 列表。已重新截取，现正确显示 Apply History 列表、记录卡片和分页控件（第 1/2 页）。
+
+2. **刷新按钮验证标签**：从 `✅ PASS` 降级为 `⚠️ CODE-PATH VERIFIED`。Route mock 环境下无法通过 request 事件捕获刷新请求，仅通过代码审查确认 `loadHistory(offset)` 在点击时被调用。
+
+3. **Confirm Apply 自动刷新验证标签**：明确标记为 `CODE-PATH VERIFIED`，完整 Confirm Apply E2E（含真实网络请求捕获）延迟到 Phase H.9 执行。
+
+---
+
 ## Decision
 
-**PASS**
+**PASS**（含 CODE-PATH VERIFIED 标注）
 
-Phase H.7 Retry 浏览器 E2E 验证全部通过。Apply History 列表、分页、刷新、Detail Drawer 三种状态（applied/conflict/unavailable）、安全脱敏、Desktop/Mobile 布局均已验证。
+Phase H.7 Retry 浏览器 E2E 验证通过。Apply History 列表、分页、Detail Drawer 三种状态（applied/conflict/unavailable）、安全脱敏、Desktop/Mobile 布局均已完整验证。刷新按钮和 Confirm Apply 自动刷新机制已通过代码路径验证（CODE-PATH VERIFIED），完整 E2E 延迟到 Phase H.9。
 
 ---
 
 ## 推荐下一步
 
 - **Phase H.8**（可选）：Apply History 高级筛选（时间范围、status 筛选）
-- **Phase H.9**（可选）：Confirm Apply 完整 E2E 路径（需要真实或更复杂的 mock preview 数据）
+- **Phase H.9**（推荐）：Confirm Apply 完整 E2E 路径 + 刷新按钮 request 验证（需真实或更复杂的 mock preview 数据）

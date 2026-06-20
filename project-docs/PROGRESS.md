@@ -32,11 +32,11 @@
 ### 浏览器验证
 - History 列表：✅ 可见，12 条记录，task_type=deep_synthesis_apply
 - 分页：✅ 第 1/2 页，下一页 offset=10
-- 刷新：✅ 按钮可点击
+- 刷新：⚠️ CODE-PATH VERIFIED（按钮可点击；route mock 环境无法捕获刷新请求，代码审查确认 loadHistory 在点击时被调用）
 - Detail drawer (applied)：✅ 成功 + 幂等快照可用 + 写入变更
 - Detail drawer (conflict)：✅ 部分成功 + 跳过项 + 冲突项 + expected/actual
 - Detail drawer (unavailable)：✅ 详情不可用 + 非幂等记录
-- Confirm Apply auto-refresh：✅ refreshKey 代码路径已确认（完整路径需真实 preview）
+- Confirm Apply auto-refresh：⚠️ CODE-PATH VERIFIED（refreshKey 代码路径已确认；完整 Confirm Apply E2E 延迟到 Phase H.9）
 - Desktop 1440px：✅ 无水平溢出
 - Mobile 390px：✅ 无水平溢出
 - 安全：✅ 无 forbidden fields 显示
@@ -58,11 +58,11 @@
 - 无
 
 ### 决策
-- **Phase H.7 Retry: PASS**
+- **Phase H.7 Retry: PASS**（含 CODE-PATH VERIFIED 标注：刷新按钮和 Confirm Apply auto-refresh 为代码路径验证，完整 E2E 延迟到 H.9）
 
 ### 推荐下一步
 - **Phase H.8**（可选）：Apply History 高级筛选（时间范围、status 筛选）
-- **Phase H.9**（可选）：Confirm Apply 完整 E2E 路径
+- **Phase H.9**（推荐）：Confirm Apply 完整 E2E 路径 + 刷新按钮 request 验证
 
 ---
 
