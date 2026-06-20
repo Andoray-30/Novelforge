@@ -7,7 +7,7 @@
   - 下部"历史详细记录"：保留过去每一轮修复动作，不删历史，便于回溯排查。
   - 文末新增记录继续按日期追加，但不再依赖对话记忆维护全局判断。
 - 阅读建议：
-  - 想知道系统现在到了哪一步，先看"2026-06-20 Phase H.7"、"2026-06-18 Phase H.6"、"2026-06-18 Phase H.5"、"2026-06-17 Phase H.4.1"、"2026-06-17 Phase H.4"、"2026-06-17 Phase H.3"、"2026-06-17 Phase H.2"和"2026-06-17 Phase G.4.4"。
+  - 想知道系统现在到了哪一步，先看"2026-06-20 Phase H.7.1"、"2026-06-20 Phase H.7"、"2026-06-18 Phase H.6"、"2026-06-18 Phase H.5"、"2026-06-17 Phase H.4.1"、"2026-06-17 Phase H.4"、"2026-06-17 Phase H.3"、"2026-06-17 Phase H.2"和"2026-06-17 Phase G.4.4"。
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
 - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
 
@@ -40,6 +40,48 @@
 
 ### 推荐下一步
 - **H.7.1**（前置修复）：在 `types/index.ts` 新增 `DeepSynthesisApplyHistoryDetail` 接口定义，然后重新执行 H.7 浏览器 QA
+
+---
+
+## 2026-06-20 Phase H.7.1: Missing Type Fix for Apply History Detail
+
+### 目标
+修复 H.7 发现的阻断问题：`DeepSynthesisApplyHistoryDetail` 类型未在 `types/index.ts` 中定义，导致前端 TypeScript 编译和生产构建失败。
+
+### 本轮完成
+- 在 `novelforge-core/frontend/src/types/index.ts` 的 `DeepSynthesisApplyResult` 之后新增 `DeepSynthesisApplyHistoryDetail` 接口定义
+- 类型字段与 `novelforge-api.ts` 中 `getApplyHistoryDetail` 的返回值和 `deep-synthesis-apply-detail-drawer.tsx` 的使用完全匹配
+- 类型包含：`detail_available`、`unavailable_reason`、`idempotency_snapshot_available`、`status`、`summary`、`applied_changes`、`skipped_changes`、`conflicts`、`warnings`
+- 未暴露安全敏感字段：`idempotency_key`、`request_fingerprint`、`budget_summary` 全量、`raw_response_text`、`provider_error_body`、`chapter_content`
+
+### 验证结果
+- `npx tsc --noEmit --incremental false`：0 errors ✅
+- `npm test -- --run`：36 files, 228 tests passed ✅
+- `npm run build`：Compiled successfully ✅
+- `pytest tests/api/test_attempt_retry_api.py -q`：38 passed ✅
+- `pytest tests/services/test_attempt_store.py -q`：12 passed ✅
+- `pytest tests/services/test_deep_synthesis.py -q`：68 passed ✅
+
+### 安全边界
+- 后端代码未修改 ✅
+- DeepSynthesisService 未修改 ✅
+- AIService 未修改 ✅
+- rate_limiter / concurrency 未修改 ✅
+- 未调用外部 provider ✅
+- 未使用真实小说文本 ✅
+- 未暴露 `idempotency_key` 类型 ✅
+- 未暴露 `request_fingerprint` 类型 ✅
+- 未暴露 `raw_response_text` / `raw_response_preview` / `provider_error_body` ✅
+
+### 修改文件
+- `novelforge-core/frontend/src/types/index.ts` — 新增 `DeepSynthesisApplyHistoryDetail` 接口
+- `project-docs/PROGRESS.md` — 进度更新
+
+### 已知限制
+- H.7 浏览器 E2E 仍未重跑
+
+### 推荐下一步
+- **Phase H.7 Retry - Apply History Browser E2E**：类型阻断已解除，重新执行浏览器 QA
 
 ---
 

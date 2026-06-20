@@ -1040,3 +1040,44 @@ export interface DeepSynthesisApplyResult {
   attempt_id?: string | null;
   task_type: string;
 }
+
+export interface DeepSynthesisApplyHistoryDetail {
+  detail_available: boolean;
+  unavailable_reason?: string | null;
+  idempotency_snapshot_available?: boolean;
+  status?: string | null;
+  summary?: {
+    applied_count?: number;
+    skipped_count?: number;
+    conflict_count?: number;
+    accepted_count?: number;
+    rejected_count?: number;
+    dry_run?: boolean;
+  } | null;
+  applied_changes?: Array<{
+    change_id?: string;
+    asset_type?: string;
+    asset_id?: string;
+    field_path?: string;
+    version_before?: string | null;
+    version_after?: string | null;
+    value_preview_before?: string | null;
+    value_preview_after?: string | null;
+  }>;
+  skipped_changes?: Array<{
+    change_id?: string;
+    reason?: string;
+    asset_type?: string | null;
+    asset_id?: string | null;
+    field_path?: string | null;
+  }>;
+  conflicts?: Array<{
+    change_id?: string;
+    asset_id?: string | null;
+    field_path?: string | null;
+    reason?: string;
+    expected_preview?: string | null;
+    actual_preview?: string | null;
+  }>;
+  warnings?: string[];
+}
