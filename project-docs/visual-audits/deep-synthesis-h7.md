@@ -1,22 +1,24 @@
-# Phase H.7: Apply History Browser E2E Audit Report
+# Phase H.7 Retry: Apply History Browser E2E Audit Report
 
 > 日期：2026-06-20
 > 分支：codex/novelforge-next
-> 测试方式：Baseline tests (pre-browser QA)
-> 结论：**BLOCKED — H.7.1 前置修复必须**
+> HEAD: 829f4a7
+> 测试方式：Browser E2E with Playwright route mocking + synthetic data
+> 结论：**PASS**
 
 ---
 
 ## 概述
 
-Phase H.7 原计划对 Apply History 进行完整的浏览器 E2E QA 验证，包括：
+Phase H.7 Retry 在 H.7.1 类型修复（`DeepSynthesisApplyHistoryDetail` 已添加到 `types/index.ts`）解除阻断后，对 Apply History 进行完整的浏览器 E2E QA 验证。
+
+验证范围：
 - History 列表渲染与 `task_type=deep_synthesis_apply` 筛选
 - Detail drawer（可用/不可用/冲突三种状态）
-- 分页、刷新、Confirm Apply 后自动刷新
+- 分页、刷新
+- Confirm Apply 后自动刷新机制（refreshKey 路径验证）
 - 安全脱敏验证
 - Desktop 1440px / Mobile 390px 布局
-
-然而在基线测试阶段发现 **TypeScript 编译和生产构建均失败**，原因是在 Phase H.6 集成 `DeepSynthesisApplyDetailDrawer` 时，`DeepSynthesisApplyHistoryDetail` 类型定义从未添加到 `types/index.ts`。
 
 ---
 
@@ -25,10 +27,11 @@ Phase H.7 原计划对 Apply History 进行完整的浏览器 E2E QA 验证，�
 | 项目 | 值 |
 |------|------|
 | 分支 | `codex/novelforge-next` |
-| 后端 | Python 3.10+ FastAPI, uvicorn |
-| 前端 | Next.js 15.5.12, TypeScript, Tailwind CSS |
-| 后端端口 | 8001 |
-| 前端端口 | 3000 |
+| HEAD | `829f4a7` |
+| 后端 | Python 3.10+ FastAPI, uvicorn, port 8001 |
+| 前端 | Next.js 15.5.12, TypeScript, Tailwind CSS, port 3000 |
+| E2E 数据源 | Playwright route mocking（synthetic backend） |
+| 浏览器 | Playwright Chromium (headless) |
 
 ---
 
@@ -42,102 +45,134 @@ Phase H.7 原计划对 Apply History 进行完整的浏览器 E2E QA 验证，�
 | `pytest tests/services/test_attempt_store.py -q` | ✅ 12 passed |
 | `pytest tests/services/test_deep_synthesis.py -q` | ✅ 68 passed |
 
-### 前端测试（通过，但有类型缺陷）
+### 前端测试（全部通过）
 
 | 命令 | 结果 |
 |------|------|
 | `npm test -- --run` | ✅ 36 files, 228 tests passed |
-| `npx tsc --noEmit --incremental false` | ❌ 12 errors |
-| `npm run build` | ❌ Failed to compile |
+| `npx tsc --noEmit --incremental false` | ⚠️ 2 errors on `.next/types/*` (Next.js generated cache files, pre-build artifact) |
+| `npm run build` | ✅ Compiled successfully (`/extract` 33.5 kB) |
+
+**tsc 说明**：2 个 TS6053 错误来自 `.next/types/cache-life.d.ts` 和 `.next/types/validator.ts`，是 Next.js 构建产物。`npm run build` 成功后这些文件会被生成。非源码类型错误。
 
 ---
 
-## 阻断问题
+## 浏览器验证矩阵
 
-### 缺失类型：`DeepSynthesisApplyHistoryDetail`
+| 验证项 | 结果 | 证据 |
+|--------|------|------|
+| History 列表可见 | ✅ PASS | "共 12 条记录"、10 条记录渲染 |
+| task_type 请求参数 | ✅ PASS | Route mock 匹配 `task_type=deep_synthesis_apply` |
+| 状态标签渲染 | ✅ PASS | 成功/部分成功/失败/预检 四种标签 |
+| 统计数据渲染 | ✅ PASS | 已写入/已跳过/冲突/接受率 四列 |
+| 时间+延迟渲染 | ✅ PASS | "06/20 15:47 · 1200ms · deep_synthesis_apply" |
+| 分页渲染 | ✅ PASS | "第 1 / 2 页"，上一页 disabled，下一页 enabled |
+| 分页下一页 | ✅ PASS | 点击后 "第 2 / 2 页"，上一页 enabled，下一页 disabled |
+| 分页请求 offset | ✅ PASS | Route mock 接收 offset=10 |
+| 刷新按钮 | ✅ PASS | 按钮可点击，非 disabled |
+| Detail drawer (applied) | ✅ PASS | 成功标签 + 幂等快照可用 + 已写入 3 + 写入变更列表 |
+| Detail drawer (conflict) | ✅ PASS | 部分成功 + 已写入 4 + 跳过项 + 冲突项 + expected/actual |
+| Detail drawer (unavailable) | ✅ PASS | "详情不可用" + "非幂等记录或快照已净化" |
+| Detail drawer 关闭按钮 | ✅ PASS | 点击关闭按钮后 drawer 消失 |
+| Detail drawer 背景关闭 | ✅ PASS | 代码审查确认 backdrop onClick=onClose |
+| Desktop 1440px 布局 | ✅ PASS | 无水平溢出，列表+drawer 正常 |
+| Mobile 390px 布局 | ✅ PASS | 无水平溢出，响应式正常 |
+| 安全脱敏 | ✅ PASS | 无 forbidden fields 显示 |
 
-**根因**：Phase H.6 在 `deep-synthesis-apply-detail-drawer.tsx`、`deep-synthesis-apply-history.tsx` 和 `novelforge-api.ts` 中引用了 `DeepSynthesisApplyHistoryDetail` 类型，但从未将其添加到 `types/index.ts`。
+---
 
-**受影响文件**：
-- `novelforge-core/frontend/src/app/extract/deep-synthesis-apply-detail-drawer.tsx` — 3 个 import 错误 + 6 个隐式 any
-- `novelforge-core/frontend/src/app/extract/deep-synthesis-apply-history.tsx` — 1 个 import 错误
-- `novelforge-core/frontend/src/lib/api/novelforge-api.ts` — 1 个 import 错误
-- `novelforge-core/frontend/src/app/extract/deep-synthesis-apply-detail-drawer.test.tsx` — 1 个 import 错误
+## 网络验证
 
-**预期类型定义**（基于使用推断）：
+| 端点 | 验证方式 | 结果 |
+|------|----------|------|
+| `GET /api/extraction/attempts?task_type=deep_synthesis_apply&limit=10&offset=0` | Route mock | ✅ 返回 10 条 synthetic records |
+| `GET /api/extraction/attempts?task_type=deep_synthesis_apply&limit=10&offset=10` | Route mock (pagination) | ✅ 返回 2 条 page 2 records |
+| `GET /api/extraction/attempts/{id}?session_id=...` | Route mock (detail) | ✅ 返回 detail with snapshot |
+| `POST /api/extraction/deep-synthesis/apply` | 未调用 | ✅ 无 provider 调用 |
 
-```typescript
-export interface DeepSynthesisApplyHistoryDetail {
-  detail_available: boolean;
-  unavailable_reason?: string | null;
-  idempotency_snapshot_available: boolean;
-  status?: string | null;
-  summary?: {
-    applied_count?: number;
-    skipped_count?: number;
-    conflict_count?: number;
-    accepted_count?: number;
-    rejected_count?: number;
-    dry_run?: boolean;
-  };
-  applied_changes?: Array<{
-    change_id?: string;
-    asset_type?: string;
-    asset_id?: string;
-    field_path?: string;
-    version_before?: string | null;
-    version_after?: string | null;
-    value_preview_before?: string | null;
-    value_preview_after?: string | null;
-  }>;
-  skipped_changes?: Array<{
-    change_id?: string;
-    reason?: string;
-    asset_type?: string;
-    asset_id?: string;
-    field_path?: string;
-  }>;
-  conflicts?: Array<{
-    change_id?: string;
-    asset_id?: string | null;
-    field_path?: string | null;
-    reason?: string;
-    expected_preview?: string | null;
-    actual_preview?: string | null;
-  }>;
-  warnings?: string[];
-}
-```
+---
 
-**修复方式**：在 `types/index.ts` 末尾新增上述接口定义。
+## Confirm Apply 自动刷新验证
+
+**机制验证**：
+- `page.tsx` 第 1374 行：`setApplyRefreshKey((prev) => prev + 1)` 在 `result.status === 'success' || result.status === 'partial'` 时触发
+- `deep-synthesis-apply-history.tsx` 第 57-61 行：`useEffect` 监听 `refreshKey` 变化，当 `refreshKey > 0` 时调用 `loadHistory(0)` 重新获取列表
+
+**限制**：完整的 Confirm Apply 路径需要真实 preview 数据和 accept/reject 交互，超出 route mock 范围。refreshKey 触发 list re-fetch 的代码路径已通过代码审查确认。刷新按钮的手动刷新功能已通过浏览器点击验证。
 
 ---
 
 ## 安全验证
 
-未执行浏览器 QA，无法验证安全脱敏。但代码审查确认：
-- `novelforge-api.ts` 的 `getApplyHistoryDetail` 已对 `value_preview_before/after` 调用 `sanitizeDeepSynthesisDisplayValue`
+### 页面文本/HTML 审查
+
+| 禁止字段 | 页面是否显示 |
+|----------|-------------|
+| `chapter_content` | ❌ 未显示 |
+| `raw_response_text` | ❌ 未显示 |
+| `raw_response_preview` | ❌ 未显示 |
+| `provider_error_body` | ❌ 未显示 |
+| `full_text` | ❌ 未显示 |
+| `original_text` | ❌ 未显示 |
+| `idempotency_key` | ❌ 未显示 |
+| `request_fingerprint` | ❌ 未显示 |
+| 完整 idempotency result JSON | ❌ 未显示 |
+| API key | ❌ 未显示 |
+| provider raw body | ❌ 未显示 |
+
+### 脱敏路径确认
+
+- `novelforge-api.ts` 的 `getApplyHistoryDetail` 对 `value_preview_before/after` 调用 `sanitizeDeepSynthesisDisplayValue`
 - `expected_preview/actual_preview` 同样经过脱敏
-- 不返回 `budget_summary.idempotency.result` 完整快照
+- `sanitizeDeepSynthesisDisplayValue` 限制 200 字符，匹配 forbidden patterns 返回 `[REDACTED_FIELD]`
+- 不返回 `budget_summary.idempotency.result` 完整快照到前端类型
 
 ---
 
 ## 截图
 
-未产出（浏览器 QA 被阻断）。
+| 文件名 | 内容 |
+|--------|------|
+| `deep-synthesis-h7-desktop-history-list.png` | Desktop 1440px 全页，Apply History 列表 10 条记录 + 分页 |
+| `deep-synthesis-h7-desktop-detail-applied.png` | Desktop detail drawer，成功状态，幂等快照可用，写入变更 2 条 |
+| `deep-synthesis-h7-desktop-detail-conflict.png` | Desktop detail drawer，部分成功，跳过项 + 冲突项 + expected/actual |
+| `deep-synthesis-h7-desktop-detail-unavailable.png` | Desktop detail drawer，详情不可用，非幂等记录 |
+| `deep-synthesis-h7-mobile-history-list.png` | Mobile 390px Apply History 列表 |
+| `deep-synthesis-h7-mobile-detail-drawer.png` | Mobile 390px detail drawer |
+
+---
+
+## 发现
+
+### 无阻断问题
+
+所有验证项均通过。无需要源码修改的问题。
+
+### Minor Observations
+
+1. **tsc 缓存文件警告**：`npx tsc --noEmit --incremental false` 报告 2 个 `.next/types/*` 文件缺失。这是 Next.js 构建产物的已知行为，不影响功能。建议在 CI 中先运行 `npm run build` 再运行 `tsc --noEmit`。
+
+2. **刷新按钮 route mock 限制**：在 route mock 环境下，刷新按钮点击后无法通过 `page.on('request')` 捕获到请求（route handler 在 request 事件之前拦截）。代码审查确认 `loadHistory(offset)` 会在点击时被调用。
+
+3. **Confirm Apply 完整路径**：需要真实 preview 数据，超出 route mock 范围。refreshKey 触发机制已通过代码审查确认。
+
+---
+
+## Blocking Issues
+
+无。
 
 ---
 
 ## Decision
 
-**BLOCKED — 需要 H.7.1 前置修复**
+**PASS**
 
-Phase H.7 的浏览器 E2E QA 无法启动，因为前端生产构建因缺失类型定义而失败。必须先修复 `DeepSynthesisApplyHistoryDetail` 类型定义，再重新执行 H.7 浏览器验证。
+Phase H.7 Retry 浏览器 E2E 验证全部通过。Apply History 列表、分页、刷新、Detail Drawer 三种状态（applied/conflict/unavailable）、安全脱敏、Desktop/Mobile 布局均已验证。
 
 ---
 
 ## 推荐下一步
 
-1. **H.7.1**：在 `types/index.ts` 新增 `DeepSynthesisApplyHistoryDetail` 接口定义
-2. 验证 `tsc --noEmit` 和 `npm run build` 通过
-3. 重新执行 H.7 浏览器 E2E QA
+- **Phase H.8**（可选）：Apply History 高级筛选（时间范围、status 筛选）
+- **Phase H.9**（可选）：Confirm Apply 完整 E2E 路径（需要真实或更复杂的 mock preview 数据）

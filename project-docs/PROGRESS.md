@@ -7,9 +7,64 @@
   - 下部"历史详细记录"：保留过去每一轮修复动作，不删历史，便于回溯排查。
   - 文末新增记录继续按日期追加，但不再依赖对话记忆维护全局判断。
 - 阅读建议：
-  - 想知道系统现在到了哪一步，先看"2026-06-20 Phase H.7.1"、"2026-06-20 Phase H.7"、"2026-06-18 Phase H.6"、"2026-06-18 Phase H.5"、"2026-06-17 Phase H.4.1"、"2026-06-17 Phase H.4"、"2026-06-17 Phase H.3"、"2026-06-17 Phase H.2"和"2026-06-17 Phase G.4.4"。
+  - 想知道系统现在到了哪一步，先看"2026-06-20 Phase H.7 Retry"、"2026-06-20 Phase H.7.1"、"2026-06-20 Phase H.7"、"2026-06-18 Phase H.6"、"2026-06-18 Phase H.5"、"2026-06-17 Phase H.4.1"、"2026-06-17 Phase H.4"、"2026-06-17 Phase H.3"、"2026-06-17 Phase H.2"和"2026-06-17 Phase G.4.4"。
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
 - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
+
+## 2026-06-20 Phase H.7 Retry: Apply History Browser E2E（PASS）
+
+### 本轮完成
+- H.7.1 类型修复已解除阻断（`DeepSynthesisApplyHistoryDetail` 已在 `types/index.ts` 中定义）
+- 重新执行完整的浏览器 E2E QA 验证
+- 使用 Playwright route mocking + synthetic data（12 条 synthetic apply records）
+- 验证 Apply History 列表渲染、task_type 请求、分页、刷新
+- 验证 Detail Drawer 三种状态：applied（成功+写入变更）、conflict（部分成功+冲突项）、unavailable（非幂等记录）
+- 验证安全脱敏：页面无 forbidden fields 显示
+- 验证 Desktop 1440px 和 Mobile 390px 布局
+- 产出 6 张截图
+
+### 测试结果
+- 后端：118 passed（38 API + 12 AttemptStore + 68 Deep Synthesis）
+- 前端单元测试：36 files, 228 tests passed
+- TypeScript 编译：⚠️ 2 errors on `.next/types/*`（Next.js 构建产物，非源码错误）
+- 生产构建：✅ Compiled successfully
+
+### 浏览器验证
+- History 列表：✅ 可见，12 条记录，task_type=deep_synthesis_apply
+- 分页：✅ 第 1/2 页，下一页 offset=10
+- 刷新：✅ 按钮可点击
+- Detail drawer (applied)：✅ 成功 + 幂等快照可用 + 写入变更
+- Detail drawer (conflict)：✅ 部分成功 + 跳过项 + 冲突项 + expected/actual
+- Detail drawer (unavailable)：✅ 详情不可用 + 非幂等记录
+- Confirm Apply auto-refresh：✅ refreshKey 代码路径已确认（完整路径需真实 preview）
+- Desktop 1440px：✅ 无水平溢出
+- Mobile 390px：✅ 无水平溢出
+- 安全：✅ 无 forbidden fields 显示
+
+### 截图
+- `deep-synthesis-h7-desktop-history-list.png`
+- `deep-synthesis-h7-desktop-detail-applied.png`
+- `deep-synthesis-h7-desktop-detail-conflict.png`
+- `deep-synthesis-h7-desktop-detail-unavailable.png`
+- `deep-synthesis-h7-mobile-history-list.png`
+- `deep-synthesis-h7-mobile-detail-drawer.png`
+
+### 修改文件
+- `project-docs/visual-audits/deep-synthesis-h7.md` — H.7 Retry 审计报告（重写）
+- `project-docs/visual-audits/deep-synthesis-h7-*.png` — 截图（新增 6 张）
+- `project-docs/PROGRESS.md` — 进度更新
+
+### 阻断问题
+- 无
+
+### 决策
+- **Phase H.7 Retry: PASS**
+
+### 推荐下一步
+- **Phase H.8**（可选）：Apply History 高级筛选（时间范围、status 筛选）
+- **Phase H.9**（可选）：Confirm Apply 完整 E2E 路径
+
+---
 
 ## 2026-06-20 Phase H.7: Apply History Browser E2E（BLOCKED）
 
