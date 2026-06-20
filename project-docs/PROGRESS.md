@@ -7,9 +7,41 @@
   - 下部"历史详细记录"：保留过去每一轮修复动作，不删历史，便于回溯排查。
   - 文末新增记录继续按日期追加，但不再依赖对话记忆维护全局判断。
 - 阅读建议：
-  - 想知道系统现在到了哪一步，先看"2026-06-18 Phase H.6"、"2026-06-18 Phase H.5"、"2026-06-17 Phase H.4.1"、"2026-06-17 Phase H.4"、"2026-06-17 Phase H.3"、"2026-06-17 Phase H.2"和"2026-06-17 Phase G.4.4"。
+  - 想知道系统现在到了哪一步，先看"2026-06-20 Phase H.7"、"2026-06-18 Phase H.6"、"2026-06-18 Phase H.5"、"2026-06-17 Phase H.4.1"、"2026-06-17 Phase H.4"、"2026-06-17 Phase H.3"、"2026-06-17 Phase H.2"和"2026-06-17 Phase G.4.4"。
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
 - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
+
+## 2026-06-20 Phase H.7: Apply History Browser E2E（BLOCKED）
+
+### 本轮完成
+- 执行基线测试检查：
+  - 后端 API 测试：38 passed（`pytest tests/api/test_attempt_retry_api.py -q`）
+  - 后端 AttemptStore 测试：12 passed（`pytest tests/services/test_attempt_store.py -q`）
+  - 后端 Deep Synthesis 测试：68 passed（`pytest tests/services/test_deep_synthesis.py -q`）
+  - 前端单元测试：36 files, 228 tests passed（`npm test -- --run`）
+- 发现阻断问题：`DeepSynthesisApplyHistoryDetail` 类型未在 `types/index.ts` 中定义
+  - `npx tsc --noEmit --incremental false`：12 个 TS 错误
+  - `npm run build`：编译失败（Failed to compile）
+  - 受影响文件：`deep-synthesis-apply-detail-drawer.tsx`、`deep-synthesis-apply-history.tsx`、`novelforge-api.ts`、`deep-synthesis-apply-detail-drawer.test.tsx`
+  - 根因：Phase H.6 集成 Detail Drawer 时未将类型定义添加到 `types/index.ts`
+
+### 测试结果
+- 后端：118 passed（38 API + 12 AttemptStore + 68 Deep Synthesis）
+- 前端单元测试：228 passed（36 files）
+- TypeScript 编译：❌ 12 errors
+- 生产构建：❌ Failed to compile
+
+### 修改文件
+- `project-docs/visual-audits/deep-synthesis-h7.md` — H.7 审计报告（新增）
+- `project-docs/PROGRESS.md` — 进度更新
+
+### 阻断问题
+- `DeepSynthesisApplyHistoryDetail` 类型缺失导致前端构建失败，无法启动浏览器 E2E QA
+
+### 推荐下一步
+- **H.7.1**（前置修复）：在 `types/index.ts` 新增 `DeepSynthesisApplyHistoryDetail` 接口定义，然后重新执行 H.7 浏览器 QA
+
+---
 
 ## 2026-06-18 Phase H.6: Integrate Apply Detail Drawer
 
