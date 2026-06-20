@@ -7,9 +7,67 @@
   - 下部"历史详细记录"：保留过去每一轮修复动作，不删历史，便于回溯排查。
   - 文末新增记录继续按日期追加，但不再依赖对话记忆维护全局判断。
 - 阅读建议：
-  - 想知道系统现在到了哪一步，先看"2026-06-20 Phase H.7 Retry"、"2026-06-20 Phase H.7.1"、"2026-06-20 Phase H.7"、"2026-06-18 Phase H.6"、"2026-06-18 Phase H.5"、"2026-06-17 Phase H.4.1"、"2026-06-17 Phase H.4"、"2026-06-17 Phase H.3"、"2026-06-17 Phase H.2"和"2026-06-17 Phase G.4.4"。
+  - 想知道系统现在到了哪一步，先看"2026-06-20 Phase H.9"、"2026-06-20 Phase H.7 Retry"、"2026-06-20 Phase H.7.1"、"2026-06-20 Phase H.7"、"2026-06-18 Phase H.6"、"2026-06-18 Phase H.5"、"2026-06-17 Phase H.4.1"、"2026-06-17 Phase H.4"、"2026-06-17 Phase H.3"、"2026-06-17 Phase H.2"和"2026-06-17 Phase G.4.4"。
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
 - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
+
+## 2026-06-20 Phase H.9: Confirm Apply Full E2E + Refresh Request Verification（PARTIAL）
+
+### 本轮完成
+- 确认分支 `codex/novelforge-next`，HEAD `3195561`
+- 基线测试按正确顺序全部通过（详见审计报告）
+- 浏览器 E2E 完整流程执行（无 catch-all passthrough，route handler 显式捕获 payload）：
+  - Preview 生成：3 个 proposed changes（h9-char-summary/h9-world-status/h9-event-outcome）
+  - Selection：individual accept h9-char-summary + individual reject h9-world-status（最终 accepted:[h9-char-summary], rejected:[h9-world-status], undecided:[h9-event-outcome]）
+  - Dry Run：payload 通过 route handler 显式捕获，dry_run=true, accepted=[h9-char-summary], rejected=[h9-world-status], idempotency_key=null ✅
+  - Confirm Apply：payload 通过 route handler 显式捕获，dry_run=false, accepted=[h9-char-summary], rejected=[h9-world-status], idempotency_key=present(36 chars UUID) ✅
+  - History auto-refresh：confirm 后自动触发 history list 请求（delta=+1）✅
+  - Manual refresh：手动刷新未触发额外请求（histManual=histAfterConfirm=4），可能因 React loading 状态 ⚠️
+  - Detail drawer：打开成功，显示"成功"状态 + "幂等快照可用" + 写入变更（非 404）✅
+  - 安全扫描：页面无 forbidden fields ✅
+- 产出 5 张截图（已验证非 404，内容正确）
+
+### 测试结果（按 H.9 要求顺序）
+- 步骤1 `npm test -- --run`：36 files, 228 tests passed ✅
+- 步骤2 `npm run build`：Compiled successfully ✅
+- 步骤3 `npx tsc --noEmit --incremental false`：0 errors ✅
+- 步骤4 `pytest tests/api/test_attempt_retry_api.py -q`：38 passed ✅
+- 步骤5 `pytest tests/services/test_attempt_store.py -q`：12 passed ✅
+- 步骤6 `pytest tests/services/test_deep_synthesis.py -q`：68 passed ✅
+
+### 浏览器验证
+- Preview：✅ 合成 3 个 proposed changes，3 个 accept 按钮渲染
+- Selection：✅ individual accept（第一个按钮=character）+ individual reject（第二个按钮=world_fact, index=1），最终 accepted:1/rejected:1/undecided:1
+- Dry Run：✅ 预检通过，route handler 捕获 payload 断言通过
+- Confirm Apply：✅ 成功写入，route handler 捕获 payload 断言通过，idempotency_key present/opaque
+- History auto-refresh：✅ confirm 后 delta=+1
+- Manual refresh：⚠️ histManual=4（与 histAfterConfirm 相同），可能因 React loading 状态导致按钮 disabled
+- Detail drawer：✅ 显示"成功"状态 + "幂等快照可用" + 写入变更（非 404）
+- 安全：✅ 无 forbidden fields
+
+### 截图
+- `deep-synthesis-h9-preview-selection.png` — preview + selection（非 404）
+- `deep-synthesis-h9-dry-run-result.png` — dry-run 结果（非 404）
+- `deep-synthesis-h9-confirm-history-refresh.png` — confirm + history refresh（非 404）
+- `deep-synthesis-h9-manual-refresh.png` — Apply History 区域 after manual refresh attempt（显示"共 13 条记录"和刷新按钮）
+- `deep-synthesis-h9-confirm-detail.png` — detail drawer 成功内容（非 404）
+
+### 修改文件
+- `project-docs/visual-audits/deep-synthesis-h9.md` — H.9 审计报告（修正）
+- `project-docs/visual-audits/deep-synthesis-h9-*.png` — 截图（修正 5 张）
+- `project-docs/PROGRESS.md` — 进度更新
+
+### 阻断问题
+- 无
+
+### 决策
+- **Phase H.9: PARTIAL**（UI 完整流程和 payload 断言通过，Detail drawer 非 404。但 manual refresh 未触发额外请求（histManual=histAfterConfirm），可能因 React loading 状态）
+
+### 推荐下一步
+- **Phase H.9.1**（可选）：调查手动刷新按钮在 confirm auto-refresh 后的 disabled 状态时序
+- **Phase H.10**（可选）：Apply History 高级筛选
+
+---
 
 ## 2026-06-20 Phase H.7 Retry: Apply History Browser E2E（PASS）
 
