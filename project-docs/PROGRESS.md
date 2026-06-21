@@ -11,6 +11,30 @@
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
 - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
 
+## 2026-06-21 Phase H.11: Apply Audit / History Hardening Closeout（PASS）
+
+### 本轮完成
+- 基于 H.10 与 H.9.1 已验证证据，对 Apply Audit / History 强化子系统（H.4 ~ H.10）进行文档级关闭
+- 产出关闭文档：`project-docs/DEEP_SYNTHESIS_APPLY_AUDIT_HISTORY_CLOSEOUT.md`
+
+### 决策
+- **Phase H.11: PASS**（文档级关闭，不重新执行产品测试）
+- H.9 保留为 **PARTIAL** 历史证据；H.9.1 补全了手动刷新请求证据缺口（harness timing issue，非产品缺陷）
+- H.10 筛选为**当前页客户端筛选**，非服务端 / 全局 / 跨页筛选
+
+### 阻断问题
+- 无
+
+### 已知限制与增强 backlog
+- H.10 筛选仅作用于当前页已加载数据，不跨页，查询条件不持久化
+- 服务端 / 全局筛选、时间范围筛选、独立资产版本历史、回滚 / 撤销、导出 / 保留策略均列为未来增强项，非关闭前提
+
+### 修改文件
+- `project-docs/DEEP_SYNTHESIS_APPLY_AUDIT_HISTORY_CLOSEOUT.md` — H.11 关闭文档
+- `project-docs/PROGRESS.md` — 进度更新
+
+---
+
 ## 2026-06-20 Phase H.9.1: Manual Refresh Request Verification / Timing Fix（PASS）
 
 ### 本轮完成
