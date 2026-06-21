@@ -75,6 +75,70 @@
 
 ---
 
+## 2026-06-21 Phase H.10: Apply History Advanced Filters（PASS）
+
+### 本轮完成
+- 在 `deep-synthesis-utils.ts` 新增过滤类型与纯函数：
+  - `ApplyHistoryStatusFilter` / `ApplyHistoryConflictFilter` / `ApplyHistoryRunTypeFilter`：三组筛选域类型
+  - `ApplyHistoryFilters`：组合筛选接口
+  - `matchesApplyHistoryFilters(item, filters)`：单条匹配判断
+  - `filterApplyHistory(items, filters)`：批量过滤
+- 在 `deep-synthesis-apply-history.tsx` 新增客户端当前页筛选：
+  - 新增 `filters` 状态（status / conflict / runType）
+  - 新增筛选栏 UI（三个 `<select>` + 重置按钮 + 匹配计数）
+  - 使用 `filterApplyHistory` 对已加载的 `items` 进行本地过滤；每次筛选变更调用 `loadHistory(0)` 重置到首页
+  - 新增筛选空态：`当前筛选没有匹配的 Apply History 记录。`
+  - 保留原有空态、加载态、错误态、分页、刷新、详情 drawer 行为
+- 在 `deep-synthesis-utils.test.ts` 新增 18 个过滤函数测试用例
+- 在 `deep-synthesis-apply-history.test.tsx` 新增 18 个组件筛选测试用例（含原有 8 个保留）
+
+### 测试结果
+- 步骤1 `npm test -- --run`：36 files, 263 tests passed ✅
+- 步骤2 `npm run build`：Compiled successfully ✅
+- 步骤3 `npx tsc --noEmit --incremental false`：0 errors ✅
+- 步骤4 `pytest tests/api/test_attempt_retry_api.py -q`：38 passed ✅
+- 步骤5 `pytest tests/services/test_attempt_store.py -q`：12 passed ✅
+- 步骤6 `pytest tests/services/test_deep_synthesis.py -q`：68 passed ✅
+
+### 筛选行为
+- status：匹配 `item.status`；`dry_run` 同时匹配 `counts.dryRun`，避免遗漏预检记录
+- conflict：匹配 `extractApplyHistoryCounts(item).conflicts > 0`
+- run type：`dry_run` 当 `counts.dryRun` 为 true；`real_apply` 当为 false
+- pagination：筛选变更时调用 `loadHistory(0)` 重置到首页；手动翻页仍基于后端 `total`、`offset`、`PAGE_SIZE`
+- refresh：`refreshKey` effect 仍调用 `loadHistory(0)`；手动刷新仍调用 `loadHistory(offset)`
+- detail drawer：从筛选后的 `filteredItems` 通过 `openDetail(item.id)` 打开
+
+### 安全边界
+- 后端代码未修改 ✅
+- DeepSynthesisService 未修改 ✅
+- AIService 未修改 ✅
+- rate_limiter / concurrency 未修改 ✅
+- 未调用外部 provider ✅
+- 未使用真实小说文本 ✅
+- 未暴露 `idempotency_key` ✅
+- 未暴露 `request_fingerprint` ✅
+- 未暴露 `budget_summary` 全量 / raw response / provider body ✅
+
+### 修改文件
+- `novelforge-core/frontend/src/app/extract/deep-synthesis-utils.ts` — 新增过滤类型和纯函数
+- `novelforge-core/frontend/src/app/extract/deep-synthesis-utils.test.ts` — 新增 18 个测试用例
+- `novelforge-core/frontend/src/app/extract/deep-synthesis-apply-history.tsx` — 新增筛选 UI 和客户端过滤
+- `novelforge-core/frontend/src/app/extract/deep-synthesis-apply-history.test.tsx` — 重写为 26 个测试用例（含 18 个新增）
+- `project-docs/PROGRESS.md` — 进度更新
+
+### 已知限制
+- 当前页客户端筛选：仅对当前已加载的 `items` 数组过滤，不跨页筛选
+- 服务端筛选：未实现，后端 API 不支持 task_type 以外的筛选参数
+
+### 决策
+- **Phase H.10: PASS**
+
+### 推荐下一步
+- 可选：Phase H.11 服务端筛选（需后端 API 扩展）
+- 可选：Phase H.12 时间范围筛选（需后端 API 扩展）
+
+---
+
 ## 2026-06-20 Phase H.9: Confirm Apply Full E2E + Refresh Request Verification（PARTIAL）
 
 ### 本轮完成
