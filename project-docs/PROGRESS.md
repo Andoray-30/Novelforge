@@ -11,6 +11,35 @@
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
 - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
 
+## 2026-06-21 Phase Q.1: Two Novel Sample Extraction Readiness & Quality Baseline（PARTIAL / AI_SMOKE_NOT_RUN）
+
+### 本轮目标
+- 用两个新 10 万字级 `.txt` 样本建立长篇提取质量基准。
+- 先做本地解析、章节切分、chunk 计划、风险评估。
+- 如获明确授权，再做真实 AI 导入 smoke；本轮未获得授权，因此不调用 provider。
+
+### 本轮完成
+- 样本发现与唯一性校验：根目录发现两个 `.txt` 样本，路径不同，SHA-256 前缀分别为 `0A5C408AC258` 和 `44EBB8B86935`。
+- 编码 readiness：两个样本均以 `utf-8-sig` 正常解码，替换字符为 0，mojibake risk 为 low。
+- 章节 readiness：本地 heading heuristic 对两个样本均只识别出 1 个长章节级单元，因此 Q.1 结论为 `LOCAL_READINESS_PARTIAL`。
+- chunk / timeout 风险：按当前默认 2,500 字符 import split 估算，两个样本分别会展开为 45 / 39 个保存章节资产；关系召回、时间线一致性和 UI 加载需要后续 smoke 验证。
+- AI smoke：未执行，原因是当前未获得明确 provider 授权。
+- 产出报告：`project-docs/sample-audits/two-novel-sample-q1.md`。
+
+### 安全边界
+- 未提交样本文本。
+- 未复制正文进报告。
+- 未泄露 API key。
+- 未写样本特化规则。
+- provider called? no。
+
+### 下一步建议
+- Phase Q.2 Real AI Import Smoke with Authorization。
+- Phase Q.3 Multi-sample Quality Matrix。
+- 并行建议：Phase P.1 Extract Page Load Speed Audit。
+
+---
+
 ## 2026-06-21 Phase H.11: Apply Audit / History Hardening Closeout（PASS）
 
 ### 本轮完成
