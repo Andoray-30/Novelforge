@@ -7,9 +7,73 @@
   - 下部"历史详细记录"：保留过去每一轮修复动作，不删历史，便于回溯排查。
   - 文末新增记录继续按日期追加，但不再依赖对话记忆维护全局判断。
 - 阅读建议：
-  - 想知道系统现在到了哪一步，先看"2026-06-20 Phase H.9"、"2026-06-20 Phase H.7 Retry"、"2026-06-20 Phase H.7.1"、"2026-06-20 Phase H.7"、"2026-06-18 Phase H.6"、"2026-06-18 Phase H.5"、"2026-06-17 Phase H.4.1"、"2026-06-17 Phase H.4"、"2026-06-17 Phase H.3"、"2026-06-17 Phase H.2"和"2026-06-17 Phase G.4.4"。
+  - 想知道系统现在到了哪一步，先看"2026-06-20 Phase H.9.1"、"2026-06-20 Phase H.9"、"2026-06-20 Phase H.7 Retry"、"2026-06-20 Phase H.7.1"、"2026-06-20 Phase H.7"、"2026-06-18 Phase H.6"、"2026-06-18 Phase H.5"、"2026-06-17 Phase H.4.1"、"2026-06-17 Phase H.4"、"2026-06-17 Phase H.3"、"2026-06-17 Phase H.2"和"2026-06-17 Phase G.4.4"。
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
 - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
+
+## 2026-06-20 Phase H.9.1: Manual Refresh Request Verification / Timing Fix（PASS）
+
+### 本轮完成
+- 确认分支 `codex/novelforge-next`，HEAD `d4bdb33`
+- 基线测试全部通过（详见审计报告）
+- 浏览器 E2E **完整链路**：preview → selection → dry-run → confirm → auto-refresh → manual-refresh
+- 使用 **handler-side closure counters** 追踪每次 history list 请求
+- **根因确认：harness timing issue，非产品缺陷**
+  - H.9 测试脚本在 auto-refresh 完成前（`loading=true`）点击了手动刷新按钮
+  - `disabled={loading}` 导致浏览器忽略点击事件
+  - H.9.1 完整 E2E 证明 confirm auto-refresh 和 manual refresh 均正常工作
+- 安全扫描无 forbidden fields
+- 产出 4 张截图
+
+### 测试结果（按 H.9.1 要求顺序）
+- 步骤1 `npm test -- --run`：36 files, 228 tests passed ✅
+- 步骤2 `npm run build`：Compiled successfully ✅
+- 步骤3 `npx tsc --noEmit --incremental false`：0 errors ✅
+- 步骤4 `pytest tests/api/test_attempt_retry_api.py -q`：38 passed ✅
+- 步骤5 `pytest tests/services/test_attempt_store.py -q`：12 passed ✅
+- 步骤6 `pytest tests/services/test_deep_synthesis.py -q`：68 passed ✅
+
+### 浏览器验证（完整链路）
+- Preview → 3 proposed changes → Accept 1, Reject 1, Undecided 1 ✅
+- Dry-run：dry_run=true, accepted=[h91-char-summary], rejected=[h91-event-outcome] ✅
+- Confirm：dry_run=false, idempotency_key=present, status=success ✅
+- **Confirm auto-refresh**：histAfterConfirm(3) > histInit(2)，delta=+1 ✅
+- **Manual refresh**：histAfterManualRefresh(4) > histBeforeManualRefresh(3)，delta=+1 ✅
+- Button state：click 前 enabled → click 后 disabled+loading → 恢复 enabled ✅
+- task_type=deep_synthesis_apply ✅
+- limit=10 ✅
+- offset=0 被省略（现有 API 客户端行为）ℹ️
+- Security：无 forbidden fields ✅
+
+### 请求计数器
+- histInit：2（seq=1: 无 parent_id, seq=2: 有 parent_id）
+- histAfterConfirm：3（seq=3: confirm auto-refresh）
+- histBeforeManualRefresh：3（同 histAfterConfirm）
+- histAfterManualRefresh：4（seq=4: manual refresh）
+- confirm auto-refresh delta：+1（3-2）
+- manual refresh delta：+1（4-3）
+
+### 截图
+- `deep-synthesis-h9.1-before-refresh.png` — Preview + selection 区域
+- `deep-synthesis-h9.1-after-refresh.png` — Apply History 刷新后状态
+- `deep-synthesis-h9.1-request-counters.png` — 全页面截图
+- `deep-synthesis-h9.1-mobile-refresh.png` — Mobile 390px 刷新按钮状态
+
+### 修改文件
+- `project-docs/visual-audits/deep-synthesis-h9.1.md` — H.9.1 审计报告
+- `project-docs/visual-audits/deep-synthesis-h9.1-*.png` — 截图（4 张）
+- `project-docs/PROGRESS.md` — 进度更新
+
+### 阻断问题
+- 无
+
+### 决策
+- **Phase H.9.1: PASS**（完整链路 E2E 证明 confirm auto-refresh 和 manual refresh 均正常触发请求，根因为 H.9 harness timing issue，非产品缺陷，无需代码修改）
+
+### 推荐下一步
+- **Phase H.10**（可选）：Apply History 高级筛选
+
+---
 
 ## 2026-06-20 Phase H.9: Confirm Apply Full E2E + Refresh Request Verification（PARTIAL）
 
