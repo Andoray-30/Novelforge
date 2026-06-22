@@ -1,5 +1,89 @@
 ﻿# NovelForge 项目进度跟踪
 
+## 2026-06-22 Phase Q.2: Real AI Import Smoke with Explicit Provider Authorization（FAIL / PROVIDER_UNAVAILABLE / SAMPLE_B_EXECUTED / SAMPLE_A_NOT_EXECUTED）
+
+### 本轮目标
+- 在明确授权后，对两个新样本执行真实 AI 导入 smoke。
+- 验证 10,000–12,000 字符 system split 下的导入稳定性。
+- 验证章节保存、角色/世界观/时间线/关系产出与质量状态。
+
+### 本轮完成
+- 授权检查：用户明确授权将两个本地小说样本正文发送到当前配置 provider，按 10,000–12,000 字符 system split 进行真实导入验证。
+- 环境检查：.env 包含 OPENAI_API_KEY、OPENAI_BASE_URL、OPENAI_MODEL、NOVELFORGE_FAST_MODEL、NOVELFORGE_PRO_MODEL（具体值脱敏）。
+- 基线测试：test_text_processing_service.py 17/17 passed，test_ai_scheduler_import.py 37/37 passed。
+- Split 配置：设置 `NOVELFORGE_IMPORT_CHAPTER_MAX_CHARS=12000`，生效验证通过（7 段 ~12k，1 段尾部余量 6,927）。
+- Sample B smoke：执行 task_id `1782124112824905`，session_id `smoke-b-20260622-182832`，95,075 chars 按 12,000 字符拆分为 8 个 system split 片段。
+- 本地拆分与持久化：成功，8 个章节资产保存完毕，标题为「片段 01」至「片段 08」，序号连续。
+- AI 提取：**失败** — provider（NewAPI gateway -> deepseek-v4-flash）完全不可用，两个模型（flash、pro）均返回 gateway_timeout，probe 评分为 0，所有 8 个 chapter index 阶段均失败，characters/world/timeline/relationships 未产出。
+- Sample A：未执行，根据流程要求 Sample B 出现结构性失败时不进入 Sample A。
+
+### Split 指标
+
+| 片段 | chars |
+|-----:|------:|
+| 01 | 11,985 |
+| 02 | 11,997 |
+| 03 | 12,000 |
+| 04 | 11,997 |
+| 05 | 11,989 |
+| 06 | 11,973 |
+| 07 | 11,997 |
+| 08 | 6,927 |
+| 合计 | 94,865 |
+
+### Provider 状态
+
+| 指标 | 值 |
+|------|-----|
+| selected_model | deepseek-ai/deepseek-v4-flash |
+| probe flash available | False (gateway_timeout, 72,824ms) |
+| probe pro available | False (gateway_timeout, 91,255ms) |
+| chapter extraction success | 0/8 |
+| retry count | 16 (8 章 × 2 次尝试) |
+| provider error count | 8 (所有章均失败) |
+
+### System Metadata Observation
+
+Q.1.2 建议的 system_split 结构化字段（`source_type`、`split_part`、`split_total`、`segment_index`、`display_title`、`original_order`、`char_range`）未出现在 Content API 返回的 metadata 或 extracted_data 中。拆分信息仅体现在章节标题中（「片段 01」至「片段 08」），结构化元数据未通过 API 暴露。
+
+### 决策
+
+**FAIL / PROVIDER_UNAVAILABLE**
+
+原因：provider 完全不可用（gateway_timeout）导致 AI 提取失败（0 characters、0 relationships、0 timeline events）。本地拆分和持久化正常工作，但 Q.2 核心目标是验证真实 AI import smoke，provider 侧失败使该目标无法达成。根据 AGENTS.md §8：「外部模型/API 调用失败时，不允许伪造通过。」
+
+### 风险
+
+- **Provider 完全不可用**（critical）：NewAPI gateway 当前完全不可用，无法验证 AI 提取质量。
+- **System split 元数据未暴露**（medium）：结构化元数据未通过 Content API 暴露，可能影响后续程序化处理。
+- **单样本验证不完整**（high）：仅验证了本地拆分，AI 提取链路未经真实 provider 测试。
+
+### 安全边界
+
+- samples committed? no
+- raw sample text in report? no
+- provider raw body in report? no
+- API key exposed? no
+- sample-specific logic added? no
+- production extractor logic changed? no
+
+### 下一步建议
+
+短期（blocking Q.2 重新执行）：
+1. 确认 NewAPI gateway 恢复。
+2. Provider 恢复后重新执行 Sample B smoke。
+3. Sample B PASS 后执行 Sample A。
+
+中期（Q.2 通过后）：
+4. Q.2.1 System Split Metadata Exposure Audit：确认结构化元数据是否存储但未暴露到 API。
+5. Q.3 Multi-sample Quality Matrix：与之前样本做质量对比。
+
+长期（并行推进）：
+6. P.1 Extract Page Load Speed Audit：验证 8-10 个 system split 章节的 UI 渲染性能。
+7. Provider Fallback Strategy：考虑多 provider 路由，避免单点失败。
+
+---
+
 ## 2026-06-22 Phase Q.1.2: Source Boundary Deep Dive & System Split Strategy（SOURCE_BOUNDARY_NOT_FOUND / SYSTEM_SPLIT_REQUIRED / AI_SMOKE_NOT_RUN）
 
 ### 本轮目标
