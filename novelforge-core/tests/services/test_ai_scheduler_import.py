@@ -358,7 +358,7 @@ def test_novel_import_preserves_chapter_content_when_detector_returns_empty_cont
         async def extract_relationships(self, text):
             return []
 
-    monkeypatch.setattr(scheduler_module, "text_processing_service", FakeTextProcessingService(), raising=False)
+    monkeypatch.setattr("novelforge.services.text_processing_service.text_processing_service", FakeTextProcessingService())
 
     import novelforge.services.extraction_service as extraction_module
     monkeypatch.setattr(extraction_module, "get_extraction_service", lambda *args, **kwargs: FakeExtractionService())
@@ -448,7 +448,7 @@ def test_novel_import_uses_chapter_index_analysis_and_returns_diagnostics(monkey
             }
 
     service = FakeExtractionService()
-    monkeypatch.setattr(scheduler_module, "text_processing_service", FakeTextProcessingService(), raising=False)
+    monkeypatch.setattr("novelforge.services.text_processing_service.text_processing_service", FakeTextProcessingService())
     import novelforge.services.extraction_service as extraction_module
     monkeypatch.setattr(extraction_module, "get_extraction_service", lambda *args, **kwargs: service)
 
@@ -521,7 +521,7 @@ def test_novel_import_marks_low_information_character_assets_for_repair(monkeypa
                 },
             }
 
-    monkeypatch.setattr(scheduler_module, "text_processing_service", FakeTextProcessingService(), raising=False)
+    monkeypatch.setattr("novelforge.services.text_processing_service.text_processing_service", FakeTextProcessingService())
     import novelforge.services.extraction_service as extraction_module
     monkeypatch.setattr(extraction_module, "get_extraction_service", lambda *args, **kwargs: FakeExtractionService())
 
