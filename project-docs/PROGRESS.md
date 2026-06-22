@@ -1,5 +1,52 @@
 ﻿# NovelForge 项目进度跟踪
 
+## 2026-06-22 Phase Q.1.2: Source Boundary Deep Dive & System Split Strategy（SOURCE_BOUNDARY_NOT_FOUND / SYSTEM_SPLIT_REQUIRED / AI_SMOKE_NOT_RUN）
+
+### 本轮目标
+- 在 Q.1/Q.1.1 基线上继续脱敏复核两个本地样本是否存在稳定源章节边界。
+- 不调用 provider，不提交样本文本，不复制正文、样本路径、文件名或标题进新报告。
+- 如果不存在稳定源边界，形成通用 system split 策略和 Q.2 smoke 建议。
+
+### 本轮完成
+- 源边界复核：两个样本的独立行首章节标题候选均为 0，连续编号标题序列均为 0，序章/尾声/幕间等候选没有形成独立分隔行。
+- 正文误报复核：Q.1.1 中的 `第...章` token 命中继续被判定为正文内提及，不能作为章节标题证据。
+- 结构审计：两个样本存在装饰性分隔符和空白块，但没有稳定的“章节标题行 + 正文块”结构；装饰性分隔符不应直接触发章节边界。
+- 结论：两个样本的 `stable_source_boundaries` 均为 `no`，置信度高；当前 parser 返回 1 个 fallback 长章节是合理结果。
+- system split 策略：Q.2 建议优先验证 10,000-12,000 字符的通用 system split，而不是继续依赖默认 2,500 字符作为长篇 smoke 主配置。
+- AI smoke：未执行，继续保持阻塞直到获得明确 provider 授权。
+- 产出报告：`project-docs/sample-audits/two-novel-sample-q1.2.md`。
+
+### 脱敏指标摘要
+- hash `0A5C408AC258`：total lines 4,593，non-empty lines 4,372，line-start heading candidates 0，numbered heading sequences 0，decorative separator lines 42，paragraph blocks 200，in-body `第...章` hits 14。
+- hash `44EBB8B86935`：total lines 4,004，non-empty lines 3,800，line-start heading candidates 0，numbered heading sequences 0，decorative separator lines 33，paragraph blocks 180，in-body `第...章` hits 15。
+
+### Chunk 策略对比
+- 2,500 chars：预计 45 / 39 段；当前默认，调度与 UI 负载最高。
+- 6,000 chars：预计 19 / 16 段；调度压力明显降低。
+- 10,000 chars：预计 12 / 10 段；上下文、调度、UI 可读性较均衡。
+- 12,000 chars：预计 10 / 8 段；在当前 clamp 上限内段数最低，并与 recall chunker 尺寸对齐。
+
+### Q.2 建议
+- 先 smoke 较短样本，再 smoke 较长样本；若较短样本出现结构性失败，先修复再继续。
+- provider 授权必须明确说明会发送小说正文、单样本规模约 95k-111k 字符、按 12,000 字符拆分约 8-10 个 system split 片段。
+- 捕获 `split_total`、实际片段字符分布、硬截断次数、每阶段 latency、retry count、error type、关系端点 unresolved 数、timeline mismatch 数和 system metadata 连续性。
+
+### 安全边界
+- raw sample text copied? no
+- sample file names copied? no
+- samples committed/staged? no
+- provider called? no
+- API key exposed? no
+- provider raw body included? no
+- sample-specific logic added? no
+- production extractor logic changed? no
+
+### 下一步建议
+- Q.2 Real AI Import Smoke with explicit provider authorization。
+- Q.1.3 focused parser plan 仅在更多样本证明存在通用稳定源边界后再推进；当前不建议扩展 parser 规则。
+
+---
+
 ## 阅读导航
 - 本文档分为四层：
   - 顶部"阶段审计结论"：用于快速判断系统当前状态、主要短板与未来规划。
