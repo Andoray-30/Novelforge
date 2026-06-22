@@ -15,11 +15,11 @@ class DefaultTextPreprocessor(TextPreprocessor):
             'horizontal_whitespace': re.compile(r'[^\S\r\n]+'),
             'multiple_newlines': re.compile(r'\n\s*\n\s*\n+'),
             'chapter_headers': re.compile(
-                r'(第[一二三四五六七八九十\d]+[章节卷集部篇])|'
+                r'(第[一二三四五六七八九十百千万零〇\d０１２３４５６７８９]+[章节卷集部篇话話])|'
                 r'(Chapter\s+\d+)|'
                 r'(Chapter\s+[A-Z])|'
                 r'(Prologue|Epilogue)|'
-                r'((?:序|引|前言|后记|尾声|终章|楔子))',
+                r'(序章|终章|后记|插图|幕间|间章|尾声|楔子|引子|前言)',
                 re.IGNORECASE
             ),
             'section_headers': re.compile(
@@ -27,7 +27,22 @@ class DefaultTextPreprocessor(TextPreprocessor):
                 r'(Section\s+\d+)|'
                 r'(Volume\s+\d+)',
                 re.IGNORECASE
-            )
+            ),
+            # A lightweight heading-line pattern used inside _format_paragraphs
+            # to preserve chapter heading boundaries when preserve_line_breaks=False.
+            # Uses the same character classes as chapter_detector.RegexBasedChapterDetector.
+            'heading_line': re.compile(
+                r'(?:'
+                r'[【★☆◆◇■□●○◎◉＊✿❀✦✧†‡•⁃※\u3000]+\s*'
+                r'第[一二三四五六七八九十百千万零〇\d０１２３４５６７８９]+[章节卷集部篇话話]'
+                r'|第[一二三四五六七八九十百千万零〇\d０１２３４５６７８９]+'
+                r'(?:章|节|卷|集|部|篇|话|話)'
+                r'|(?:序章|终章|后记|插图|幕间|间章|尾声|楔子|引子|前言)'
+                r'|(?:Chapter|Ch\.)\s+\d+'
+                r'|Prologue|Epilogue'
+                r')',
+                re.IGNORECASE
+            ),
         }
     
     def preprocess(self, text: str, config: TextProcessingConfig) -> str:
@@ -138,8 +153,18 @@ class DefaultTextPreprocessor(TextPreprocessor):
         # 移除结尾的短行
         end_idx = len(lines)
         for i in range(len(lines) - 1, -1, -1):
-            if len(lines[i].strip()) > 20:
+            stripped_line = lines[i].strip()
+            if len(stripped_line) > 20:
                 end_idx = i + 1
+                break
+
+        # Don't drop short chapter-heading lines that appear after
+        # the "last long body line" — the body-after-heading heuristic
+        # can truncate legit content with short body paragraphs.
+        for i in range(end_idx, len(lines)):
+            stripped_line = lines[i].strip()
+            if self.patterns['chapter_headers'].search(stripped_line) or len(stripped_line) > 20:
+                end_idx = len(lines)
                 break
         
         # 重新构建文本
@@ -186,32 +211,55 @@ class DefaultTextPreprocessor(TextPreprocessor):
         return False
     
     def _format_paragraphs(self, text: str, preserve_line_breaks: bool) -> str:
-        """
-        格式化段落
-        
-        Args:
-            text: 原始文本
-            preserve_line_breaks: 是否保留原始换行符
-            
-        Returns:
-            格式化后的文本
-        """
+        """格式化段落"""
         if preserve_line_breaks:
             return text
-        
+
+        heading_pattern = self.patterns.get('heading_line')
+
         # 将文本分割成段落
-        paragraphs = text.split('\n\n')
+        raw_paragraphs = text.split('\n\n')
         formatted_paragraphs = []
-        
-        for paragraph in paragraphs:
-            # 将段落中的单个换行符替换为空格（合并物理行）
-            # 但保留段落之间的换行
+
+        for paragraph in raw_paragraphs:
             lines = paragraph.split('\n')
-            joined_line = ' '.join(line.strip() for line in lines if line.strip())
-            
-            if joined_line.strip():  # 如果段落不为空
-                formatted_paragraphs.append(joined_line)
-        
+
+            # Detect heading lines within the paragraph so we can preserve
+            # their boundaries even when merging body lines.
+            heading_line_indices = [
+                i for i, line in enumerate(lines)
+                if heading_pattern is not None
+                and heading_pattern.search(line.strip())
+            ]
+
+            if heading_line_indices and heading_pattern is not None:
+                # Split at heading boundaries: each heading gets its own
+                # paragraph, body lines between headings get merged.
+                start = 0
+                for idx in heading_line_indices:
+                    # Emit body lines before this heading as merged paragraph
+                    if idx > start:
+                        body = ' '.join(
+                            line.strip() for line in lines[start:idx] if line.strip()
+                        )
+                        if body:
+                            formatted_paragraphs.append(body)
+                    # Emit heading as standalone paragraph
+                    formatted_paragraphs.append(lines[idx].strip())
+                    start = idx + 1
+                # Emit trailing body lines
+                if start < len(lines):
+                    body = ' '.join(
+                        line.strip() for line in lines[start:] if line.strip()
+                    )
+                    if body:
+                        formatted_paragraphs.append(body)
+            else:
+                # No headings — merge all lines normally
+                joined_line = ' '.join(line.strip() for line in lines if line.strip())
+                if joined_line.strip():
+                    formatted_paragraphs.append(joined_line)
+
         return '\n\n'.join(formatted_paragraphs)
 
 

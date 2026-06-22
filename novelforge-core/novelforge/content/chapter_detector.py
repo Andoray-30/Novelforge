@@ -8,34 +8,58 @@ from novelforge.types.text_processing import Chapter, ChapterDetector
 
 class RegexBasedChapterDetector(ChapterDetector):
     """基于正则表达式的章节检测器"""
-    
+
+    # Common decorative wrapper symbols around chapter headings
+    _deco_open_chars = r'【★☆◆◇■□●○◎◉＊✿❀✦✧†‡•⁃※\u3000'
+    _deco_close_chars = r'】★☆◆◇■□●○◎◉＊✿❀✦✧†‡•⁃※\u3000'
+
+    # Chinese numeral + fullwidth digit + 〇 + Arabic digit compound
+    _cn_numeral = r'[一二三四五六七八九十百千万零〇\d０１２３４５６７８９]+'
+    _cn_label = r'(?:章|节|卷|集|部|篇|话|話)'
+
+    # Special light-novel / non-standard heading terms
+    _special_terms = r'(?:序章|终章|后记|插图|幕间|间章|尾声|楔子|引子|前言|Prologue|Epilogue)'
+
     def __init__(self):
         # 预编译章节标题的正则表达式模式
         self.chapter_patterns = [
-            # 中文数字章节（第X章、第X节等）
-            re.compile(r'(第[一二三四五六七八九十百千万零\d]+(?:章|节|卷|集|部|篇))\s*(.*?)(?=\n|$)', re.IGNORECASE),
-            
-            # 阿拉伯数字章节
+            # Decorated / wrapped headings: 【第一章】雨夜, ★第一章★, etc.
+            # Single capture group so the full match is used as title.
+            re.compile(
+                rf'([{self._deco_open_chars}]+\s*'
+                rf'第{self._cn_numeral}{self._cn_label}\s*'
+                rf'[{self._deco_close_chars}]+'
+                rf'(?:\s*.*?)?)(?=\n|$)',
+                re.IGNORECASE
+            ),
+
+            # Chinese numerals + fullwidth + Arabic digits: 第一章, 第1节, 第０１话
+            re.compile(
+                rf'(第{self._cn_numeral}{self._cn_label})\s*(.*?)(?=\n|$)',
+                re.IGNORECASE
+            ),
+
+            # English chapter headings
             re.compile(r'(Chapter|Ch\.)\s+(\d+|\w+)\s*(.+?)(?=\n|$)', re.IGNORECASE),
-            
-            # 序章、终章等特殊章节
-            re.compile(r'(Prologue|Epilogue|序章|引子|前言|后记|尾声|终章|楔子|序|跋)\s*(.+?)(?=\n|$)', re.IGNORECASE),
-            
-            # 部分、卷等
+
+            # Special light-novel headings: Prologue, Epilogue, 序章, 幕间 etc.
+            re.compile(rf'({self._special_terms})\s*(.*?)(?=\n|$)', re.IGNORECASE),
+
+            # Part / Section / Volume
             re.compile(r'(Part|Section|Volume|部|卷|篇|Partie)\s*(\d+|\w+)\s*(.+?)(?=\n|$)', re.IGNORECASE),
-            
+
             # 直接的数字标题（如 1. 章节标题）
             re.compile(r'^(\d+\.?\d*)\s+(.+?)(?=\n|$)', re.MULTILINE),
-            
+
             # 大写字母标题（如 A. 章节标题）
             re.compile(r'^([A-Z])\s+(.+?)(?=\n|$)', re.MULTILINE),
         ]
-        
+
         # 用于检测可能是章节标题的模式（但需要进一步验证）
         self.potential_chapter_patterns = [
             re.compile(r'^(.{2,50})$', re.MULTILINE),  # 单行标题（2-50个字符）
         ]
-        
+
         # 章节标题的特征词（用于辅助判断）
         self.chapter_keywords = {
             'chapter', 'ch.', 'part', 'section', 'volume', 'prologue', 'epilogue',
@@ -186,75 +210,72 @@ class RegexBasedChapterDetector(ChapterDetector):
         return chapters
     
     def _is_valid_chapter_title(self, title: str) -> bool:
-        """
-        验证章节标题是否有效
-        
-        Args:
-            title: 章节标题
-            
-        Returns:
-            如果标题有效则返回True
-        """
+        """Validate that a matched string is plausibly a chapter heading."""
         if not title:
             return False
-        
-        # 检查长度
+
+        # Check length
         if len(title) < 2 or len(title) > 100:
             return False
 
+        # Reject strings containing sentence-ending punctuation
         if re.search(r'[。！？?!；;]', title):
             return False
-        
-        # 检查是否包含章节关键词
-        title_lower = title.lower()
-        if any(keyword in title_lower for keyword in self.chapter_keywords):
-            return True
-        
-        # 检查是否匹配章节模式
+
+        # Reject lines that look like copyright / URL / ad boilerplate
+        if re.search(r'(?:版权|©|http|www\.|保留.*权利)', title):
+            return False
+
+        # Must match a chapter pattern from the *start* of the string —
+        # keyword-in-string matching is too broad (e.g. "第一" in body text).
         for pattern in self.chapter_patterns:
-            if pattern.search(title):
+            if pattern.match(title.strip()):
                 return True
-        
-        # 一些额外的启发式规则
-        # 如果标题包含数字且看起来像是章节标题
-        if re.search(r'第\d+|Chapter\s+\d+|Part\s+\d+', title, re.IGNORECASE):
-            return True
-        
+
         return False
     
     def _is_potential_chapter_title(self, text: str) -> bool:
-        """
-        检查文本是否可能是章节标题
-        
-        Args:
-            text: 待检查的文本
-            
-        Returns:
-            如果可能是章节标题则返回True
+        """Check if text could be a chapter heading.
+
+        This is intentionally stricter than _is_valid_chapter_title because
+        it runs as a fallback when explicit patterns fail.  It uses structural
+        heuristics to avoid overmatching ordinary text / dialogue lines.
         """
         if not text:
             return False
-        
-        # 长度检查
+
         text = text.strip()
-        if len(text) < 2 or len(text) > 50:
+        if len(text) < 2 or len(text) > 60:
             return False
-        
-        # 检查是否包含章节关键词
-        if any(keyword in text.lower() for keyword in self.chapter_keywords):
-            return True
-        
-        # 检查是否包含数字和常见章节标识
-        if re.search(r'第\d+|Chapter\s+\d+|Part\s+\d+|Vol\.?\s+\d+', text, re.IGNORECASE):
-            return True
-        
-        # 检查是否是单行且看起来像标题（首字母大写等）
-        lines = text.split('\n')
-        if len(lines) == 1:
-            # 如果是单行且格式类似于标题
-            if text[0].isupper() or re.match(r'^[\u4e00-\u9fff]+', text):  # 中文字符开头
+
+        # Reject strings with sentence-ending punctuation
+        if re.search(r'[。！？?!；;]', text):
+            return False
+
+        # Reject copyright / URL / ad lines
+        if re.search(r'(?:版权|©|http|www\.|保留.*权利)', text):
+            return False
+
+        # Strip decorative wrappers and check again
+        stripped = re.sub(
+            rf'[{self._deco_open_chars}{self._deco_close_chars}]', '', text
+        ).strip()
+
+        if not stripped or len(stripped) < 2:
+            return False
+
+        # Check explicit heading patterns against the stripped form
+        for pattern in self.chapter_patterns:
+            if pattern.match(stripped):
                 return True
-        
+
+        # Also accept lines that strongly look like volume+chapter combos:
+        # e.g. 第一卷 序章, 第二卷 第三章
+        if re.match(
+            rf'第{self._cn_numeral}卷\s*第{self._cn_numeral}{self._cn_label}', stripped
+        ):
+            return True
+
         return False
     
     def _find_next_chapter_position(self, text: str, start_pos: int) -> int:
@@ -329,20 +350,21 @@ class EnhancedChapterDetector(RegexBasedChapterDetector):
         基于内容结构检测章节
         """
         chapters = []
-        
+
         # 使用段落分隔符和内容特征来识别潜在章节
         paragraphs = text.split('\n\n')
-        
+
         if not paragraphs:
             return chapters
-        
+
         current_chapter_start = 0
         current_chapter_title = "序章"  # 默认标题
-        
+        any_boundary_detected = False
+
         # 扫描段落以识别章节边界
         for i, paragraph in enumerate(paragraphs):
             paragraph = paragraph.strip()
-            
+
             # 检查当前段落是否可能是新的章节开始
             if self._is_new_chapter_start(paragraph, i, paragraphs):
                 # 完成上一个章节
@@ -350,7 +372,7 @@ class EnhancedChapterDetector(RegexBasedChapterDetector):
                     chapter_content = '\n\n'.join(
                         paragraphs[current_chapter_start:i]
                     ).strip()
-                    
+
                     if chapter_content:
                         chapter = Chapter(
                             title=current_chapter_title,
@@ -359,22 +381,39 @@ class EnhancedChapterDetector(RegexBasedChapterDetector):
                             end_position=text.find(paragraphs[i-1]) + len(paragraphs[i-1])
                         )
                         chapters.append(chapter)
-                
+
                 # 开始新章节
+                any_boundary_detected = True
                 current_chapter_start = i
                 current_chapter_title = paragraph if len(paragraph) < 50 else f"章节 {len(chapters) + 1}"
-        
+
+        # If no heading boundary was found at all, treat the entire text
+        # as a single fallback chapter if it is long enough.
+        if not any_boundary_detected:
+            if len(text.strip()) > 500:
+                chapter_content = text.strip()
+                if chapter_content:
+                    chapters.append(
+                        Chapter(
+                            title="正文",
+                            content=chapter_content,
+                            start_position=0,
+                            end_position=len(text),
+                        )
+                    )
+            return chapters
+
         # 添加最后一个章节
         if current_chapter_start < len(paragraphs):
             chapter_content = '\n\n'.join(
                 paragraphs[current_chapter_start:]
             ).strip()
-            
+
             if chapter_content:
                 # 找到内容在原文中的位置
                 content_start_pos = text.find(paragraphs[current_chapter_start])
                 content_end_pos = text.rfind(paragraphs[-1]) + len(paragraphs[-1])
-                
+
                 chapter = Chapter(
                     title=current_chapter_title,
                     content=chapter_content,
@@ -386,28 +425,17 @@ class EnhancedChapterDetector(RegexBasedChapterDetector):
         return chapters
     
     def _is_new_chapter_start(self, paragraph: str, index: int, paragraphs: List[str]) -> bool:
-        """
-        判断段落是否是新的章节开始
-        """
+        """判断段落是否是新的章节开始"""
         if not paragraph:
             return False
-        
-        # 检查是否匹配章节模式
+
+        # Primary: delegate to the stricter pattern-based check
         if self._is_potential_chapter_title(paragraph):
             return True
-        
-        # 检查段落的相对位置和长度特征
-        # 如果是第一个段落，可能是序章
-        if index == 0:
-            return len(paragraph) < 50  # 短标题可能是章节名
-        
-        # 检查段落长度：短段落更可能是章节标题
-        if 10 < len(paragraph) < 50:
-            # 检查段落内容是否包含标题特征
-            first_words = paragraph.split()[:3]
-            if any(word.istitle() or re.match(r'第\d+', word) for word in first_words):
-                return True
-        
+
+        # First paragraph: only accept if short AND pattern-matched
+        # (already handled above — no extra heuristic needed)
+
         return False
     
     def _post_process_chapters(self, chapters: List[Chapter], text: str) -> List[Chapter]:
