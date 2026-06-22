@@ -11,6 +11,48 @@
   - 想知道当前正在做什么，看"正在处理 / 待处理"。
 - 想追溯某一轮具体修复，看"历史详细记录"中的日期条目。
 
+## 2026-06-22 Phase Q.1.1: Two Novel Sample Re-audit — Parser Regression Fix & Chapter Boundary Reality Check（PARTIAL / AI_SMOKE_NOT_RUN）
+
+### 本轮目标
+- 验证首轮 Q.1.1 尝试中发现的 zero-chapter 回归是否已修复。
+- 重新评估本地解析对两个样本的章节边界检测现状。
+- 不调用 provider，不提交样本文本。
+
+### 本轮完成
+- 回归修复确认：`TextProcessingService().process_file(path)` 对两个样本均不再返回 zero chapter，而是返回 1 个 fallback 章节，与 Q.1 基线一致。
+- 章节边界现实检查：对两个样本进行 token-level 分析，发现 14 和 15 处 `第...章` 形 token 命中，但 0 处行首 heading match；所有 token-hit 行均含句内标点，属于正文内提及而非稳定源章节分隔符。
+- 结论：Q.1.1 不能证明稳定的源章节边界检测。zero-chapter 回归已修复，但章节切分仍依赖单一大章节的系统拆分策略。
+- AI smoke：未执行，继续保持阻塞直到获得明确 provider 授权。
+- 产出报告：`project-docs/sample-audits/two-novel-sample-q1.1.md`。
+
+### 测试结果
+- `.\.venv\Scripts\python.exe -m pytest -q tests/services/test_text_processing_service.py -v` -> 17 passed, 1 pytest cache warning.
+- `.\.venv\Scripts\python.exe -m pytest -q tests/services/test_ai_scheduler_import.py -v` -> 37 passed, 1 pytest cache warning.
+- `$env:GIT_MASTER='1'; git diff --check` -> no whitespace errors; LF/CRLF warning for `test_ai_scheduler_import.py` only.
+
+### After-audit Metrics（脱敏）
+- hash `0A5C408AC258`：detected_chapters 1, metadata_chapter_count 1, empty_chapters 0, shortest/longest/P50/P90/P95 106216, chapters_over_2500 1, estimated_assets_at_2500 43
+- hash `44EBB8B86935`：detected_chapters 1, metadata_chapter_count 1, empty_chapters 0, shortest/longest/P50/P90/P95 90936, chapters_over_2500 1, estimated_assets_at_2500 37
+
+### 安全边界
+- raw sample text copied? no
+- sample file names copied? no in Q.1.1 report
+- samples committed/staged? no
+- provider called? no
+- API key exposed? no
+- sample-specific code added? no
+
+### 风险更新
+- chapter boundary detection：仍为中高。zero-chapter 回归已修复，但稳定的多章节源边界检测尚未证明。
+- long chapter：高。两个样本仍然是单个大章节单元。
+- split quality：在真实 AI smoke 前未知。系统拆分单章 90k+ 字符可能影响叙事连贯性。
+
+### 下一步建议
+- Q.1.2 Chapter Boundary Deep Dive：聚焦验证这些样本是否真正包含稳定的源章节分隔符，还是仅有正文内章节提及，仍需避免复制原文。
+- Q.2 AI smoke：继续保持阻塞，直到获得明确的 provider 授权。
+
+---
+
 ## 2026-06-21 Phase Q.1: Two Novel Sample Extraction Readiness & Quality Baseline（PARTIAL / AI_SMOKE_NOT_RUN）
 
 ### 本轮目标
