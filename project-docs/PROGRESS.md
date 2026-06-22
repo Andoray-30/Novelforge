@@ -1,5 +1,44 @@
 ﻿# NovelForge 项目进度跟踪
 
+## 2026-06-22 Phase Q.2.1: Provider Recovery Probe & Fallback Readiness（PROVIDER_STILL_UNAVAILABLE）
+
+### 本轮目标
+- 执行 synthetic lightweight provider 探测，确认 Q.2 失败后 provider 是否已恢复。
+- 生成 Q.2.1 审计报告，判定 provider 状态并给出 Q.2 Retry 建议。
+- 不发送小说文本，不执行 Q.2 Retry，仅做诊断。
+
+### 本轮完成
+- 配置检查：.env 包含 OPENAI_API_KEY、OPENAI_BASE_URL、OPENAI_MODEL、NOVELFORGE_FAST_MODEL、NOVELFORGE_PRO_MODEL（具体值脱敏）。
+- Synthetic 探测：使用最小 payload（input="ping", max_tokens=10）探测 fast/flash 和 pro 两个路由。
+- 探测结果：两个路由均返回 HTTP 503 Service Unavailable，延迟分别为 956ms 和 794ms。
+- 状态判定：**PROVIDER_STILL_UNAVAILABLE** — 所有路由均失败，但错误从 Q.2 的 gateway_timeout（72,824ms / 91,255ms）演进为 503（956ms / 794ms），说明 gateway 本身已可达，后端服务仍不可用。
+- Fallback 建议：推荐使用备用 gateway `https://newapi.sync-api.xyz/v1`（比当前 `fast-newapi.sync-api.xyz:8848` 更稳定）。
+- 产出报告：`project-docs/sample-audits/two-novel-sample-q2.1-provider-recovery.md`。
+- 探测脚本：`novelforge-core/scripts/probe_provider_readiness.py`。
+
+### 探测详情
+
+| 路由 | 模型 | 延迟(ms) | 成功 | 错误类型 | HTTP 状态 |
+|------|------|----------|------|----------|-----------|
+| fast/flash | deepseek-ai/deepseek-v4-flash | 956 | False | http_503 | 503 |
+| pro | deepseek-ai/deepseek-v4-pro | 794 | False | http_503 | 503 |
+
+### Q.2 Retry 建议
+
+- **不允许执行 Q.2 Retry**。Provider 仍不可用（HTTP 503）。
+- 建议先尝试备用 gateway `https://newapi.sync-api.xyz/v1`，然后重新运行 Q.2.1 探测。
+- 若备用 gateway 可用，再执行 Sample B Q.2 Retry。
+
+### 安全边界
+
+- 小说文本发送：no
+- 样本提交：no
+- 原始 provider body 暴露：no
+- API Key 暴露：no
+- Q.2 Retry 执行：no
+
+---
+
 ## 2026-06-22 Phase Q.2: Real AI Import Smoke with Explicit Provider Authorization（FAIL / PROVIDER_UNAVAILABLE / SAMPLE_B_EXECUTED / SAMPLE_A_NOT_EXECUTED）
 
 ### 本轮目标
