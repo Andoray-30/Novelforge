@@ -217,6 +217,7 @@ class ExtractionService:
             session_id=session_id or "",
         )
         model_route = None
+        decision = None
         if getattr(self.config, "enable_model_router", True):
             decision = await self.model_router.select_model(role, session_id=session_id, parent_id=parent_id)
             role = decision.role or role
@@ -224,6 +225,41 @@ class ExtractionService:
             model_route["runtime_settings"] = self._model_role_settings(role, runtime_settings)
             if repair_strategy:
                 model_route["repair_strategy"] = repair_strategy
+            # Provider Health Gate: block if probes were attempted but none passed
+            if decision.probe_results and not decision.probe_passed:
+                diagnostics: Dict[str, Any] = {
+                    "provider_unavailable": True,
+                    "provider_health_summary": {
+                        "all_candidates_failed": True,
+                        "failed_routes": [r.model for r in decision.probe_results],
+                        "recommended_action": "check_provider_status_or_wait",
+                    },
+                    "model_route": model_route,
+                }
+                if repair_strategy:
+                    diagnostics["repair_strategy"] = repair_strategy
+                return {
+                    "status": "provider_unavailable",
+                    "retryable": True,
+                    "provider_health_summary": diagnostics["provider_health_summary"],
+                    "failed_routes": diagnostics["provider_health_summary"]["failed_routes"],
+                    "recommended_action": diagnostics["provider_health_summary"]["recommended_action"],
+                    "characters": [],
+                    "world_setting": None,
+                    "timeline_events": [],
+                    "relationships": [],
+                    "chapter_indices": [],
+                    "analysis_diagnostics": diagnostics,
+                    "candidate_counts": {},
+                    "failed_chapters": [],
+                    "chapter_index_attempts": [],
+                    "chapter_index_status": [],
+                    "relationship_unresolved_endpoints": [],
+                    "timeline_mismatch_events": [],
+                    "model_route": model_route,
+                    "retry_stats": None,
+                    "budget_summary": None,
+                }
             with_overrides = getattr(self.ai_service, "with_overrides", None)
             if decision.selected_model and callable(with_overrides):
                 routed_service = with_overrides(

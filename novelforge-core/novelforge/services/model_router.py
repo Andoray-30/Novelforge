@@ -236,6 +236,10 @@ class ModelRouteDecision:
             payload["selected_profile_metrics"] = selected_profile
         return payload
 
+    @property
+    def probe_passed(self) -> bool:
+        return any(result.passes_for_role() for result in self.probe_results)
+
     def _selected_profile_summary(self) -> Optional[Dict[str, Any]]:
         if not self.profile_rankings:
             return None
