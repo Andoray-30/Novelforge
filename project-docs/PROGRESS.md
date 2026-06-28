@@ -1,5 +1,41 @@
 ﻿# NovelForge 项目进度跟踪
 
+## 2026-06-28 Phase R.0: Provider Health Gate & Hard Fallback Enforcement
+
+### 本轮目标
+- 在 extraction pipeline 前增加 provider 健康硬门控，防止所有候选模型 probe 失败时仍进行章节级 extraction。
+- 当 ModelRouter 探测到所有候选均不可用时，在 `extract_and_merge` 调用前返回结构化的 `provider_unavailable` 结果。
+- 保持现有测试/假服务上下文的行为兼容性。
+
+### 本轮完成
+- **ModelRouteDecision 新增 `probe_passed` 属性**：基于 `probe_results` 判断是否有候选真正通过了角色探测。
+- **ExtractionService 新增 Provider Health Gate**：在 `extract_chapter_index_assets` 中，当 `enable_model_router` 为 True、探测已执行且没有任何 probe 通过时，直接返回结构化 provider_unavailable 结果，跳过 `extractor.extract_and_merge(chapters)`。
+- **诊断信息安全**：返回的 `provider_unavailable` 诊断仅包含模型路由状态（`all_candidates_failed`、`failed_routes`、`recommended_action`），不含原始 provider body、API key、prompt body、completion body 或小说/章节内容。
+- **行为兼容性**：无真实 client（`has_real_client() == False`）或探测被跳过的场景，保持原有行为不变。
+- **TDD 实施**：先写 RED 测试（7 个新测试全部失败），再实现功能，最终全部通过。
+- **回归测试**：
+  - test_model_router.py: 41 passed
+  - test_model_health.py: 7 passed
+  - test_ai_scheduler_import.py: 39 passed
+  - test_deep_synthesis.py: 68 passed
+  - test_extraction_service.py: 7 passed
+
+### 改动文件
+- `novelforge-core/novelforge/services/model_router.py`：新增 `ModelRouteDecision.probe_passed` 属性。
+- `novelforge-core/novelforge/services/extraction_service.py`：在 `extract_chapter_index_assets` 中新增 provider health gate 逻辑，并在 gate 触发时返回顶层 `status/retryable/provider_health_summary/failed_routes/recommended_action` 的自描述结果。
+- `novelforge-core/novelforge/services/ai_scheduler.py`：在 `_run_import_chapter_index_analysis` 中新增 provider_unavailable 诊断传播，将 `stage_results['chapter_index']` 从 `completed` 修正为 `failed`，并返回结构化的 provider-unavailable 结果；在 `_process_novel_import_task` 中把分析结果里的 `status/retryable/provider_health_summary/failed_routes/recommended_action` 传播到最终返回的 task result。
+- `novelforge-core/tests/services/test_extraction_service.py`：新增 7 个 TDD 测试。
+- `novelforge-core/tests/services/test_ai_scheduler_import.py`：新增 scheduler 传播测试与 `_process_novel_import_task` 级最终 result 传播测试。
+
+### 安全边界
+- 小说文本发送：no
+- 样本提交：no
+- 原始 provider body 暴露：no
+- API key 暴露：no
+- 诊断中包含用户内容：no
+
+---
+
 ## 2026-06-22 Phase Q.2.1: Provider Recovery Probe & Fallback Readiness（PROVIDER_STILL_UNAVAILABLE）
 
 ### 本轮目标
