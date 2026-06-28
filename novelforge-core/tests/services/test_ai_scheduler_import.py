@@ -480,6 +480,8 @@ def test_novel_import_uses_chapter_index_analysis_and_returns_diagnostics(monkey
     assert result["relationship_unresolved_endpoints"] == ["陌生人"]
     assert result["model_stage_plan"]["next_recommended_stage"] == "extractor_repair"
     assert result["analysis_diagnostics"]["model_stage_plan"]["next_recommended_stage"] == "extractor_repair"
+    for key in ("status", "retryable", "provider_health_summary", "failed_routes", "recommended_action"):
+        assert key not in result
 
 
 def test_novel_import_marks_low_information_character_assets_for_repair(monkeypatch, tmp_path):
@@ -556,6 +558,89 @@ def test_novel_import_marks_low_information_character_assets_for_repair(monkeypa
     assert character_item.extracted_data["diagnostic_seed"] is True
     assert character_item.extracted_data["needs_ai_repair"] is True
     assert character_item.extracted_data["source_type"] == "diagnostic_seed"
+
+
+def test_novel_import_propagates_provider_unavailable_to_final_result(monkeypatch, tmp_path):
+    from novelforge.services import ai_scheduler as scheduler_module
+    from novelforge.types.text_processing import Chapter, ProcessedText, TextMetadata
+
+    class FakeTextProcessingService:
+        def process_file(self, file_path, config):
+            content = Path(file_path).read_text(encoding="utf-8")
+            return ProcessedText(
+                content=content,
+                metadata=TextMetadata(title="Test Novel"),
+                chapters=[Chapter(title="Chapter 1", content=content, start_position=0, end_position=len(content), index=1)],
+            )
+
+    class FakeExtractionService:
+        async def extract_chapter_index_assets(self, chapters):
+            return {
+                "characters": [],
+                "relationships": [],
+                "timeline_events": [],
+                "world_setting": None,
+                "analysis_diagnostics": {
+                    "provider_unavailable": True,
+                    "provider_health_summary": {
+                        "all_candidates_failed": True,
+                        "failed_routes": ["model-a", "model-b"],
+                        "recommended_action": "check_provider_status_or_wait",
+                    },
+                    "model_route": {
+                        "role": "extractor_fast",
+                        "selected_model": "model-a",
+                        "reason": "no_probe_passed_using_best_score",
+                        "candidates": ["model-a", "model-b"],
+                    },
+                },
+                "model_route": {
+                    "role": "extractor_fast",
+                    "selected_model": "model-a",
+                    "reason": "no_probe_passed_using_best_score",
+                    "candidates": ["model-a", "model-b"],
+                },
+            }
+
+    monkeypatch.setattr("novelforge.services.text_processing_service.text_processing_service", FakeTextProcessingService())
+    import novelforge.services.extraction_service as extraction_module
+    monkeypatch.setattr(extraction_module, "get_extraction_service", lambda *args, **kwargs: FakeExtractionService())
+
+    source_path = tmp_path / "novel.txt"
+    source_path.write_text("Synthetic test content.", encoding="utf-8")
+    content_manager = RecordingContentManager()
+    scheduler = build_scheduler(content_manager=content_manager)
+    task = Task(
+        id="task-provider-unavailable",
+        type="novel_import",
+        status=TaskStatus.RUNNING,
+        priority=TaskPriority.HIGH,
+        parameters={
+            "file_path": str(source_path),
+            "book_title": "Test Novel",
+            "session_id": "session-pu",
+            "config": {},
+            "source_file_name": "novel.txt",
+        },
+        created_at=datetime.now(),
+    )
+
+    result = asyncio.run(scheduler._process_novel_import_task(task))
+
+    assert result["status"] == "provider_unavailable"
+    assert result["retryable"] is True
+    assert result["provider_health_summary"]["all_candidates_failed"] is True
+    assert result["failed_routes"] == ["model-a", "model-b"]
+    assert result["recommended_action"] == "check_provider_status_or_wait"
+    assert result["analysis_status"] == "failed"
+    assert result["analysis_stage_results"]["chapter_index"] == "failed"
+    assert result["characters_count"] == 0
+    assert result["world_count"] == 0
+    assert result["relationships_count"] == 0
+    assert result["timeline_count"] == 0
+    assert result["analysis_diagnostics"]["provider_unavailable"] is True
+    assert result.get("chapter_index_attempts") is None or result.get("chapter_index_attempts") == []
+    assert "Synthetic test content" not in str(result.get("analysis_diagnostics", {}))
 
 
 def test_character_quality_metadata_marks_backfilled_seed():
@@ -2321,3 +2406,69 @@ def test_import_deep_analysis_prefers_guided_relationship_extraction_when_availa
     assert len([rel for rel in relationships if {rel.source, rel.target} == {"林墨", "周岚"}]) == 1
     assert "陌生人" in result["relationship_unresolved_endpoints"]
     assert any("关系端点无法映射到角色池" in issue for issue in result["quality_issues"])
+
+
+def test_chapter_index_analysis_propagates_provider_unavailable():
+    class ProviderUnavailableService:
+        async def extract_chapter_index_assets(self, chapters, diagnostics_recorder=None, model_role=None, repair_strategy=None):
+            return {
+                "characters": [],
+                "relationships": [],
+                "timeline_events": [],
+                "world_setting": None,
+                "analysis_diagnostics": {
+                    "provider_unavailable": True,
+                    "provider_health_summary": {
+                        "all_candidates_failed": True,
+                        "failed_routes": ["model-a", "model-b"],
+                        "recommended_action": "check_provider_status_or_wait",
+                    },
+                    "model_route": {
+                        "role": "extractor_fast",
+                        "selected_model": "model-a",
+                        "reason": "no_probe_passed_using_best_score",
+                        "candidates": ["model-a", "model-b"],
+                    },
+                },
+                "model_route": {
+                    "role": "extractor_fast",
+                    "selected_model": "model-a",
+                    "reason": "no_probe_passed_using_best_score",
+                    "candidates": ["model-a", "model-b"],
+                },
+            }
+
+    scheduler = build_scheduler(storage_manager=MemoryStorageManager())
+    task = Task(
+        id="provider-unavailable",
+        type="novel_import",
+        status=TaskStatus.RUNNING,
+        priority=TaskPriority.HIGH,
+        parameters={"session_id": "session-pu", "parent_id": "novel-pu"},
+        created_at=datetime.now(),
+    )
+
+    result = asyncio.run(
+        scheduler._run_import_chapter_index_analysis(
+            ProviderUnavailableService(),
+            [{"id": "chapter-1", "title": "第一章", "chapter_index": 1, "content": "正文"}],
+            task,
+        )
+    )
+
+    assert result["status"] == "provider_unavailable"
+    assert result["retryable"] is True
+    assert result["provider_health_summary"]["all_candidates_failed"] is True
+    assert result["failed_routes"] == ["model-a", "model-b"]
+    assert result["recommended_action"] == "check_provider_status_or_wait"
+    assert result["analysis_status"] == "failed"
+    assert result["stage_results"]["chapter_index"] == "failed"
+    assert result["characters"] == []
+    assert result["world_setting"] is None
+    assert result["timeline_events"] == []
+    assert result["relationships"] == []
+    assert result["chapter_index_attempts"] == []
+    # Safe diagnostics: no raw text leakage
+    result_str = str(result)
+    assert "正文" not in result_str
+    assert "chapter-1" not in result_str

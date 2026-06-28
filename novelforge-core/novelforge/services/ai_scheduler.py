@@ -2166,6 +2166,46 @@ class AITaskScheduler:
             task,
         )
         diagnostics = analysis.get("analysis_diagnostics", {}) or {}
+
+        # Provider Health Gate: propagate provider_unavailable upstream
+        if diagnostics.get("provider_unavailable"):
+            provider_health_summary = diagnostics.get("provider_health_summary", {})
+            model_route = analysis.get("model_route") or diagnostics.get("model_route")
+            return {
+                "status": "provider_unavailable",
+                "retryable": True,
+                "provider_health_summary": provider_health_summary,
+                "failed_routes": provider_health_summary.get("failed_routes", []),
+                "recommended_action": provider_health_summary.get("recommended_action", "check_provider_status_or_wait"),
+                "analysis_status": "failed",
+                "stage_results": {
+                    "chapter_index": "failed",
+                    "characters": "failed",
+                    "timeline_events": "failed",
+                    "world_setting": "failed",
+                    "relationships": "failed",
+                },
+                "characters": [],
+                "world_setting": None,
+                "timeline_events": [],
+                "relationships": [],
+                "errors": [],
+                "quality_issues": [],
+                "analysis_diagnostics": diagnostics,
+                "candidate_counts": {},
+                "failed_chapters": [],
+                "chapter_index_attempts": [],
+                "chapter_index_status": [],
+                "relationship_unresolved_endpoints": [],
+                "relationship_unresolved_details": [],
+                "relationship_endpoint_resolution": [],
+                "relationship_low_confidence_resolved_endpoints": [],
+                "timeline_mismatch_events": [],
+                "model_route": model_route,
+                "model_stage_plan": None,
+                "analysis_warning": None,
+            }
+
         characters = list(analysis.get("characters") or [])
         relationships = list(analysis.get("relationships") or [])
         timeline_events = list(analysis.get("timeline_events") or [])
@@ -3058,6 +3098,11 @@ class AITaskScheduler:
             relationship_unresolved_endpoints = extracted.get("relationship_unresolved_endpoints", [])
             timeline_mismatch_events = extracted.get("timeline_mismatch_events", [])
             model_stage_plan = extracted.get("model_stage_plan") or analysis_diagnostics.get("model_stage_plan") or {}
+            provider_status = extracted.get("status")
+            retryable_flag = extracted.get("retryable")
+            provider_health_summary = extracted.get("provider_health_summary")
+            failed_routes = extracted.get("failed_routes")
+            recommended_action = extracted.get("recommended_action")
 
             task.message = "AI 分析完成，正在保存结果..."
             await self._save_task(task)
@@ -3092,6 +3137,11 @@ class AITaskScheduler:
             analysis_diagnostics["model_stage_plan"] = model_stage_plan
             task.message = f"AI 分析失败: {str(e)[:50]}"
             await self._save_task(task)
+            provider_status = None
+            retryable_flag = None
+            provider_health_summary = None
+            failed_routes = None
+            recommended_action = None
         
         # 保存提取资产 - 角色（全量保存深度信息）
         characters_count = 0
@@ -3305,7 +3355,7 @@ class AITaskScheduler:
             f"导入完成：已写入 {len(chapters_to_save)} 个章节"
             + (f"，并完成 {characters_count} 个角色、{world_count} 个世界设定、{timeline_count} 个时间线、{rel_count} 个关系资产分析" if analysis_status == "completed" else "，但深度分析未完全完成")
         )
-        return {
+        result_dict: Dict[str, Any] = {
             "book_title": book_title,
             "parent_id": parent_id,
             "chapters_count": len(chapters_to_save),
@@ -3332,6 +3382,13 @@ class AITaskScheduler:
             "timeline_mismatch_events": timeline_mismatch_events,
             "model_stage_plan": model_stage_plan,
         }
+        if provider_status == "provider_unavailable":
+            result_dict["status"] = provider_status
+            result_dict["retryable"] = retryable_flag
+            result_dict["provider_health_summary"] = provider_health_summary
+            result_dict["failed_routes"] = failed_routes
+            result_dict["recommended_action"] = recommended_action
+        return result_dict
     
     async def submit_task(self, task_type: str, parameters: Dict[str, Any], 
                          priority: TaskPriority = TaskPriority.MEDIUM, 
