@@ -1,5 +1,40 @@
 ﻿# NovelForge 项目进度跟踪
 
+## 2026-06-30 Phase Q.2.4: Sample A SiliconFlow Flash Smoke（PRECHECK_FAILED）
+
+### 本轮目标
+- 对 Sample A 执行 SiliconFlow + DeepSeek-V4-Flash 真实 AI 导入 smoke，验证长篇提取链路。
+- 不切换 provider/model，不发送 Sample A 到任何备选 provider。
+
+### 本轮完成
+- Preflight 前置检查：分支 `codex/novelforge-next` ✅，Sample A 元数据（hash prefix `0A5C408AC258`，chars `110,970`，bytes `313,435`，expected split ~10）全部通过 ✅。
+- Provider preflight probe：向 `https://api.siliconflow.cn/v1` 发送轻量探测，目标模型 `deepseek-ai/DeepSeek-V4-Flash`。
+- Probe 结果：HTTP 401 "Api key is invalid"，available=false。
+- 后续字段 non_empty_chat / json_capable / extraction_rich / selected_model 均未到达。
+- Sample A **未发送**到 provider，scheduler **未执行**，无 temp copy / temp dir 创建，无 orphan Python 进程。
+- `.env` 未编辑/未提交，samples 未提交，源代码未修改。
+
+### 决策
+- **`PRECHECK_FAILED`**
+- Preflight 探测阶段因 worker-accessible SiliconFlow key / process-accessible key 无效（HTTP 401）而终止。
+- Sample A 未到达 provider 执行阶段，scheduler 未导入。
+
+### 安全边界
+- 小说文本发送：no
+- 样本提交：no
+- API key 暴露：no
+- 原始 provider body 暴露：no
+- provider request ID 暴露：no
+- `.env` 编辑/提交：no
+- 源代码修改：no
+
+### 下一步建议
+- **提供/inject 有效的 SiliconFlow process-level API key**：当前 worker-accessible key 对 `https://api.siliconflow.cn/v1` 返回 401。需要一个对 SiliconFlow 端点有效的 process-accessible API key。
+- **重新执行 Q.2.4**：API key 更新后，重新运行 Sample A SiliconFlow Flash smoke。
+- **不建议切换 provider 或使用 fallback**：本轮目标是验证 SiliconFlow + DeepSeek-V4-Flash 链路，provider 切换不在 Q.2.4 范围内。
+
+---
+
 ## 2026-06-28 Phase R.0: Provider Health Gate & Hard Fallback Enforcement
 
 ### 本轮目标
