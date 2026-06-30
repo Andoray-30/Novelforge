@@ -1,5 +1,47 @@
 ﻿# NovelForge 项目进度跟踪
 
+## 2026-06-30 Phase D.0: Deployment Readiness Audit（CONDITIONAL / PARTIAL）
+
+### 本轮目标
+- 基于已有 Q.2/Q.2.3/Q.2.4 证据，执行 deployment readiness audit 并制定最小 MVP 部署计划。
+- 不执行 Sample A/B 提取，不修改源码，不运行应用服务器。仅含 1 次合成 tiny provider probe。
+
+### 本轮完成
+- D.0 报告创建：`project-docs/deployment-readiness-d0.md`，包含 Readiness Matrix、Provider Deployment Recommendation、Minimal Deploy Checklist、Blockers、Next Phase 规划。
+- 基线安全：`.env` gitignored，未打印、未 staged、未 committed；样本 `.txt` 未提交；无 API key / 供应商原始响应内容 / 请求标识泄露。
+- 前端验证 PASS：`npm test -- --run` 263 tests / 36 files，`npx tsc --noEmit` 零错误，`npm run build` 编译成功。
+- Provider tiny probe 恢复：向 SiliconFlow `deepseek-ai/DeepSeek-V4-Flash` 发送合成 `ping`（`max_tokens=10`，无样本正文），HTTP 200，延迟 11721ms，`parse_ok=true`。本地进程级凭证注入已恢复。
+- 后端定向测试 93 passed / 1 failed：`test_import_chapter_split_size_uses_extractor_fast_role_settings` 期望 1200 实际 12000，配置/代码预期值不一致。
+
+### 决策
+- **`CONDITIONAL / PARTIAL`**
+- Provider tiny probe 恢复，Sample B 完整提取通过，前端验证全通过，但后端定向测试存在 1 个失败用例，Sample A 尚未在凭证恢复后重跑，部署环境凭证注入未验证。当前不具备完整上线条件。
+
+### 安全边界
+- 样本正文发送：no（仅合成 `ping`）
+- Sample A/B 执行：no
+- API key 暴露：no
+- 供应商原始响应内容 / 请求标识暴露：no
+- `.env` 本地更新：是（SiliconFlow 进程凭证，gitignored，未打印、未 staged、未 committed）
+- 样本 `.txt` 未跟踪、未提交
+- 源代码未修改
+- 验证与内容生成阶段未 stage/commit/push/reset；最终 D.0 提交仅允许包含 `project-docs/deployment-readiness-d0.md` 与 `project-docs/PROGRESS.md`
+
+### 阻断项与部署检查缺口
+1. **后端 split config 测试失败**：`test_import_chapter_split_size_uses_extractor_fast_role_settings` 预期值不一致（1200 vs 12000），需在 D.0.1 中确认设计意图并修复。
+2. **Sample A 未重跑**：Q.2.4 因 HTTP 401 未执行，凭证恢复后尚未重跑，长篇提取质量未验证。
+3. **部署检查缺口：凭证/admin/session/public flag 未审计**：本地 `.env` 已更新但部署环境注入方式未确认。
+
+### 下一步建议
+- **D.0.1**：聚焦后端 split config 测试修复/确认，目标 94/94 通过。
+- **D.1**：Provider 复验 + Sample A smoke（需用户授权），建立双样本提取质量基线。
+- **D.2**：部署配置加固（admin password / session secret / public flag / `.env` 注入方式）。
+
+### 参考文档
+- `project-docs/deployment-readiness-d0.md`
+
+---
+
 ## 2026-06-30 Phase Q.2.4: Sample A SiliconFlow Flash Smoke（PRECHECK_FAILED）
 
 ### 本轮目标
