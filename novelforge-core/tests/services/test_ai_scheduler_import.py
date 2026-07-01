@@ -1198,6 +1198,8 @@ def test_import_chapter_split_size_uses_extractor_fast_role_settings(monkeypatch
 
     scheduler = AITaskScheduler(DummyAIService(), MemoryStorageManager(), ChunkConfig())
 
+    # Isolate: clear any process-level override so role-settings default is tested.
+    monkeypatch.delenv("NOVELFORGE_IMPORT_CHAPTER_MAX_CHARS", raising=False)
     assert scheduler._resolve_import_chapter_max_chars() == 1200
 
     monkeypatch.setenv("NOVELFORGE_IMPORT_CHAPTER_MAX_CHARS", "500")
