@@ -1,5 +1,40 @@
 ﻿# NovelForge 项目进度跟踪
 
+## 2026-07-01 Phase D.1: Minimal Deploy Config & Security Hardening
+
+### 本轮目标
+- 创建可执行的最小部署指南和配置模板，使 NovelForge 可以通过文档独立部署。
+- 不修改源码、不执行 provider 调用。仅含文档和配置示例变更；主会话运行后端定向 pytest、前端类型检查和前端 production build 作为回归验证。
+
+### 本轮完成
+- `.env.example` 全面重写：覆盖所有 `Config` 支持的环境变量，placeholder-only 值，SiliconFlow Flash 默认 provider，Q.2.3 提取调优建议，安全变量文档。
+- `project-docs/DEPLOYMENT.md` 创建：最小部署指南，含 Windows/Linux 启动命令、Provider 设置、存储备份、安全检查清单、MVP Smoke 清单。
+- `project-docs/deployment-readiness-d1.md` 创建：D.1 就绪记录。
+- 三份 README 端口对齐：后端 8000 → 8001，前端环境变量对齐 `NEXT_PUBLIC_NOVELFORGE_URL=http://localhost:8001`，添加 DEPLOYMENT.md 链接。
+- 主会话验证通过：后端定向 pytest 94/94 通过；前端 `npx tsc --noEmit --incremental false` 通过；前端 `npm run build` 通过；`git diff --check` 通过。
+- Provider tiny probe 未重跑，沿用 D.0 合成 `ping` 证据（HTTP 200，`parse_ok=true`）；本轮未运行 Sample A/B，未发送小说正文。
+
+### 决策
+- **PASS**（文档/配置示例完备，主会话验证通过，剩余项有意移至 D.2）
+- 不声称生产就绪。D.1 仅确保有可执行的部署文档和配置模板。
+
+### 安全边界
+- 源代码：未修改
+- 测试：未修改；后端定向 pytest、前端 tsc、前端 build 已运行通过
+- `.env`（本地）：未修改
+- API key：未暴露
+- Provider 原始响应：未暴露
+- Git：最终通过显式文件列表 stage / commit / push；未 reset；样本不提交
+
+### 参考文档
+- `project-docs/DEPLOYMENT.md`
+- `project-docs/deployment-readiness-d1.md`
+
+### 下一步建议
+- **D.2**：部署加固（反向代理模板、限流、密码强度、日志脱敏审计、Sample A 全量提取 smoke）
+
+---
+
 ## 2026-06-30 Phase D.0: Deployment Readiness Audit（CONDITIONAL / PARTIAL）
 
 ### 本轮目标
