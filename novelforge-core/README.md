@@ -118,15 +118,15 @@ NOVELFORGE_ALLOW_RUNTIME_OPENAI_OVERRIDES=false
 
 ```bash
 # 开发模式（自动重载）
-uvicorn novelforge.api.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn novelforge.api.main:app --reload --host 0.0.0.0 --port 8001
 
 # 或
 python -m novelforge.api.main
 ```
 
 访问：
-- API 服务：http://localhost:8000
-- Swagger 文档：http://localhost:8000/docs
+- API 服务：http://localhost:8001
+- Swagger 文档：http://localhost:8001/docs
 
 ---
 
@@ -159,7 +159,7 @@ novelforge-core/
 │   └── world_tree/           # 世界树系统
 ├── frontend/                 # Next.js 前端（见 frontend/README.md）
 ├── scripts/                  # 工具脚本
-│   ├── test_api.py           # API 冒烟测试（需后端运行在 :8000）
+│   ├── test_api.py           # API 冒烟测试（需后端运行在 :8001）
 │   ├── test_api_rate_limit.py# OpenAI API 速率测试工具
 │   ├── start_api.py          # 快速启动脚本
 │   └── ...                   # 其他工具脚本
@@ -255,7 +255,7 @@ python test_text_processing.py
 # 完整后端功能集成测试（需要 AI API 配置）
 python test_backend_features.py
 
-# API 冒烟测试（需要后端服务运行在 :8000）
+# API 冒烟测试（需要后端服务运行在 :8001）
 python scripts/test_api.py
 
 # pytest 运行所有测试
@@ -287,3 +287,9 @@ pytest --cov=novelforge  # 含覆盖率
 - **动态并发控制**：根据 API 响应自动调整并发数（2~10）
 - **智能限流**：RPM/TPM 限流，防止触发 API 限制
 - **指数退避重试**：失败时自动重试，带随机抖动
+
+---
+
+## 更多文档
+
+- 部署指南：`../project-docs/DEPLOYMENT.md`

@@ -107,13 +107,19 @@ frontend/
 
 ```env
 # NovelForge 后端 API 地址
-NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_NOVELFORGE_URL=http://localhost:8001
 
 # SillyTavern 地址
 NEXT_PUBLIC_SILLYTAVERN_URL=http://localhost:8000
 ```
 
 公开部署时，前端请求会携带 HttpOnly 登录 Cookie；后端需配置 `FRONTEND_ORIGIN` 为前端域名。公开部署模式下浏览器端 OpenAI Key 覆盖入口会隐藏，统一使用后端服务端 Key。
+
+---
+
+## 更多文档
+
+- 部署指南：`../../../project-docs/DEPLOYMENT.md`
 
 ---
 
@@ -124,7 +130,7 @@ NEXT_PUBLIC_SILLYTAVERN_URL=http://localhost:8000
 ```typescript
 import { APIClient } from '@/lib/api/client'
 
-const client = new APIClient('http://localhost:8000')
+const client = new APIClient('http://localhost:8001')
 
 // GET 请求
 const data = await client.get<ResponseType>('/api/ai/generate-story-outline')

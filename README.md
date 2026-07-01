@@ -28,7 +28,7 @@ cd novelforge-core
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e .
-uvicorn novelforge.api.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn novelforge.api.main:app --reload --host 0.0.0.0 --port 8001
 ```
 
 ### 2) Frontend (optional)
@@ -41,8 +41,8 @@ npm run dev
 
 ### 3) Open API Docs
 
-- Backend: http://localhost:8000
-- Swagger: http://localhost:8000/docs
+- Backend: http://localhost:8001
+- Swagger: http://localhost:8001/docs
 
 ## Notes
 
@@ -51,6 +51,7 @@ npm run dev
 
 ## More Documentation
 
+- Deployment guide: `project-docs/DEPLOYMENT.md`
 - Core backend documentation: `novelforge-core/README.md`
 - Project plan: `project-docs/IMPLEMENTATION_PLAN.md`
 - Progress tracking: `project-docs/PROGRESS.md`
