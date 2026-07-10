@@ -1,6 +1,48 @@
 ﻿# NovelForge 项目进度跟踪
 
-## 2026-07-01 Phase D.1: Minimal Deploy Config & Security Hardening
+## 2026-07-10 Phase D.2: Public Deployment Guardrails Closure
+
+### 本轮目标
+- 只收口既有 D.2 七文件改动：公开部署启动 guardrails、auth 测试、反向代理静态模板和证据文档。
+- 不调用 provider，不运行 Sample A/B，不读取或发送用户小说文本。
+
+### 实现
+- 公开模式强制 `auth_required`、强管理员密码、非 placeholder 且不少于 32 字符的 session secret、关闭 runtime provider override、mock 和 debug，并保留既有 provider key/content_db/目录可写检查。
+- `FRONTEND_ORIGIN` 严格限制为公开绝对 HTTPS Origin，拒绝 wildcard、userinfo、localhost/loopback/`.local`/placeholder、附加 path/query/fragment 和畸形 URL；公开 CORS 仅保留该 Origin，本地开发仍允许 localhost。
+- 配置错误不回显配置值；通用异常及公开模式 HTTP 5xx 使用固定安全消息，不回显 `str(exc)`。
+- Caddy 与 Nginx 模板覆盖前后端路由、上传限制、安全头和长任务 timeout；Nginx 另含 HTTP→HTTPS、有效 HTTPS block、WebSocket 和 per-IP 限流。两份模板均为 `STATIC_REVIEW_ONLY`。
+
+### 本轮验证
+- **verified by test**：focused review 修复后，`tests/api/test_auth.py` 实际 `52 passed`。
+- **verified by test**：四个指定核心 services 文件实际 `94 passed`。
+- **verified by test**：`npx tsc --noEmit --incremental false` 零错误。
+- **verified by test**：`npm run build` 成功，Next.js 15.5.12，13/13 静态页面生成。
+- **static review only**：Caddy/Nginx 模板；未执行代理二进制语法检查或真实 TLS/代理 E2E。
+- **verified by local smoke**：backend 8001 与 frontend 3000 同时运行；`/health`、`/openapi.json`、frontend `/` 均为 HTTP 200；停止后 3000/8001 均无残留监听。
+- pytest 仅出现现有 `.pytest_cache` Windows ACL 写入警告，不影响测试结果；未尝试管理员权限清理。
+
+### Focused review
+- 初始实质结果：0 critical、2 high、2 medium。
+- 已处理：Origin canonicalization 与真实 CORS preflight、placeholder 变体、WHATWG/非规范 loopback、Nginx 固定 authority redirect。
+- 修复后 auth 52 passed、核心回归 94 passed、`git diff --check` 通过。状态为 findings resolved，不写作 independent reviewer PASS。
+
+### 当前决策
+- **PASS**：D.2 的确定性代码/测试/build、无 provider local smoke 和 focused review findings closure 已完成。
+- 代理仍为 `STATIC_REVIEW_ONLY`；不声称 production certified、真实代理/TLS E2E 通过或 independent reviewer PASS。
+
+### 已知 post-D.2 focused issue
+- provider/model routing 层仍可能把上游非 JSON 异常文本写入内部错误摘要；该位置超出本轮七文件修改边界，本轮不声称已修复。公开 API 的通用 5xx 已固定为安全消息。
+
+### 安全边界
+- `.env` 未修改；没有 provider 调用；没有 Sample A/B；没有读取或发送用户小说正文。
+- 没有 stage、commit 或 push；这些动作由主任务在最终安全检查后显式执行。
+
+### Next Goal
+- **Local MVP Synthetic Import Acceptance**
+
+---
+
+## 历史前置阶段：2026-07-01 Phase D.1: Minimal Deploy Config & Security Hardening
 
 ### 本轮目标
 - 创建可执行的最小部署指南和配置模板，使 NovelForge 可以通过文档独立部署。
@@ -30,12 +72,12 @@
 - `project-docs/DEPLOYMENT.md`
 - `project-docs/deployment-readiness-d1.md`
 
-### 下一步建议
-- **D.2**：部署加固（反向代理模板、限流、密码强度、日志脱敏审计、Sample A 全量提取 smoke）
+### 历史状态
+- D.1 已被 D.2 收口工作继承，不再作为当前 next step。
 
 ---
 
-## 2026-06-30 Phase D.0: Deployment Readiness Audit（CONDITIONAL / PARTIAL）
+## 历史前置阶段：2026-06-30 Phase D.0: Deployment Readiness Audit（CONDITIONAL / PARTIAL）
 
 ### 本轮目标
 - 基于已有 Q.2/Q.2.3/Q.2.4 证据，执行 deployment readiness audit 并制定最小 MVP 部署计划。
@@ -67,10 +109,8 @@
 2. **Sample A 未重跑**：Q.2.4 因 HTTP 401 未执行，凭证恢复后尚未重跑，长篇提取质量未验证。
 3. **部署检查缺口：凭证/admin/session/public flag 未审计**：本地 `.env` 已更新但部署环境注入方式未确认。
 
-### 下一步建议
-- **D.0.1**：聚焦后端 split config 测试修复/确认，目标 94/94 通过。
-- **D.1**：Provider 复验 + Sample A smoke（需用户授权），建立双样本提取质量基线。
-- **D.2**：部署配置加固（admin password / session secret / public flag / `.env` 注入方式）。
+### 历史状态
+- D.0/D.0.1 已由后续阶段取代，不再作为当前 next step。
 
 ### 参考文档
 - `project-docs/deployment-readiness-d0.md`

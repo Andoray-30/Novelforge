@@ -1,7 +1,7 @@
-# NovelForge 最小部署指南
+# NovelForge 部署指南
 
-> D.1 交付物。覆盖本地开发和单机内部部署场景。
-> 不是生产加固指南。安全检查清单中标注了已覆盖和未覆盖的项目。
+> D.1 是本指南的历史基础；D.2 增加公开部署启动 guardrails 和反向代理静态模板。
+> 本指南不是生产认证，尚未证明真实域名、TLS、反向代理或公开网络 E2E。
 
 ---
 
@@ -15,11 +15,13 @@
 - SiliconFlow + DeepSeek-V4-Flash Provider 配置
 - 存储与备份基础
 - 非公开部署安全检查清单
+- D.2 公开模式启动 guardrails
+- Caddy / Nginx 静态占位模板
 
 本指南**不**覆盖：
 
 - 多实例 / 负载均衡部署
-- HTTPS 终止 / 反向代理配置（需在前端使用 nginx/caddy）
+- 真实域名、证书和反向代理 E2E
 - CI/CD 流水线配置
 - 面向公众的生产部署加固
 - 容器编排
@@ -212,6 +214,28 @@ copy data\novelforge_content.db backups\novelforge_content_$(Get-Date -Format yy
 
 ---
 
+## 公开部署 Guardrails
+
+当 `NOVELFORGE_PUBLIC_DEPLOYMENT=true` 时，后端在启动时会强制执行以下 guardrails。任何一项检查失败都会导致应用拒绝启动：
+
+| Guardrail | 规则 | 失败时行为 |
+|-----------|------|----------|
+| 认证开关 | `NOVELFORGE_AUTH_REQUIRED=true` | 启动失败，错误仅指出配置名 |
+| 管理员密码强度 | 非空、非 placeholder、长度 >= 12，且包含大小写字母、数字和特殊字符 | 启动失败，错误提示策略名（不含实际密码） |
+| Session Secret 强度 | 非空、非 placeholder（如 `replace-with-a-long-random-string`）、长度 >= 32 | 启动失败，错误提示策略名（不含实际 secret） |
+| Provider Key | 必须已配置 | 启动失败，错误提示 `OPENAI_API_KEY` |
+| 前端 Origin | 仅接受绝对 HTTPS Origin；拒绝 wildcard、userinfo、local/loopback/`.local`/placeholder host、附加 path/query/fragment 和畸形 URL | 启动失败，错误不回显 Origin 值 |
+| CORS | 公开模式仅允许已验证的 `FRONTEND_ORIGIN`；本地模式保留 localhost 开发来源 | 公开模式不注入 localhost 来源 |
+| 运行时 OpenAI 覆盖 | `NOVELFORGE_ALLOW_RUNTIME_OPENAI_OVERRIDES` 必须为 `False` | 启动失败，错误提示覆盖策略 |
+| Mock 工具调用 | `NOVELFORGE_MOCK_TOOL_CALLS` 必须为 `False` | 启动失败，错误提示 mock 策略 |
+| Debug | `NOVELFORGE_DEBUG` 必须为 `False` | 启动失败，错误提示 debug 策略 |
+| 内容数据库 | `STORAGE_TYPE` 必须为 `content_db`，`USE_CONTENT_DATABASE` 必须为 `True` | 启动失败，错误提示存储策略 |
+| 错误消息安全 | 配置错误仅包含变量名 / 策略说明；通用异常及公开模式 HTTP 5xx 使用固定安全消息 | 不回显异常文本、密码、Session Secret 或 API Key 值 |
+
+> **验证证据（2026-07-10）**：focused review 修复后，`tests/api/test_auth.py` 实际收集并通过 52 项；核心服务定向回归实际通过 94 项。真实公开部署 E2E 未执行。
+
+---
+
 ## 安全检查清单
 
 ### 本地开发（默认）
@@ -233,10 +257,19 @@ copy data\novelforge_content.db backups\novelforge_content_$(Get-Date -Format yy
 ### 公开部署（额外要求）
 
 - [ ] 设置 `NOVELFORGE_PUBLIC_DEPLOYMENT=true`
+- [ ] 设置 `NOVELFORGE_AUTH_REQUIRED=true`
 - [ ] 上述内部部署所有项目
 - [ ] 通过反向代理（nginx/caddy）进行 HTTPS 终止
-- [ ] 强 `NOVELFORGE_ADMIN_PASSWORD`
-- [ ] 确认 `FRONTEND_ORIGIN` 与 HTTPS 前端域名匹配
+- [ ] 强 `NOVELFORGE_ADMIN_PASSWORD`（非 placeholder、长度 >= 12，包含大小写字母、数字和特殊字符）
+- [ ] 强 `NOVELFORGE_SESSION_SECRET`（非 placeholder、长度 >= 32）
+- [ ] 确认 `FRONTEND_ORIGIN` 为无 userinfo/path/query/fragment 的公开 HTTPS Origin
+- [ ] 设置 `NOVELFORGE_ALLOW_RUNTIME_OPENAI_OVERRIDES=false`
+- [ ] 设置 `NOVELFORGE_MOCK_TOOL_CALLS=false`（公开部署禁止 mock）
+- [ ] 设置 `NOVELFORGE_DEBUG=false`
+- [ ] 确认 `STORAGE_TYPE=content_db` 且 `USE_CONTENT_DATABASE=true`
+- [ ] 确认 `.env` 未提交到版本控制
+
+> **Guardrails 说明**：当 `NOVELFORGE_PUBLIC_DEPLOYMENT=true` 时，后端启动会自动检查上述配置。若检查失败，应用将拒绝启动并返回包含变量名 / 策略说明的错误信息（不会泄漏实际密码或 secret 值）。
 
 ### Cookie 行为
 
@@ -247,15 +280,92 @@ NovelForge 使用 HttpOnly 会话 cookie：
 
 ---
 
-## MVP 冒烟检查清单
+## 本地启动冒烟检查清单（Wave 4）
 
-启动后验证：
+> 以下检查项必须在**前后端均启动后**执行。仅启动前端而不启动后端会导致 API 调用失败、数据不返回、测试结果不可靠。
 
-1. **后端健康**：`curl http://localhost:8001/health` 返回 OK
-2. **Swagger 文档**：`http://localhost:8001/docs` 可加载
-3. **前端**：`http://localhost:3000` 可加载
-4. **Provider 探测**：`python scripts/probe_provider_readiness.py` 返回成功
-5. **导入冒烟**：通过 Extract 页面上传一个小文本文件，验证章节已创建
+### 1. 后端启动验证
+
+```powershell
+cd novelforge-core
+.\.venv\Scripts\Activate.ps1
+uvicorn novelforge.api.main:app --reload --port 8001
+```
+
+- [ ] 后端启动无异常，无 guardrails 报错
+- [ ] `curl http://localhost:8001/health` 返回 OK
+- [ ] `http://localhost:8001/docs` 可加载
+
+### 2. 前端启动验证
+
+```powershell
+cd novelforge-core/frontend
+npm run dev
+```
+
+- [ ] 前端启动无编译错误
+- [ ] `http://localhost:3000` 可加载
+- [ ] 前端可正常代理 API 请求到 `127.0.0.1:8001`
+
+### 3. Provider 凭证预检
+
+在尝试真实提取之前，先运行 provider 探测脚本验证连通性和凭证有效性：
+
+```powershell
+cd novelforge-core
+python scripts/probe_provider_readiness.py
+```
+
+- [ ] 探测脚本返回成功（`parse_ok=true`）
+- [ ] 若失败，根据错误类型排查：
+  - `provider_unavailable` → 检查 `OPENAI_BASE_URL`
+  - `key invalid` / HTTP 401 → 检查 `OPENAI_API_KEY`
+  - HTTP 503 → Provider 服务暂时不可用，稍后重试
+  - 超时 → 检查网络，增大 `NOVELFORGE_MODEL_PROBE_TIMEOUT`
+
+> **安全提示**：探测脚本仅发送合成 `ping`（`max_tokens=10`），不会发送小说正文或用户数据。脚本输出不含 API key、原始请求体、原始响应体或请求标识。
+
+### D.2 本轮验证记录（2026-07-10）
+
+| 检查 | 状态 | 本轮证据 |
+|------|------|----------|
+| public/auth guardrails | verified by test | `tests/api/test_auth.py`: 52 passed |
+| 核心服务回归 | verified by test | 指定四个 services 测试文件：94 passed |
+| frontend typecheck | verified by test | `npx tsc --noEmit --incremental false`：零错误 |
+| frontend production build | verified by test | Next.js 15.5.12 build 成功，13/13 静态页面生成 |
+| Caddy / Nginx | static review only | 本轮未发现可用二进制，未执行目标服务器语法检查 |
+| 前后端同时启动 smoke | verified by local smoke | backend 8001 与 frontend 3000 同时运行；`/health`、`/openapi.json`、frontend `/` 均为 HTTP 200；停止后两端口均无残留监听 |
+| 真实 TLS / proxy E2E | not verified | D.2 不进行真实公开部署 |
+| Provider / Extract | not run | 本轮禁止 provider、样本和真实提取 |
+
+Focused review 返回 0 critical、2 high、2 medium；四项均已修复并通过上述回归。该记录表示 findings resolved，不写作 independent reviewer PASS。
+
+### 4. 导入冒烟
+
+- [ ] 通过 Extract 页面上传一个小文本文件（如 < 1,000 字符的短文本）
+- [ ] 验证章节已创建并可在 UI 中查看
+- [ ] 验证无前端控制台报错或 API 500 错误
+
+---
+
+## 反向代理示例（Phase D.2）
+
+公开部署时建议使用反向代理（nginx 或 Caddy）提供 HTTPS 终止和请求路由。后端自身不提供 HTTPS，也不内置 per-IP 限流；这些能力必须由外部反向代理或 WAF 提供。
+
+| 模板 | 路径 | 关键特性 |
+|------|------|----------|
+| Caddy | `deploy/caddy/Caddyfile.example` | 自动 HTTPS、请求体限制、前后端路由、有效安全头、长任务 timeout；per-IP 限流需 CDN/WAF 或经审计插件 |
+| Nginx | `deploy/nginx/novelforge.conf.example` | HTTP→HTTPS、有效 HTTPS block、WebSocket、请求体限制、长超时、安全头、API/login per-IP 限流 |
+
+> ⚠️ **警告**：以上仅为占位示例，使用时必须：
+> - 将 `novelforge.example.invalid` 替换为真实域名
+> - 配置真实 TLS 证书路径（或启用自动 HTTPS）
+> - 根据实际环境调整端口、路径和超时参数
+> - 验证并测试所有配置后再上线
+>
+> 这些模板**不能**使部署自动达到生产级安全标准，仍需结合实际情况进行加固。
+
+模板状态为 `STATIC_REVIEW_ONLY`：未执行 Caddy/Nginx 二进制语法检查，也未执行真实 TLS/代理 E2E。
 
 ---
 

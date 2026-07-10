@@ -1,0 +1,43 @@
+# NovelForge Caddy 反向代理占位模板（STATIC_REVIEW_ONLY）
+# 使用前必须替换保留域名、按目标环境验证配置并执行真实 TLS/代理 E2E。
+
+novelforge.example.invalid {
+    # Caddy 对有效公开域名自动申请和续期 HTTPS 证书。
+    # 使用自有证书时可改为：tls /placeholder/fullchain.pem /placeholder/privkey.pem
+
+    # 限制包含小说上传在内的请求体；按实际产品限制调整。
+    request_body {
+        max_size 50MB
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        -Server
+    }
+
+    @backend path /api/* /health /docs* /redoc* /openapi.json
+    handle @backend {
+        reverse_proxy 127.0.0.1:8001 {
+            # AI 提取/生成可能为长任务；这里保留十分钟上游读写窗口。
+            # 应结合应用 timeout、上游网关 timeout 与任务队列策略共同调整。
+            transport http {
+                dial_timeout 10s
+                response_header_timeout 10m
+                read_timeout 10m
+                write_timeout 10m
+            }
+        }
+    }
+
+    handle {
+        reverse_proxy 127.0.0.1:3000
+    }
+}
+
+# 此模板不声明第三方模块，也不提供内置 per-IP rate limiting。
+# 公开部署必须在上游 CDN/WAF 实施 per-IP 限流，或改用随附 Nginx 模板；
+# 若选择 Caddy 限流插件，须先固定并审计插件版本，再单独验证其配置。

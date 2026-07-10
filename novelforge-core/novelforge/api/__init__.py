@@ -19,9 +19,11 @@ import secrets
 import time
 import asyncio
 import logging
+import ipaddress
 from enum import Enum
 from pathlib import Path
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 
 from .types import (
     NovelType,
@@ -173,21 +175,55 @@ def _validate_public_deployment_config() -> None:
         return
 
     missing = []
-    if not getattr(config, "admin_password", None):
+    if not getattr(config, "auth_required", False):
+        missing.append("NOVELFORGE_AUTH_REQUIRED=true")
+    admin_password = getattr(config, "admin_password", None)
+    if not admin_password:
         missing.append("NOVELFORGE_ADMIN_PASSWORD")
-    if not getattr(config, "session_secret", None):
+    session_secret = getattr(config, "session_secret", None)
+    if not session_secret:
         missing.append("NOVELFORGE_SESSION_SECRET")
     if not getattr(config, "api_key", None):
         missing.append("OPENAI_API_KEY")
     frontend_origin = (getattr(config, "frontend_origin", "") or "").strip()
-    if not frontend_origin or frontend_origin.startswith("http://localhost") or frontend_origin.startswith("http://127.0.0.1"):
-        missing.append("FRONTEND_ORIGIN=https://your-frontend-domain")
+    if _public_origin_error(frontend_origin):
+        missing.append("FRONTEND_ORIGIN")
     if getattr(config, "storage_type", "") != "content_db":
         missing.append("STORAGE_TYPE=content_db")
     if not getattr(config, "use_content_database", False):
         missing.append("USE_CONTENT_DATABASE=true")
     if missing:
         raise RuntimeError("公开部署配置不完整: " + ", ".join(missing))
+
+    # Do not include the supplied values in any validation error.
+    if (
+        not isinstance(admin_password, str)
+        or len(admin_password) < 12
+        or _looks_like_placeholder(admin_password)
+        or not any(character.islower() for character in admin_password)
+        or not any(character.isupper() for character in admin_password)
+        or not any(character.isdigit() for character in admin_password)
+        or not any(not character.isalnum() for character in admin_password)
+    ):
+        raise RuntimeError(
+            "公开部署配置无效: NOVELFORGE_ADMIN_PASSWORD 必须至少 12 个字符并包含大小写字母、数字和特殊字符，且不能使用占位值"
+        )
+
+    if (
+        not isinstance(session_secret, str)
+        or len(session_secret) < 32
+        or _looks_like_placeholder(session_secret)
+    ):
+        raise RuntimeError(
+            "公开部署配置无效: NOVELFORGE_SESSION_SECRET 必须至少 32 个字符且不能使用占位值"
+        )
+
+    if getattr(config, "allow_runtime_openai_overrides", True):
+        raise RuntimeError("公开部署配置无效: NOVELFORGE_ALLOW_RUNTIME_OPENAI_OVERRIDES 必须为 false")
+    if getattr(config, "mock_tool_calls", False):
+        raise RuntimeError("公开部署配置无效: NOVELFORGE_MOCK_TOOL_CALLS 必须为 false")
+    if getattr(config, "debug", False):
+        raise RuntimeError("公开部署配置无效: NOVELFORGE_DEBUG 必须为 false")
 
     data_dir = Path(config.data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -204,7 +240,178 @@ def _validate_public_deployment_config() -> None:
             probe.write_text("ok", encoding="utf-8")
             probe.unlink(missing_ok=True)
         except OSError as exc:
-            raise RuntimeError(f"公开部署数据目录不可写: {label} -> {target}") from exc
+            raise RuntimeError(f"公开部署数据目录不可写: {label}") from exc
+
+
+def _looks_like_placeholder(value: str) -> bool:
+    normalized = value.strip().lower().replace("_", "-")
+    collapsed = "".join(character for character in normalized if character.isalnum())
+    exact_placeholders = {
+        "password",
+        "password123",
+        "admin123456",
+        "changeme",
+        "change-me",
+        "change-this-password",
+        "replace-with-a-long-random-string",
+        "novelforge-local-dev-session-secret",
+    }
+    collapsed_prefixes = (
+        "password123",
+        "changeme",
+        "changethispassword",
+        "replacewithalongrandomstring",
+        "novelforgelocaldevsessionsecret",
+        "yourpassword",
+        "yoursecret",
+    )
+    return (
+        normalized in exact_placeholders
+        or "placeholder" in normalized
+        or collapsed.startswith(collapsed_prefixes)
+    )
+
+
+def _parse_legacy_ipv4(hostname: str) -> Optional[ipaddress.IPv4Address]:
+    """Parse ambiguous WHATWG-style numeric IPv4 forms without resolving DNS."""
+    parts = hostname.lower().split(".")
+    if not 1 <= len(parts) <= 4:
+        return None
+
+    numbers = []
+    for part in parts:
+        if not part:
+            return None
+        base = 10
+        digits = part
+        if part.startswith("0x"):
+            base = 16
+            digits = part[2:]
+        elif len(part) > 1 and part.startswith("0"):
+            base = 8
+            digits = part[1:]
+        if not digits:
+            return None
+        try:
+            numbers.append(int(digits, base))
+        except ValueError:
+            return None
+
+    if any(number > 255 for number in numbers[:-1]):
+        return None
+    last_limit = (256 ** (5 - len(numbers))) - 1
+    if numbers[-1] > last_limit:
+        return None
+
+    value = numbers[-1]
+    for index, number in enumerate(numbers[:-1]):
+        value += number << (8 * (3 - index))
+    try:
+        return ipaddress.IPv4Address(value)
+    except ipaddress.AddressValueError:
+        return None
+
+
+def _public_origin_error(origin: str) -> Optional[str]:
+    """Return a policy label for an invalid public origin without echoing its value."""
+    if not origin or any(character.isspace() or ord(character) < 32 for character in origin):
+        return "malformed"
+    try:
+        parsed = urlparse(origin)
+        hostname = parsed.hostname
+        # Accessing port also validates malformed/non-numeric/out-of-range ports.
+        parsed.port
+    except (ValueError, UnicodeError):
+        return "malformed"
+
+    if parsed.scheme.lower() != "https" or not parsed.netloc or not hostname:
+        return "https_absolute_required"
+    if parsed.username is not None or parsed.password is not None:
+        return "userinfo_forbidden"
+    if parsed.path not in {"", "/"} or parsed.params or parsed.query or parsed.fragment:
+        return "origin_only"
+    if "*" in parsed.netloc or hostname.endswith("."):
+        return "wildcard_or_ambiguous_host"
+
+    normalized_host = hostname.lower()
+    if normalized_host == "localhost" or normalized_host.endswith(".localhost"):
+        return "local_host_forbidden"
+    if normalized_host == "local" or normalized_host.endswith(".local"):
+        return "local_host_forbidden"
+    if normalized_host == "127" or normalized_host.startswith("127."):
+        return "loopback_forbidden"
+
+    try:
+        if ipaddress.ip_address(normalized_host).is_loopback:
+            return "loopback_forbidden"
+        return None
+    except ValueError:
+        pass
+
+    legacy_ipv4 = _parse_legacy_ipv4(normalized_host)
+    if legacy_ipv4 is not None:
+        return "loopback_forbidden" if legacy_ipv4.is_loopback else "ambiguous_numeric_host"
+
+    try:
+        ascii_host = normalized_host.encode("idna").decode("ascii")
+    except UnicodeError:
+        return "malformed_host"
+    labels = ascii_host.split(".")
+    if (
+        len(ascii_host) > 253
+        or len(labels) < 2
+        or any(
+            not label
+            or len(label) > 63
+            or not label[0].isalnum()
+            or not label[-1].isalnum()
+            or any(not (character.isalnum() or character == "-") for character in label)
+            for label in labels
+        )
+    ):
+        return "malformed_host"
+    if any(label in {"example", "placeholder"} or label.startswith("your-") for label in labels):
+        return "placeholder_host"
+    return None
+
+
+def _canonical_public_origin(origin: str) -> Optional[str]:
+    """Canonicalize an already policy-valid public origin for exact CORS matching."""
+    if _public_origin_error(origin):
+        return None
+    parsed = urlparse(origin)
+    hostname = parsed.hostname
+    if hostname is None:
+        return None
+    try:
+        host = ipaddress.ip_address(hostname)
+        canonical_host = f"[{host.compressed}]" if host.version == 6 else host.compressed
+    except ValueError:
+        canonical_host = hostname.encode("idna").decode("ascii").lower()
+    port = parsed.port
+    authority = canonical_host if port in {None, 443} else f"{canonical_host}:{port}"
+    return f"https://{authority}"
+
+
+def _cors_allowed_origins() -> List[str]:
+    frontend_origin = (getattr(config, "frontend_origin", "") or "").strip()
+    if getattr(config, "public_deployment", False):
+        canonical_origin = _canonical_public_origin(frontend_origin)
+        return [canonical_origin] if canonical_origin else []
+
+    origins = [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:3002",
+        "http://localhost:3010",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+        "http://127.0.0.1:3002",
+        "http://127.0.0.1:3010",
+    ]
+    if frontend_origin and frontend_origin not in origins:
+        origins.append(frontend_origin)
+    return origins
 
 
 def _auth_config_readiness() -> Dict[str, Any]:
@@ -1103,17 +1310,7 @@ app = FastAPI(
 # CORS configuration.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://localhost:3002",
-        "http://localhost:3010",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-        "http://127.0.0.1:3002",
-        "http://127.0.0.1:3010",
-        config.frontend_origin,
-    ],  # Frontend dev servers.
+    allow_origins=_cors_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -3159,7 +3356,10 @@ async def get_user_tasks(
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
     """HTTP寮傚父澶勭悊"""
-    detail = exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail, ensure_ascii=False)
+    if exc.status_code >= 500 and getattr(config, "public_deployment", False):
+        detail = "请求处理失败，请稍后重试"
+    else:
+        detail = exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail, ensure_ascii=False)
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -3176,7 +3376,7 @@ async def general_exception_handler(request, exc):
         status_code=500,
         content={
             "error": "服务器内部错误",
-            "detail": str(exc),
+            "detail": "请求处理失败，请稍后重试",
             "timestamp": datetime.now().isoformat()
         }
     )
