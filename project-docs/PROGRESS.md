@@ -1,5 +1,45 @@
 ﻿# NovelForge 项目进度跟踪
 
+## 2026-07-12 Phase M.0: Local MVP Synthetic Import Acceptance
+
+### 本轮目标
+- 使用本轮临时生成、完全合成且无敏感信息的短篇输入，在本地浏览器验收导入、结构化资产、Deep Synthesis preview/apply 和 Apply History/诊断链路。
+- 仅使用 deterministic mock/fake provider；不调用真实外部 provider，不读取两个本地小说样本。
+
+### 验收结果
+- **总体 PARTIAL；功能链路 PASS**：真实浏览器 UI 通过 `/extract` 页面自带“粘贴文本导入”提交与临时 synthetic TXT 相同的内容，走通真实 upload、scheduler 与 content 链路。
+- 导入状态为 `completed_with_quality_warnings`：3/3 章节完成、失败章节 0；质量阈值警告不违反 M.0 明示最低资产下限。
+- 结构化资产：characters 3、relationships 2、timeline events 3、world settings 1；Characters、World、Analytics 页面均通过检查。
+- Deep Synthesis：preview success（1 candidate、未写入、人工接受）；首次 dry-run 0 conflict；apply `applied=1`、`skipped=0`、`conflict=0`；第二次 preview + dry-run 检测到 1 个当前值冲突并阻止重复写入。
+- History/diagnostics：API 有 3 条 `deep_synthesis_apply` attempt，UI History 与详情 drawer 可见；浏览器 console error 0、warning 0、敏感信息匹配 0。
+- 启动与隔离：backend health/openapi、frontend root/extract 均为 HTTP 200；runtime listener 进程对外已建立连接数为 0；4 个日志文件总计 0 bytes。
+
+### 证据与验证
+- 输入 SHA-256：`438bf74744babfcfdc882995564eee8c7473af2d5ddd3e39d165a3d60a25b82f`；临时文件 6,294 字符，UI 输入 6,293 字符，3 章。
+- elapsed：import/preview 均为浏览器观察在 1,000 ms 内完成；dry-run/apply 为服务端记录 1 ms / 47 ms。
+- backend required suite：47 passed；AIService focused suite：3 passed。
+- frontend targeted suite：4 files / 117 passed；TypeScript 通过；production build 通过并生成 13/13 静态页面。
+- `git diff --check` 通过。
+- 验收报告：`project-docs/mvp-acceptance-m0.md` 与 `project-docs/mvp-acceptance-m0.json`。
+- 截图：`project-docs/screenshots/m0/` 下 5 张必要证据图。
+
+### 已知限制与待收口
+- 浏览器控制接口不提供 `setInputFiles`，原生文件选择器未执行；本轮只验收页面原生“粘贴文本导入”，不声称 native file chooser 已测试。
+- 一次 worker 工具输出曾显示受保护样本的 filename metadata；样本内容未读取，样本文件未修改、暂存或提交，报告/JSON/截图均不包含该名称。该 finding 已通过将总体 Decision 降为 `PARTIAL` 并如实披露处理。
+- 本轮未测试真实 provider；质量阈值警告反映长篇建议阈值，而非 M.0 最低资产下限失败。
+- 唯一一次 focused review 为 substantive：0 critical / 0 high / 1 medium；不表述为 review PASS。
+- cleanup 已完成：synthetic input 与临时 data dir 已移除，backend/frontend 已停止，3000/8001 端口均已释放。清理后仅剩 2 个预期受保护样本和当时 8 个 M.0 delivery artifact 为 untracked。
+- 显式 commit/push 仍待本轮后续步骤完成。
+
+### 安全边界
+- provider called: false；samples read: false。
+- 报告与 JSON 不包含 synthetic 全文、运行/内容 ID、secret、provider raw body 或本地样本名称。
+
+### Next Goal
+- **Internal Deployment Rehearsal**
+
+---
+
 ## 2026-07-10 Phase D.2: Public Deployment Guardrails Closure
 
 ### 本轮目标
@@ -38,7 +78,7 @@
 - 没有 stage、commit 或 push；这些动作由主任务在最终安全检查后显式执行。
 
 ### Next Goal
-- **Local MVP Synthetic Import Acceptance**
+- **已由 Phase M.0 取代；当前唯一 Next Goal 见顶部：Internal Deployment Rehearsal**
 
 ---
 

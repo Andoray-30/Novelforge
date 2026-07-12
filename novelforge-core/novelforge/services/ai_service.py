@@ -17,6 +17,7 @@ from ..base.concurrency import AdaptiveConcurrency
 from ..base.rate_limiter import RateLimiter
 from ..base.retry_policy import RetryPolicy, retry_with_policy
 from ..core.config import Config, config as default_config
+from .deterministic_mock_provider import DeterministicMockProvider
 
 T = TypeVar("T", bound=BaseModel)
 logger = logging.getLogger(__name__)
@@ -70,6 +71,8 @@ class AIService:
 
     def has_real_client(self) -> bool:
         """Whether the current config contains a usable upstream API key."""
+        if getattr(self.config, "mock_tool_calls", False):
+            return False
         return bool(self.config.api_key and "your-api-key-here" not in self.config.api_key)
 
     def supports_tool_calling_for_agent(self) -> bool:
@@ -374,6 +377,9 @@ class AIService:
         timeout: float = 120.0,
     ) -> str:
         """Single-turn chat with retry and rate limiting."""
+        if getattr(self.config, "mock_tool_calls", False):
+            return DeterministicMockProvider().chat(prompt, system_prompt=system_prompt)
+
         messages: list[dict[str, str]] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})

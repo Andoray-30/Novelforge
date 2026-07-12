@@ -484,6 +484,98 @@ def test_novel_import_uses_chapter_index_analysis_and_returns_diagnostics(monkey
         assert key not in result
 
 
+def test_mock_import_persists_deep_synthesis_suggestion_without_provider_call(monkeypatch, tmp_path):
+    from novelforge.core.config import Config
+    from novelforge.services import ai_service as ai_service_module
+    from novelforge.services.ai_service import AIService
+    from novelforge.types.text_processing import Chapter, ProcessedText, TextMetadata
+
+    monkeypatch.setenv("NOVELFORGE_MOCK_TOOL_CALLS", "true")
+    monkeypatch.setenv("OPENAI_API_KEY", "configured-but-must-not-be-used")
+
+    def fail_external_client(*args, **kwargs):
+        raise AssertionError("mock import must not initialize an external provider client")
+
+    monkeypatch.setattr(ai_service_module, "AsyncOpenAI", fail_external_client)
+    monkeypatch.setattr(ai_service_module.httpx, "AsyncClient", fail_external_client)
+
+    class SyntheticTextProcessingService:
+        def process_file(self, file_path, config):
+            content = Path(file_path).read_text(encoding="utf-8")
+            chapters = [
+                Chapter(
+                    title=f"第{index}章",
+                    content=f"云穹城浮核站第{index}段合成验收内容，唯一正文标记 synthetic-body-{index}。",
+                    start_position=(index - 1) * 32,
+                    end_position=index * 32,
+                    index=index,
+                )
+                for index in range(1, 4)
+            ]
+            return ProcessedText(
+                content=content,
+                metadata=TextMetadata(title="云穹城浮核站"),
+                chapters=chapters,
+            )
+
+    monkeypatch.setattr(
+        "novelforge.services.text_processing_service.text_processing_service",
+        SyntheticTextProcessingService(),
+    )
+
+    source_path = tmp_path / "synthetic-m0.txt"
+    source_path.write_text("完全合成的三章浮核站验收输入。", encoding="utf-8")
+    config = Config()
+    ai_service = AIService(config)
+    content_manager = RecordingContentManager()
+    scheduler = AITaskScheduler(
+        ai_service,
+        MemoryStorageManager(),
+        config,
+        content_manager,
+    )
+    task = Task(
+        id="task-mock-suggestions",
+        type="novel_import",
+        status=TaskStatus.RUNNING,
+        priority=TaskPriority.HIGH,
+        parameters={
+            "file_path": str(source_path),
+            "book_title": "云穹城浮核站",
+            "session_id": "session-mock-suggestions",
+            "config": {},
+            "source_file_name": "synthetic-m0.txt",
+        },
+        created_at=datetime.now(),
+    )
+
+    result = asyncio.run(scheduler._process_novel_import_task(task))
+
+    assert ai_service.has_real_client() is False
+    assert ai_service.client is None
+    assert result["characters_count"] >= 3
+    assert result["relationships_count"] >= 2
+    assert result["timeline_count"] >= 3
+    assert result["world_count"] >= 1
+    lanzhou = next(
+        item
+        for item in content_manager.items
+        if item.metadata.type == "character" and item.metadata.title == "岚舟"
+    )
+    suggested_changes = lanzhou.extracted_data["suggested_changes"]
+    assert suggested_changes == [{
+        "change_id": "mock-lanzhou-description",
+        "field_path": "description",
+        "current_value": "云穹城浮核站维修组长，负责核心失稳调查。",
+        "proposed_value": "岚舟在云穹城浮核站危机后承担起追查异常脉冲来源的责任。",
+        "confidence": 0.95,
+        "reason": "合成章节中的浮核危机为角色后续行动提供了明确动机。",
+        "risk_level": "low",
+        "evidence_refs": ["岚舟召集维修组排查浮核核心失稳。"],
+    }]
+    assert "synthetic-body" not in str(suggested_changes)
+
+
 def test_novel_import_marks_low_information_character_assets_for_repair(monkeypatch, tmp_path):
     from novelforge.services import ai_scheduler as scheduler_module
     from novelforge.types.text_processing import Chapter, ProcessedText, TextMetadata

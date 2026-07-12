@@ -27,8 +27,11 @@ import {
   TargetAudience,
   WorldBuildingRequest,
   WorldSetting,
+  DeepSynthesisBudgetTier,
   DeepSynthesisRequest,
+  DeepSynthesisRequestAsset,
   DeepSynthesisResult,
+  DeepSynthesisScopeType,
   DeepSynthesisApplyRequest,
   DeepSynthesisApplyResult,
   ExtractionAttemptSummary,
@@ -686,9 +689,13 @@ export const extractionAttemptService = {
     const idempotency = budgetSummary.idempotency && typeof budgetSummary.idempotency === 'object'
       ? budgetSummary.idempotency as Record<string, unknown>
       : null;
-    const snapshot = idempotency?.result_snapshot && typeof idempotency.result_snapshot === 'object'
+    const currentSnapshot = idempotency?.result && typeof idempotency.result === 'object'
+      ? idempotency.result as Record<string, unknown>
+      : null;
+    const legacySnapshot = idempotency?.result_snapshot && typeof idempotency.result_snapshot === 'object'
       ? idempotency.result_snapshot as Record<string, unknown>
       : null;
+    const snapshot = currentSnapshot ?? legacySnapshot;
     if (!snapshot) {
       return {
         detail_available: false,
@@ -786,9 +793,80 @@ function extractApplyResultFromPayload(payload: unknown): DeepSynthesisApplyResu
   return null;
 }
 
+const DEEP_SYNTHESIS_CONTENT_TYPES: ContentType[] = ['character', 'relationship', 'timeline', 'world'];
+
+const DEEP_SYNTHESIS_ASSET_TYPE_BY_CONTENT_TYPE: Partial<Record<ContentType, DeepSynthesisRequestAsset['asset_type']>> = {
+  character: 'character',
+  relationship: 'relationship',
+  timeline: 'event',
+  world: 'world_fact',
+};
+
+function contentTypesForDeepSynthesisScope(scopeType: DeepSynthesisScopeType): ContentType[] {
+  if (scopeType === 'full') return DEEP_SYNTHESIS_CONTENT_TYPES;
+  const matchingType = Object.entries(DEEP_SYNTHESIS_ASSET_TYPE_BY_CONTENT_TYPE)
+    .find(([, assetType]) => assetType === scopeType)?.[0] as ContentType | undefined;
+  return matchingType ? [matchingType] : DEEP_SYNTHESIS_CONTENT_TYPES;
+}
+
+export function buildDeepSynthesisRequestAssets(items: ContentItem[]): DeepSynthesisRequestAsset[] {
+  return items.flatMap((item) => {
+    const assetType = DEEP_SYNTHESIS_ASSET_TYPE_BY_CONTENT_TYPE[item.metadata.type];
+    const data = item.extracted_data;
+    const suggestedChanges = data?.suggested_changes;
+    if (!assetType || !data || !Array.isArray(suggestedChanges)) return [];
+
+    const consumableChanges = suggestedChanges.filter((change) => (
+      change !== null
+      && typeof change === 'object'
+      && typeof (change as Record<string, unknown>).field_path === 'string'
+      && Boolean(((change as Record<string, unknown>).field_path as string).trim())
+    ));
+    if (consumableChanges.length === 0) return [];
+
+    return [{
+      asset_type: assetType,
+      asset_id: item.metadata.id,
+      asset_version: `v${item.metadata.version}`,
+      data: {
+        ...data,
+        suggested_changes: consumableChanges,
+      },
+    }];
+  });
+}
+
 export const deepSynthesisService = {
   createPreview: (request: DeepSynthesisRequest): Promise<DeepSynthesisResult> => {
     return novelforgeClient.post<DeepSynthesisResult>('/api/extraction/deep-synthesis/preview', request);
+  },
+
+  createPreviewFromPersistedAssets: async (params: {
+    sessionId: string;
+    parentId?: string | null;
+    scopeType: DeepSynthesisScopeType;
+    budgetTier: DeepSynthesisBudgetTier;
+  }): Promise<DeepSynthesisResult> => {
+    const searchResult = await contentService.search({
+      session_id: params.sessionId,
+      parent_id: params.parentId || undefined,
+      content_types: contentTypesForDeepSynthesisScope(params.scopeType),
+      limit: 500,
+      offset: 0,
+      include_content: true,
+    });
+    const assets = buildDeepSynthesisRequestAssets(searchResult.items);
+    if (assets.length === 0) {
+      throw new Error('当前项目没有包含可消费改进建议的结构化资产，请先完成导入或资产修复后再生成深度合成预览。');
+    }
+    return novelforgeClient.post<DeepSynthesisResult>('/api/extraction/deep-synthesis/preview', {
+      session_id: params.sessionId,
+      scope_type: params.scopeType,
+      scope_ids: assets.map((asset) => asset.asset_id),
+      assets,
+      conflicts: [],
+      budget_tier: params.budgetTier,
+    } satisfies DeepSynthesisRequest);
   },
 
   applyPreview: async (request: DeepSynthesisApplyRequest): Promise<DeepSynthesisApplyResult> => {

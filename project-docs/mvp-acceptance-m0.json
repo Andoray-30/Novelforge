@@ -1,0 +1,60 @@
+{
+  "decision": "PARTIAL",
+  "function_flow": "PASS",
+  "synthetic_input_hash": "438bf74744babfcfdc882995564eee8c7473af2d5ddd3e39d165a3d60a25b82f",
+  "input_chars": 6294,
+  "ui_input_chars": 6293,
+  "input_method": "paste_text_import",
+  "chapter_count": 3,
+  "asset_counts": {
+    "characters": 3,
+    "relationships": 2,
+    "timeline_events": 3,
+    "world_settings": 1
+  },
+  "import_status": "completed_with_quality_warnings",
+  "preview_status": "success",
+  "apply_status": "success",
+  "history_status": "success",
+  "elapsed_times": {
+    "import_observed_ms_max_exclusive": 1000,
+    "preview_observed_ms_max_exclusive": 1000,
+    "dry_run_server_ms": 1,
+    "apply_server_ms": 47
+  },
+  "screenshots": [
+    "project-docs/screenshots/m0/01-import-complete.png",
+    "project-docs/screenshots/m0/02-characters.png",
+    "project-docs/screenshots/m0/03-deep-synthesis-preview.png",
+    "project-docs/screenshots/m0/04-apply-history.png",
+    "project-docs/screenshots/m0/05-apply-detail.png"
+  ],
+  "provider_called": false,
+  "samples_read": false,
+  "quality_warning": true,
+  "cleanup": {
+    "synthetic_file_removed": true,
+    "temporary_data_removed": true,
+    "backend_stopped": true,
+    "frontend_stopped": true,
+    "port_3000_released": true,
+    "port_8001_released": true,
+    "protected_samples_untracked": 2,
+    "delivery_artifacts_untracked": 8,
+    "status": "complete"
+  },
+  "review": {
+    "runs": 1,
+    "status": "substantive",
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "finding": "protected_sample_filename_metadata_emitted_once",
+    "sample_content_read": false,
+    "sample_modified": false,
+    "sample_staged": false,
+    "sample_committed": false,
+    "delivery_artifacts_contain_sample_filename": false,
+    "disposition": "decision_downgraded_and_disclosed"
+  }
+}

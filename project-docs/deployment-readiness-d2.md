@@ -97,7 +97,7 @@ Windows ACL 警告只涉及 pytest 无法写入既有 `.pytest_cache`；未使�
 - API key / admin password / session secret exposed：no
 - provider raw body / request id exposed：no
 - real domain / IP / certificate committed：no
-- stage / commit / push performed：no
+- stage / commit / push performed：yes，commit `26489eef`，已推送至 `origin/codex/novelforge-next`
 
 ## Next Goal
 

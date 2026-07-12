@@ -1258,13 +1258,11 @@ export default function ExtractPage() {
     setDeepSynthesisLoading(true);
     setDeepSynthesisError(null);
     try {
-      const res = await deepSynthesisService.createPreview({
-        session_id: sessionId,
-        scope_type: deepSynthesisScopeType,
-        scope_ids: [],
-        assets: [],
-        conflicts: [],
-        budget_tier: deepSynthesisBudgetTier
+      const res = await deepSynthesisService.createPreviewFromPersistedAssets({
+        sessionId,
+        parentId: completedResult?.parent_id || null,
+        scopeType: deepSynthesisScopeType,
+        budgetTier: deepSynthesisBudgetTier,
       });
       setDeepSynthesisResult(res);
       setDeepSynthesisSelectionState(buildDeepSynthesisSelectionState(res));

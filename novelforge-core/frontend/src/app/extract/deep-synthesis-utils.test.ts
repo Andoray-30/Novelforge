@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
 	DeepSynthesisApplyResult,
 	DeepSynthesisPreview,
@@ -30,6 +30,11 @@ import {
 	matchesApplyHistoryFilters,
 	sanitizeDeepSynthesisDisplayValue,
 } from "./deep-synthesis-utils";
+import {
+	buildDeepSynthesisRequestAssets,
+	deepSynthesisService,
+	extractionAttemptService,
+} from "@/lib/api/novelforge-api";
 
 describe("Deep Synthesis Utils", () => {
 	describe("formatDeepSynthesisBudgetTier", () => {
@@ -882,5 +887,199 @@ describe("Deep Synthesis Utils", () => {
 			});
 			expect(result).toHaveLength(0);
 		});
+	});
+});
+
+describe("Deep Synthesis persisted asset API integration", () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it("submits non-empty persisted assets and preserves consumable suggested_changes", async () => {
+		const fetchMock = vi.fn()
+			.mockResolvedValueOnce(new Response(JSON.stringify({
+				items: [{
+					metadata: {
+						id: "char-persisted-1",
+						title: "Synthetic Engineer",
+						type: "character",
+						status: "published",
+						tags: [],
+						created_at: "2026-07-12T00:00:00Z",
+						updated_at: "2026-07-12T00:00:00Z",
+						version: 3,
+						session_id: "session-m0",
+						parent_id: "novel-m0",
+					},
+					content: "safe synthetic summary",
+					extracted_data: {
+						name: "Synthetic Engineer",
+						suggested_changes: [{
+							field_path: "profile.summary",
+							current_value: "old",
+							proposed_value: "new",
+							confidence: 0.9,
+							reason: "synthetic evidence",
+						}],
+					},
+				}],
+				total: 1,
+				page: 1,
+				limit: 500,
+			}), { status: 200, headers: { "Content-Type": "application/json" } }))
+			.mockResolvedValueOnce(new Response(JSON.stringify({ status: "completed" }), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			}));
+		vi.stubGlobal("fetch", fetchMock);
+
+		await deepSynthesisService.createPreviewFromPersistedAssets({
+			sessionId: "session-m0",
+			parentId: "novel-m0",
+			scopeType: "full",
+			budgetTier: "low",
+		});
+
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		const searchBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+		expect(searchBody).toMatchObject({
+			session_id: "session-m0",
+			parent_id: "novel-m0",
+			content_types: ["character", "relationship", "timeline", "world"],
+		});
+		const previewBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+		expect(previewBody.scope_ids).toEqual(["char-persisted-1"]);
+		expect(previewBody.assets).toHaveLength(1);
+		expect(previewBody.assets[0]).toMatchObject({
+			asset_type: "character",
+			asset_id: "char-persisted-1",
+			asset_version: "v3",
+			data: {
+				name: "Synthetic Engineer",
+				suggested_changes: [{
+					field_path: "profile.summary",
+					proposed_value: "new",
+				}],
+			},
+		});
+	});
+
+	it("rejects with a clear error before preview when no persisted asset has consumable changes", async () => {
+		const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+			items: [{
+				metadata: {
+					id: "world-without-change",
+					title: "Synthetic World",
+					type: "world",
+					status: "published",
+					tags: [],
+					created_at: "2026-07-12T00:00:00Z",
+					updated_at: "2026-07-12T00:00:00Z",
+					version: 1,
+				},
+				content: "safe synthetic world",
+				extracted_data: { suggested_changes: [] },
+			}],
+			total: 1,
+			page: 1,
+			limit: 500,
+		}), { status: 200, headers: { "Content-Type": "application/json" } }));
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(deepSynthesisService.createPreviewFromPersistedAssets({
+			sessionId: "session-m0",
+			scopeType: "full",
+			budgetTier: "low",
+		})).rejects.toThrow("没有包含可消费改进建议的结构化资产");
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("maps only persisted assets whose suggested_changes are consumable", () => {
+		const assets = buildDeepSynthesisRequestAssets([{
+			metadata: {
+				id: "timeline-1",
+				title: "Synthetic Event",
+				type: "timeline",
+				status: "published",
+				tags: [],
+				created_at: "2026-07-12T00:00:00Z",
+				updated_at: "2026-07-12T00:00:00Z",
+				version: 2,
+			},
+			content: "safe synthetic event",
+			extracted_data: {
+				suggested_changes: [null, {}, { field_path: "description", proposed_value: "refined" }],
+			},
+		}]);
+		expect(assets).toHaveLength(1);
+		expect(assets[0].asset_type).toBe("event");
+		expect(assets[0].data?.suggested_changes).toEqual([
+			{ field_path: "description", proposed_value: "refined" },
+		]);
+	});
+});
+
+describe("Apply history detail snapshot compatibility", () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it.each(["result", "result_snapshot"])("reads idempotency.%s snapshots", async (snapshotKey) => {
+		const snapshot = {
+			status: "success",
+			summary: { applied_count: 1, conflict_count: 0 },
+			applied_changes: [{
+				change_id: "change-1",
+				asset_type: "character",
+				asset_id: "char-1",
+				field_path: "profile.summary",
+				asset_version_before: "v1",
+				asset_version_after: "v2",
+				previous_value: "old",
+				applied_value: "new",
+			}],
+			conflicts: [],
+			skipped_changes: [],
+			warnings: [],
+		};
+		vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+			id: "attempt-1",
+			status: "success",
+			budget_summary: { idempotency: { [snapshotKey]: snapshot } },
+		}), { status: 200, headers: { "Content-Type": "application/json" } })));
+
+		const detail = await extractionAttemptService.getApplyHistoryDetail({
+			sessionId: "session-m0",
+			attemptId: "attempt-1",
+		});
+
+		expect(detail.detail_available).toBe(true);
+		expect(detail.summary?.applied_count).toBe(1);
+		expect(detail.applied_changes?.[0]).toMatchObject({
+			change_id: "change-1",
+			version_before: "v1",
+			version_after: "v2",
+		});
+	});
+
+	it("prefers the current result snapshot when both current and legacy keys exist", async () => {
+		vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+			id: "attempt-1",
+			status: "partial",
+			budget_summary: {
+				idempotency: {
+					result: { status: "success", summary: { applied_count: 2 } },
+					result_snapshot: { status: "failed", summary: { applied_count: 0 } },
+				},
+			},
+		}), { status: 200, headers: { "Content-Type": "application/json" } })));
+
+		const detail = await extractionAttemptService.getApplyHistoryDetail({
+			sessionId: "session-m0",
+			attemptId: "attempt-1",
+		});
+
+		expect(detail.status).toBe("success");
+		expect(detail.summary?.applied_count).toBe(2);
 	});
 });

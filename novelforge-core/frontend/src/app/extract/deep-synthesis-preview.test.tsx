@@ -150,6 +150,17 @@ describe('DeepSynthesisPreviewPanel', () => {
     expect(screen.getByText(/无可用的深度合成预览数据/)).toBeTruthy();
   });
 
+  it('renders a clear persisted-asset error without remaining in loading state', () => {
+    render(React.createElement(DeepSynthesisPreviewPanel, {
+      result: null,
+      ...defaultProps,
+      loading: false,
+      error: '当前项目没有包含可消费改进建议的结构化资产，请先完成导入或资产修复后再生成深度合成预览。',
+    }));
+    expect(screen.getByText(/没有包含可消费改进建议的结构化资产/)).toBeTruthy();
+    expect(document.querySelector('.animate-spin')).toBeNull();
+  });
+
   it('renders preview.summary from result.preview.summary', () => {
     const result = buildDeepSynthesisResultFixture();
     render(React.createElement(DeepSynthesisPreviewPanel, { result, ...defaultProps }));

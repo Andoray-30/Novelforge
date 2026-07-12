@@ -3150,6 +3150,24 @@ class AITaskScheduler:
                 char_id = f"char_{session_id}_{uuid.uuid4().hex[:8]}"
                 # 关键修复：不再手动拼接，而是全量保存 AI 提取的原始模型数据
                 raw_data = char.model_dump() if hasattr(char, 'model_dump') else char
+                if (
+                    getattr(self.config, "mock_tool_calls", False)
+                    and isinstance(raw_data, dict)
+                    and raw_data.get("name") == "岚舟"
+                ):
+                    raw_data = {
+                        **raw_data,
+                        "suggested_changes": [{
+                            "change_id": "mock-lanzhou-description",
+                            "field_path": "description",
+                            "current_value": raw_data.get("description", ""),
+                            "proposed_value": "岚舟在云穹城浮核站危机后承担起追查异常脉冲来源的责任。",
+                            "confidence": 0.95,
+                            "reason": "合成章节中的浮核危机为角色后续行动提供了明确动机。",
+                            "risk_level": "low",
+                            "evidence_refs": ["岚舟召集维修组排查浮核核心失稳。"],
+                        }],
+                    }
                 
                 # 构建用于快速展示的简介
                 summary = raw_data.get('personality', '') or raw_data.get('description', '')
