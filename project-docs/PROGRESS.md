@@ -1,5 +1,47 @@
 ﻿# NovelForge 项目进度跟踪
 
+## 2026-07-13 Goal D.3: Internal MVP Release Rehearsal
+
+### 本轮目标
+- 在仓库外的隔离环境中，以 backend 无 reload `uvicorn` 和 frontend production build + start 的生产式路径完成内部 MVP 发布演练。
+- 只使用全新 synthetic 输入与 deterministic mock provider；认证强制开启，不调用外部 provider，不读取受保护样本。
+
+### 验收结果
+- **Decision：`PASS_WITH_PROXY_E2E_PENDING`**。Mandatory Tier A 已通过；当前机器没有可用的代理运行环境，Tier B 如实记录为 `PROXY_TLS_E2E_NOT_AVAILABLE`。
+- 启动与认证：backend `/health` HTTP 200、认证后 `/openapi.json` HTTP 200、未认证受保护 API HTTP 401；错误登录 HTTP 401 且无 secret 回显，正确登录 HTTP 200；frontend `/` 与 `/extract` HTTP 200。
+- 浏览器验收：console errors/warnings/sensitive matches 均为 0；session cookie 属性为 `HttpOnly`、`SameSite=Lax`、`Path=/`，Tier A loopback HTTP 下 `Secure=false`。
+- synthetic UI 导入：3,193 字符、3 章；状态 `completed_with_quality_warnings`，失败章节 0；characters 3、relationships 2、timeline 3、world 1、novel 1、total 13；`provider_unavailable=0`。
+- 重启持久化：正常停机并释放 3000/8001 后，使用同一隔离 data dir 按 production-style 重启；项目与全部资产计数恢复一致，History 可读空状态保持 `0 -> 0`，duplicates 0。
+- 备份恢复：使用 `OFFLINE_FILE_COPY_BACKUP`；3 files / 115,000 bytes，逐文件 SHA-256 聚合一致；从新的隔离 restore directory 恢复后项目、资产、History 与 duplicates 状态完全一致。不声称在线热备份。
+- 代理环境：Docker CLI 存在但 engine 单次探测超时，Caddy/Nginx 不可用；未执行 syntax、redirect、HTTPS 或 cookie E2E，也未把静态模板审查写成 PASS。
+- 最终 production-style 补测再次确认 backend/frontend/auth 探针全通过；用于日志扫描的另一份 3,150 字符、3 章 synthetic 输入未执行导入（`import_executed=false`），不替代 3,193 字符 UI 验收。
+- 日志安全：4 files / 697 bytes，errors 0、warnings 0、sensitive matches 0；最终稳定网络快照的 backend Python、frontend Node、其他子进程、provider-associated 与 unclassified 已建立外部连接均为 0。
+
+### 验证与证据
+- backend auth：52 passed（1.46 s）。
+- backend scheduler/import + extraction：47 passed（1.28 s）。
+- TypeScript：通过（约 9 s）；frontend production build：通过（24.9 s），13/13 静态页面生成。
+- `git diff --check`：通过，仅有 LF→CRLF warning。
+- 首次 auth 测试受 sandbox 临时目录 ACL 限制；相同命令在允许环境通过，不是产品失败。pytest cache warning 不影响结果；build 识别既有 `.env.local`，本轮未读取、修改或提交。
+- 机器摘要：`project-docs/internal-deployment-rehearsal-d3.json`；中文报告：`project-docs/internal-deployment-rehearsal-d3.md`；四张 1280×720 true PNG 证据位于 `project-docs/screenshots/d3/`。
+
+### Cleanup 与安全边界
+- 本轮 backend/frontend 已停止，3000/8001 已释放；synthetic 输入、isolated/backup/restore data、日志、运行时配置、临时脚本与本轮 secrets 均已移除。
+- 2 个预期受保护样本仍为 untracked；未读取、未 stage、未提交。
+- external provider called: false；protected samples read: false；runtime provider overrides: false；Tier A public deployment: false。
+- 未写入 synthetic 全文、secret、cookie 值、运行时数据库/日志或本地绝对路径。
+
+### Remaining Risks
+- 尚未执行 target-server proxy/TLS E2E；Tier A 的 `Secure=false` 只符合 loopback HTTP 演练。
+- deterministic mock 不代表真实 provider；停机文件复制不代表热备份；rehearsal 各阶段未单独计时。
+- 网络采样曾瞬时观察到 1 条未分类已建立连接；未关联 provider，且最终稳定复现未再出现。目标服务器演练仍需核对代理后的出站连接策略。
+- M.0 仍为 `PARTIAL`，继续保留原生文件选择器未自动化和一次 filename metadata 披露限制。
+
+### Next Goal
+- **Target Server Proxy/TLS Rehearsal**
+
+---
+
 ## 2026-07-12 Phase M.0: Local MVP Synthetic Import Acceptance
 
 ### 本轮目标

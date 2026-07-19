@@ -1,0 +1,149 @@
+{
+  "decision": "PASS_WITH_PROXY_E2E_PENDING",
+  "startup_status": {
+    "backend_production_process": "PASS",
+    "backend_bind": "127.0.0.1:8001",
+    "backend_reload": false,
+    "frontend_build": "PASS",
+    "frontend_start": "PASS",
+    "frontend_bind": "127.0.0.1:3000",
+    "health_http_status": 200,
+    "authenticated_openapi_http_status": 200,
+    "unauthenticated_protected_api_http_status": 401,
+    "frontend_root_http_status": 200,
+    "frontend_extract_http_status": 200,
+    "browser_console": {
+      "errors": 0,
+      "warnings": 0,
+      "sensitive_matches": 0
+    },
+    "final_production_reprobe": {
+      "health_http_status": 200,
+      "authenticated_openapi_http_status": 200,
+      "unauthenticated_protected_api_http_status": 401,
+      "wrong_login_http_status": 401,
+      "correct_login_http_status": 200,
+      "frontend_root_http_status": 200,
+      "frontend_extract_http_status": 200
+    }
+  },
+  "auth_status": {
+    "required": true,
+    "wrong_login_http_status": 401,
+    "wrong_login_safe_failure": true,
+    "secret_echoed": false,
+    "correct_login_http_status": 200,
+    "session_cookie": {
+      "http_only": true,
+      "same_site": "Lax",
+      "path": "/",
+      "secure": false,
+      "scope": "tier_a_loopback_http"
+    }
+  },
+  "synthetic_asset_counts": {
+    "input_chars": 3193,
+    "input_sha256": "457b5fbcc2ed37baadbaa50ca681f856053522f29c5b214ba67381f01995a626",
+    "status": "completed_with_quality_warnings",
+    "chapters": 3,
+    "failed_chapters": 0,
+    "characters": 3,
+    "relationships": 2,
+    "timeline": 3,
+    "world": 1,
+    "novel": 1,
+    "total_contents": 13,
+    "provider_unavailable": 0,
+    "raw_exception_or_secret_matches": 0,
+    "history_readable_count": 0
+  },
+  "restart_persistence_status": {
+    "status": "PASS",
+    "normal_stop": true,
+    "ports_released_before_restart": true,
+    "same_data_directory": true,
+    "production_style_restart": true,
+    "project_recovered": true,
+    "project_session_marker_sha256_prefix": "be8fc38d",
+    "marker_preserved_across_import_restart_restore": true,
+    "asset_counts_preserved": true,
+    "history_before": 0,
+    "history_after": 0,
+    "duplicates": 0
+  },
+  "backup_type": "OFFLINE_FILE_COPY_BACKUP",
+  "restore_status": {
+    "status": "PASS",
+    "backup_files": 3,
+    "backup_bytes": 115000,
+    "per_file_sha256_aggregate_match": true,
+    "project_recovered": true,
+    "asset_counts_preserved": true,
+    "history_count": 0,
+    "duplicates": 0,
+    "online_hot_backup_claimed": false,
+    "cleanup_status": {
+      "services_stopped": true,
+      "ports_3000_8001_released": true,
+      "synthetic_input_removed": true,
+      "isolated_data_removed": true,
+      "backup_removed": true,
+      "restore_removed": true,
+      "logs_removed": true,
+      "runtime_config_removed": true,
+      "rehearsal_secrets_removed": true,
+      "temporary_scripts_removed": true,
+      "protected_samples_untracked_count": 2,
+      "protected_samples_committed": false
+    }
+  },
+  "proxy_tls_status": {
+    "status": "PROXY_TLS_E2E_NOT_AVAILABLE",
+    "selected_proxy": "none",
+    "docker_cli_available": true,
+    "docker_engine_probe": "single_probe_timeout",
+    "caddy_available": false,
+    "nginx_available": false,
+    "syntax": "not_run",
+    "http_to_https_redirect": "not_run",
+    "https": "not_run",
+    "cookie_e2e": "not_run"
+  },
+  "log_safety_counts": {
+    "files": 4,
+    "total_bytes": 697,
+    "errors": 0,
+    "warnings": 0,
+    "sensitive_matches": 0,
+    "supplemental_log_probe": {
+      "input_chars": 3150,
+      "chapters": 3,
+      "import_executed": false,
+      "purpose": "log_safety_only"
+    },
+    "external_connection_counts_final_stable_snapshot": {
+      "backend_python": 0,
+      "frontend_node": 0,
+      "other_child": 0,
+      "provider_associated": 0,
+      "unclassified": 0
+    },
+    "transient_unclassified_connection_observed": 1,
+    "transient_connection_reproduced_in_final_snapshot": false
+  },
+  "elapsed_times": {
+    "rehearsal_phase_timing": "not_separately_instrumented",
+    "auth_pytest_seconds": 1.46,
+    "scheduler_import_extraction_pytest_seconds": 1.28,
+    "typescript_seconds_approx": 9,
+    "frontend_build_seconds": 24.9
+  },
+  "screenshots": [
+    "project-docs/screenshots/d3/01-login-success.png",
+    "project-docs/screenshots/d3/02-import-complete.png",
+    "project-docs/screenshots/d3/03-restart-persistence.png",
+    "project-docs/screenshots/d3/04-backup-restore.png"
+  ],
+  "external_provider_called": false,
+  "protected_samples_read": false
+}

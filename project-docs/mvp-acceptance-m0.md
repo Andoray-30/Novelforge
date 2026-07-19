@@ -110,13 +110,15 @@ cleanup 已完成；未删除、打开或改动两个受保护样本。
 - 一次 worker 工具输出曾显示受保护样本的 filename metadata；内容未读取，文件未修改、暂存或提交，报告/JSON/截图均无该名称。
 - `completed_with_quality_warnings` 包含面向长篇内容的建议资产阈值警告；本轮实际结果仍满足 M.0 明示最低资产下限。
 - 本轮按要求仅使用 deterministic mock/fake provider，没有测试真实 provider 的可用性、延迟或输出质量。
-- 显式 commit/push 尚待本轮后续步骤完成。
+- Commit：`08ea3f634953b34d27ec49ed91209c40f5b0f689`
+- Push：已推送至 `origin/codex/novelforge-next`
+- 提交完成时 HEAD/upstream：`0 / 0`
 
 ## Final MVP Assessment
 
 - local MVP ready: **功能链路 PASS；M.0 总体 PARTIAL，保留上述原生文件选择器与 filename metadata 限制**
 - internal deployment rehearsal ready: **可进入下一阶段，但必须保留上述 PARTIAL 结论，不得改写为完整端到端 PASS**
-- final M.0 closure: **PARTIAL；cleanup 与 substantive review 已完成，commit/push 待主任务执行**
+- final M.0 closure: **PARTIAL；cleanup、substantive review、commit 与 push 均已完成；提交完成时 HEAD/upstream 为 `0 / 0`**
 
 ## Next Goal
 
